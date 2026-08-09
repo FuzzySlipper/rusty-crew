@@ -4,6 +4,7 @@ import type {
   JsonRpcId,
   NeutralExternalEventKind,
   ExternalRuntimeMediaCaptureCandidate,
+  ExternalRuntimeDocumentCaptureCandidate,
   NeutralExternalRuntimeEvent,
   NeutralExternalRuntimeEventPayload,
 } from "./types.js";
@@ -25,6 +26,7 @@ export function mapNotification(
   const kind = known
     ? classifyNotification(notification.method, item)
     : "unknown_native_notification";
+  const documents = projectDocumentCandidates(item);
   return {
     transportSequence,
     method: notification.method,
@@ -32,10 +34,60 @@ export function mapNotification(
     ...(threadId === undefined ? {} : { threadId }),
     ...(turnId === undefined ? {} : { turnId }),
     ...(itemId === undefined ? {} : { itemId }),
-    payload: projectPayload(notification.method, kind, params, item, turn),
+    payload: projectPayload(
+      notification.method,
+      kind,
+      params,
+      documents.sanitizedItem,
+      turn,
+    ),
     ...projectMediaCandidates(item),
+    ...(documents.candidates.length === 0
+      ? {}
+      : { documentCandidates: documents.candidates }),
     rawDetail: captureBoundedRawDetail(notification, maxRawDetailBytes),
   };
+}
+
+function projectDocumentCandidates(item: Record<string, unknown>): {
+  candidates: readonly ExternalRuntimeDocumentCaptureCandidate[];
+  sanitizedItem: Record<string, unknown>;
+} {
+  if (stringValue(item.type) !== "agentMessage") {
+    return { candidates: [], sanitizedItem: item };
+  }
+  const text = stringValue(item.text);
+  if (text === undefined) return { candidates: [], sanitizedItem: item };
+  const candidates: ExternalRuntimeDocumentCaptureCandidate[] = [];
+  const sanitized = text.replace(
+    /(?<!!)\[([^\]]+)\]\((?:<)?(\/[^)\n>]+?)(?::\d+)?(?:>)?\)/g,
+    (_match, label: string, path: string) => {
+      const decodedPath = decodeURIComponentSafe(path.trim());
+      candidates.push({
+        source: "agent_message_file_link",
+        documentIndex: candidates.length,
+        path: decodedPath,
+        displayName: label.trim() || basenameFromPath(decodedPath),
+      });
+      return label.trim() || basenameFromPath(decodedPath);
+    },
+  );
+  return {
+    candidates,
+    sanitizedItem: sanitized === text ? item : { ...item, text: sanitized },
+  };
+}
+
+function basenameFromPath(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1) || "document";
+}
+
+function decodeURIComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function projectMediaCandidates(item: Record<string, unknown>): {

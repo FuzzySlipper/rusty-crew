@@ -78,6 +78,40 @@ export type ExternalRuntimeMediaCaptureCandidate =
       readonly path: string;
     };
 
+/**
+ * A host file deliberately presented to the operator through a Markdown link
+ * in an agent message. The path is transient capture input and is never part
+ * of the public normalized event.
+ */
+export interface ExternalRuntimeDocumentCaptureCandidate {
+  readonly source: "agent_message_file_link";
+  readonly documentIndex: number;
+  readonly path: string;
+  readonly displayName: string;
+}
+
+export interface ExternalRuntimeDocumentProjection {
+  readonly documentIndex: number;
+  readonly captureSource: ExternalRuntimeDocumentCaptureCandidate["source"];
+  readonly captureState:
+    | "available"
+    | "missing"
+    | "binary"
+    | "empty"
+    | "oversized"
+    | "changed"
+    | "unsupported"
+    | "failed";
+  readonly reasonCode?: string;
+  readonly attachmentId?: string;
+  readonly filename?: string;
+  readonly mimeType?: string;
+  readonly languageHint?: string;
+  readonly byteSize?: number;
+  readonly sha256?: string;
+  readonly contentUrl?: string;
+}
+
 export interface ExternalRuntimeMediaProjection {
   readonly mediaIndex: number;
   readonly captureSource: ExternalRuntimeMediaCaptureCandidate["source"];
@@ -138,6 +172,7 @@ export interface NeutralExternalRuntimeEventPayload {
   readonly tool?: string;
   readonly success?: boolean;
   readonly media?: readonly ExternalRuntimeMediaProjection[];
+  readonly documents?: readonly ExternalRuntimeDocumentProjection[];
   readonly summary?: readonly string[];
   readonly fileChanges?: readonly {
     readonly path?: string;
@@ -166,6 +201,7 @@ export interface NeutralExternalRuntimeEvent {
   readonly nativeRequestId?: JsonRpcId;
   readonly payload: NeutralExternalRuntimeEventPayload;
   readonly mediaCandidates?: readonly ExternalRuntimeMediaCaptureCandidate[];
+  readonly documentCandidates?: readonly ExternalRuntimeDocumentCaptureCandidate[];
   readonly rawDetail: BoundedRawDetail;
 }
 

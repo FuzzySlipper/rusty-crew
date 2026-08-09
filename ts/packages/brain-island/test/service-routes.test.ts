@@ -1887,6 +1887,68 @@ test("Rusty View chat stream route validates, replays once, and cleans subscribe
   );
   assert.equal(attachmentResponse.body, "png");
 
+  context.readAttachmentContent = async (sessionId, attachmentId) => ({
+    attachment: {
+      attachment_id: attachmentId,
+      session_id: sessionId,
+      status: "active",
+      filename: "design.md",
+      mime_type: "text/markdown",
+      byte_size: 9,
+      extracted_text_truncated: false,
+      metadata_json: { content_sha256: "b".repeat(64) },
+      created_at: "2026-07-05T00:00:00.000Z",
+      updated_at: "2026-07-05T00:00:00.000Z",
+      links: [],
+    },
+    bytes: Buffer.from("# Design\n"),
+  });
+  const documentContent = await handleRustyViewChatStreamRequest(
+    requestLike("GET"),
+    new URL(
+      "http://local/v1/chat/sessions/field-session/attachments/attachment-document/content",
+    ),
+    context,
+  );
+  const documentResponse = fakeResponse();
+  if (documentContent && "kind" in documentContent) {
+    documentContent.write(documentResponse);
+  }
+  assert.equal(documentResponse.statusCode, 200);
+  assert.equal(documentResponse.headers["content-type"], "text/markdown");
+  assert.equal(
+    documentResponse.headers["content-disposition"],
+    'inline; filename="design.md"',
+  );
+  assert.equal(documentResponse.headers["x-content-sha256"], "b".repeat(64));
+  assert.equal(documentResponse.headers["x-image-width"], undefined);
+  assert.equal(documentResponse.body, "# Design\n");
+
+  context.readAttachmentContent = async (sessionId, attachmentId) => {
+    assert.equal(sessionId, "field-session");
+    assert.equal(attachmentId, "attachment-1");
+    return {
+      attachment: {
+        attachment_id: attachmentId,
+        session_id: sessionId,
+        status: "active",
+        filename: "generated.png",
+        mime_type: "image/png",
+        byte_size: 3,
+        extracted_text_truncated: false,
+        metadata_json: {
+          content_sha256: "a".repeat(64),
+          width: 2,
+          height: 3,
+        },
+        created_at: "2026-07-05T00:00:00.000Z",
+        updated_at: "2026-07-05T00:00:00.000Z",
+        links: [],
+      },
+      bytes: Buffer.from("png"),
+    };
+  };
+
   const cachedAttachment = await handleRustyViewChatStreamRequest(
     requestLike("GET", {
       "if-none-match": `"sha256:${"a".repeat(64)}"`,

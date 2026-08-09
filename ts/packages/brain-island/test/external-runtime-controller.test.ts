@@ -32,6 +32,10 @@ import type {
   ExternalRuntimeMediaCaptureInput,
   ExternalRuntimeMediaCaptureSink,
 } from "../src/external-runtime-media.js";
+import type {
+  ExternalRuntimeDocumentCaptureInput,
+  ExternalRuntimeDocumentCaptureSink,
+} from "../src/external-runtime-document.js";
 
 function isCompatibilityProbeThreadId(threadId: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -1072,6 +1076,104 @@ test("controller captures transient native media before persisting an opaque ord
     );
     assert.ok(raw);
     assert.doesNotMatch(raw.json, /cHJvb2Y=/);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("controller captures explicit document links while persisting only opaque references", async () => {
+  const captures: ExternalRuntimeDocumentCaptureInput[] = [];
+  const documentCaptureSink: ExternalRuntimeDocumentCaptureSink = {
+    async captureExternalRuntimeDocuments(input) {
+      captures.push(input);
+      return [
+        {
+          documentIndex: 0,
+          captureSource: "agent_message_file_link",
+          captureState: "available",
+          attachmentId: "attachment:document",
+          filename: "design.md",
+          mimeType: "text/markdown",
+          languageHint: "markdown",
+          byteSize: 18,
+          sha256: "b".repeat(64),
+          contentUrl:
+            "/v1/chat/sessions/creation-profile-session/attachments/attachment%3Adocument/content",
+        },
+      ];
+    },
+  };
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    undefined,
+    false,
+    "creation-profile",
+    undefined,
+    documentCaptureSink,
+  );
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "browser-create-document",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    fixture.transport.emit({
+      method: "item/completed",
+      params: {
+        threadId: created.thread.threadId,
+        turnId: "native-turn-document",
+        completedAtMs: Date.now(),
+        item: {
+          id: "native-item-document",
+          type: "agentMessage",
+          text: "Open [design](/home/dev/project/design.md:12)",
+          phase: "commentary",
+          memoryCitation: null,
+        },
+      },
+    });
+    await waitUntil(
+      async () => captures.length === 1,
+      "external document capture",
+    );
+    assert.equal(captures[0]?.sessionId, created.creation.session.sessionId);
+    assert.equal(captures[0]?.nativeTurnId, "native-turn-document");
+    assert.equal(captures[0]?.itemId, "native-item-document");
+    assert.equal(
+      captures[0]?.candidates[0]?.path,
+      "/home/dev/project/design.md",
+    );
+
+    const events = await fixture.bridge.queryExternalRuntimeEvents({
+      runtimeId: fixture.runtimeId,
+      afterSequence: 0,
+      limit: 1_000,
+    });
+    const documentEvent = events.find(
+      (event) => event.itemId === "native-item-document",
+    );
+    assert.ok(documentEvent);
+    const payload = documentEvent.payload as Record<string, unknown>;
+    assert.equal(payload.text, "Open design");
+    assert.deepEqual(payload.documents, [
+      {
+        documentIndex: 0,
+        captureSource: "agent_message_file_link",
+        captureState: "available",
+        attachmentId: "attachment:document",
+        filename: "design.md",
+        mimeType: "text/markdown",
+        languageHint: "markdown",
+        byteSize: 18,
+        sha256: "b".repeat(64),
+        contentUrl:
+          "/v1/chat/sessions/creation-profile-session/attachments/attachment%3Adocument/content",
+      },
+    ]);
+    assert.equal(JSON.stringify(payload).includes("/home/dev/project"), false);
   } finally {
     await fixture.cleanup();
   }
@@ -3929,6 +4031,7 @@ async function externalCreationFixture(
   profilelessBindingReads = false,
   profileIdOverride = "creation-profile",
   mediaCaptureSink?: ExternalRuntimeMediaCaptureSink,
+  documentCaptureSink?: ExternalRuntimeDocumentCaptureSink,
 ) {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-creation-controller-"),
@@ -3978,6 +4081,7 @@ async function externalCreationFixture(
   const controller = new ServiceExternalRuntimeController({
     bridge: controllerBridge,
     mediaCaptureSink,
+    documentCaptureSink,
     instanceId: "creation-test-controller",
     driverFactory: (_registration, authority) =>
       new CodexAppServerDriver(transport, authority, {

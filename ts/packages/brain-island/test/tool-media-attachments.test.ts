@@ -108,25 +108,29 @@ function harness(rootDir: string, now = "2026-07-25T12:00:00.000Z") {
       return removed;
     },
   };
+  const appendChatEvent = async (
+    sessionId: SessionId,
+    event: Pick<ChatEvent, "kind" | "payload">,
+  ) => {
+    const saved: ChatEvent = {
+      event_id: `${sessionId}:${++sequence}`,
+      session_id: sessionId,
+      sequence_id: sequence,
+      created_at: now,
+      kind: event.kind,
+      payload: event.payload,
+    };
+    events.push(saved);
+    return saved;
+  };
   const createStore = () =>
     new ToolMediaAttachmentStore({
       artifactDir: rootDir,
       bridge: bridge as never,
       now: () => now,
-      appendChatEvent: async (sessionId: SessionId, event) => {
-        const saved: ChatEvent = {
-          event_id: `${sessionId}:${++sequence}`,
-          session_id: sessionId,
-          sequence_id: sequence,
-          created_at: now,
-          kind: event.kind,
-          payload: event.payload,
-        };
-        events.push(saved);
-        return saved;
-      },
+      appendChatEvent,
     });
-  return { attachments, bridge, createStore, events };
+  return { appendChatEvent, attachments, bridge, createStore, events };
 }
 
 test("narrator image provider capability is explicit and bounded", () => {
@@ -490,6 +494,113 @@ test("external runtime media exposes typed non-available capture states", async 
     ["unavailable", "unsupported", "oversized", "empty"],
   );
   assert.equal(testHarness.attachments.size, 0);
+});
+
+test("external document checkpoints preserve exact revisions and typed failures", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-external-document-"));
+  const markdownPath = join(root, "notes.md");
+  const sourcePath = join(root, "main.rs");
+  const binaryPath = join(root, "binary.rs");
+  const oversizedPath = join(root, "large.ts");
+  await writeFile(markdownPath, "# First revision\n");
+  await writeFile(sourcePath, "fn main() {}\n");
+  await writeFile(binaryPath, Buffer.from([0, 1, 2]));
+  await writeFile(oversizedPath, "x".repeat(33));
+  const testHarness = harness(root);
+  const store = new ToolMediaAttachmentStore({
+    artifactDir: root,
+    bridge: testHarness.bridge as never,
+    now: () => "2026-07-25T12:00:00.000Z",
+    maxDocumentBytes: 32,
+    appendChatEvent: testHarness.appendChatEvent,
+  });
+  const input = {
+    runtimeId: "runtime-1",
+    sessionId: "session-1",
+    bindingId: "binding-1",
+    nativeThreadId: "thread-1",
+    nativeTurnId: "turn-1",
+    itemId: "message-1",
+    externalEventId: "event-1",
+    candidates: [
+      {
+        source: "agent_message_file_link" as const,
+        documentIndex: 0,
+        path: markdownPath,
+        displayName: "notes",
+      },
+      {
+        source: "agent_message_file_link" as const,
+        documentIndex: 1,
+        path: sourcePath,
+        displayName: "source",
+      },
+    ],
+  };
+  const [markdown, source] = await store.captureExternalRuntimeDocuments(input);
+  assert.equal(markdown?.captureState, "available");
+  assert.equal(markdown?.languageHint, "markdown");
+  assert.equal(source?.captureState, "available");
+  assert.equal(source?.languageHint, "rust");
+  assert.equal(testHarness.attachments.size, 2);
+  assert.equal(
+    JSON.stringify([...testHarness.attachments.values()]).includes(root),
+    false,
+  );
+  assert.deepEqual(
+    (await store.readContent("session-1", markdown!.attachmentId!)).bytes,
+    Buffer.from("# First revision\n"),
+  );
+
+  await writeFile(markdownPath, "# Second revision\n");
+  const restartedStore = new ToolMediaAttachmentStore({
+    artifactDir: root,
+    bridge: testHarness.bridge as never,
+    now: () => "2026-07-25T12:01:00.000Z",
+    maxDocumentBytes: 32,
+    appendChatEvent: testHarness.appendChatEvent,
+  });
+  const replay = await restartedStore.captureExternalRuntimeDocuments(input);
+  assert.deepEqual(replay, [markdown, source]);
+  assert.deepEqual(
+    (await restartedStore.readContent("session-1", markdown!.attachmentId!))
+      .bytes,
+    Buffer.from("# First revision\n"),
+  );
+  const [later] = await store.captureExternalRuntimeDocuments({
+    ...input,
+    nativeTurnId: "turn-2",
+    itemId: "message-2",
+    externalEventId: "event-2",
+    candidates: [input.candidates[0]!],
+  });
+  assert.equal(later?.captureState, "available");
+  assert.notEqual(later?.attachmentId, markdown?.attachmentId);
+  assert.notEqual(later?.sha256, markdown?.sha256);
+
+  const failures = await store.captureExternalRuntimeDocuments({
+    ...input,
+    itemId: "message-failures",
+    externalEventId: "event-failures",
+    candidates: [
+      {
+        ...input.candidates[0]!,
+        documentIndex: 0,
+        path: join(root, "missing.md"),
+      },
+      { ...input.candidates[0]!, documentIndex: 1, path: binaryPath },
+      { ...input.candidates[0]!, documentIndex: 2, path: oversizedPath },
+      {
+        ...input.candidates[0]!,
+        documentIndex: 3,
+        path: join(root, "file.bin"),
+      },
+    ],
+  });
+  assert.deepEqual(
+    failures.map((failure) => failure.captureState),
+    ["missing", "binary", "oversized", "unsupported"],
+  );
 });
 
 test("tool image validation rejects malformed, oversized, and unsupported media", async () => {

@@ -63,6 +63,7 @@ import type {
   ExternalThreadTurnProjection,
 } from "./external-runtime-api-contract.js";
 import type { ExternalRuntimeMediaCaptureSink } from "./external-runtime-media.js";
+import type { ExternalRuntimeDocumentCaptureSink } from "./external-runtime-document.js";
 
 const CONTROLLER_LEASE_MS = 30_000;
 const RAW_DETAIL_LIMIT = 256;
@@ -335,6 +336,7 @@ export class ServiceExternalRuntimeController {
     typeof resolveCodexCoordinationToolCall
   >[0]["onReviewCompletion"];
   readonly #mediaCaptureSink?: ExternalRuntimeMediaCaptureSink;
+  readonly #documentCaptureSink?: ExternalRuntimeDocumentCaptureSink;
   readonly #driverFactory: (
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
@@ -371,6 +373,7 @@ export class ServiceExternalRuntimeController {
       typeof resolveCodexCoordinationToolCall
     >[0]["onReviewCompletion"];
     mediaCaptureSink?: ExternalRuntimeMediaCaptureSink;
+    documentCaptureSink?: ExternalRuntimeDocumentCaptureSink;
     recoveryBaseDelayMs?: number;
     recoveryMaxDelayMs?: number;
   }) {
@@ -381,6 +384,7 @@ export class ServiceExternalRuntimeController {
     this.#onReviewSubmission = input.onReviewSubmission;
     this.#onReviewCompletion = input.onReviewCompletion;
     this.#mediaCaptureSink = input.mediaCaptureSink;
+    this.#documentCaptureSink = input.documentCaptureSink;
     this.#recoveryBaseDelayMs =
       input.recoveryBaseDelayMs ?? DEFAULT_RECOVERY_BASE_DELAY_MS;
     this.#recoveryMaxDelayMs =
@@ -3440,6 +3444,16 @@ export class ServiceExternalRuntimeController {
             detailId,
             binding,
           });
+    const documents =
+      event.documentCandidates === undefined ||
+      event.documentCandidates.length === 0
+        ? undefined
+        : await this.#captureEventDocuments({
+            controlled,
+            event,
+            detailId,
+            binding,
+          });
     const saved = await this.#bridge.recordExternalRuntimeEvent({
       controller: this.#controllerContext(controlled),
       event: {
@@ -3461,6 +3475,7 @@ export class ServiceExternalRuntimeController {
         payload: {
           ...browserSafePayload(event),
           ...(media === undefined ? {} : { media }),
+          ...(documents === undefined ? {} : { documents }),
         },
         rawDetailRef: detailId,
       },
@@ -3504,6 +3519,43 @@ export class ServiceExternalRuntimeController {
       ...(input.event.payload.tool === undefined
         ? {}
         : { toolName: input.event.payload.tool }),
+      candidates,
+    });
+  }
+
+  async #captureEventDocuments(input: {
+    controlled: ControlledRuntime;
+    event: NeutralExternalRuntimeEvent;
+    detailId: string;
+    binding: ExternalAgentBinding | undefined;
+  }) {
+    const candidates = input.event.documentCandidates ?? [];
+    if (this.#documentCaptureSink === undefined) {
+      return candidates.map((candidate) => ({
+        documentIndex: candidate.documentIndex,
+        captureSource: candidate.source,
+        captureState: "failed" as const,
+        reasonCode: "external_document_capture_unconfigured",
+      }));
+    }
+    return this.#documentCaptureSink.captureExternalRuntimeDocuments({
+      runtimeId: input.controlled.registration.runtimeId,
+      ...(input.binding?.sessionId == null
+        ? {}
+        : { sessionId: input.binding.sessionId }),
+      ...(input.binding === undefined
+        ? {}
+        : { bindingId: input.binding.bindingId }),
+      ...(input.event.threadId === undefined
+        ? {}
+        : { nativeThreadId: input.event.threadId }),
+      ...(input.event.turnId === undefined
+        ? {}
+        : { nativeTurnId: input.event.turnId }),
+      ...(input.event.itemId === undefined
+        ? {}
+        : { itemId: input.event.itemId }),
+      externalEventId: input.detailId,
       candidates,
     });
   }

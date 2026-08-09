@@ -1032,6 +1032,7 @@ export async function createRustyCrewServiceApp(
     const externalRuntimeController = new ServiceExternalRuntimeController({
       bridge,
       mediaCaptureSink: toolMediaAttachments,
+      documentCaptureSink: toolMediaAttachments,
       now: () => new Date((options.now ?? (() => new Date().toISOString()))()),
       onCoordinationDelivery: async (receipt) => {
         const state = liveState;

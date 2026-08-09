@@ -33,6 +33,20 @@ export function captureBoundedRawDetail(
         return `[MEDIA_BYTES_REDACTED sha256=${createHash("sha256").update(child).digest("hex")}]`;
       }
       if (
+        key === "text" &&
+        typeof child === "string" &&
+        typeof this === "object" &&
+        this !== null &&
+        (this as Record<string, unknown>).type === "agentMessage"
+      ) {
+        const redacted = child.replace(
+          /(?<!!)\[([^\]]+)\]\((?:<)?(\/[^)\n>]+?)(?::\d+)?(?:>)?\)/g,
+          "$1",
+        );
+        if (redacted !== child) redactedKeys.add("agentMessage.fileLink");
+        return redacted;
+      }
+      if (
         key === "path" &&
         typeof child === "string" &&
         typeof this === "object" &&

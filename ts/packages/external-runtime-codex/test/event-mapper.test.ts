@@ -251,6 +251,53 @@ test("MCP image content and image-view paths become transient capture candidates
   assert.doesNotMatch(viewed.rawDetail.json, /\/tmp\/proof\.png/);
 });
 
+test("explicit agent file links become transient document candidates without exposing host paths", () => {
+  const event = mapNotification(
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          id: "message-1",
+          type: "agentMessage",
+          text: "Inspect [design notes](</home/dev/project/docs/design notes.md:42>) and [source](/home/dev/project/src/main.rs). Ignore `/home/dev/incidental.txt` and [binary](/home/dev/project/app.bin).",
+        },
+      },
+    },
+    14,
+    16_384,
+    true,
+  );
+
+  assert.deepEqual(event.documentCandidates, [
+    {
+      source: "agent_message_file_link",
+      documentIndex: 0,
+      path: "/home/dev/project/docs/design notes.md",
+      displayName: "design notes",
+    },
+    {
+      source: "agent_message_file_link",
+      documentIndex: 1,
+      path: "/home/dev/project/src/main.rs",
+      displayName: "source",
+    },
+    {
+      source: "agent_message_file_link",
+      documentIndex: 2,
+      path: "/home/dev/project/app.bin",
+      displayName: "binary",
+    },
+  ]);
+  assert.equal(
+    event.payload.text,
+    "Inspect design notes and source. Ignore `/home/dev/incidental.txt` and binary.",
+  );
+  assert.equal(event.rawDetail.json.includes("/home/dev/project"), false);
+  assert.ok(event.rawDetail.redactedKeys.includes("agentMessage.fileLink"));
+});
+
 test("error diagnostics bound and sanitize every browser-facing string", () => {
   const oversizedCode = `code\u0000${"x".repeat(1_000)}`;
   const diagnostic = projectCodexErrorDiagnostic({

@@ -19,8 +19,14 @@ import type {
   ExternalRuntimeMediaCaptureSink,
   ExternalRuntimeMediaReference,
 } from "./external-runtime-media.js";
+import type {
+  ExternalRuntimeDocumentCaptureInput,
+  ExternalRuntimeDocumentCaptureSink,
+  ExternalRuntimeDocumentReference,
+} from "./external-runtime-document.js";
 
 export const MAX_CHAT_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_EXTERNAL_DOCUMENT_BYTES = 1024 * 1024;
 const MIME_EXTENSIONS = new Map([
   ["image/png", "png"],
   ["image/jpeg", "jpg"],
@@ -40,6 +46,7 @@ export interface ToolMediaAttachmentStoreOptions {
   ): Promise<ChatEvent>;
   now(): string;
   maxImageBytes?: number;
+  maxDocumentBytes?: number;
 }
 
 export interface ToolMediaAttachmentContent {
@@ -48,14 +55,20 @@ export interface ToolMediaAttachmentContent {
 }
 
 export class ToolMediaAttachmentStore
-  implements BrainToolMediaSink, ExternalRuntimeMediaCaptureSink
+  implements
+    BrainToolMediaSink,
+    ExternalRuntimeMediaCaptureSink,
+    ExternalRuntimeDocumentCaptureSink
 {
   private readonly rootDir: string;
   private readonly maxImageBytes: number;
+  private readonly maxDocumentBytes: number;
 
   constructor(private readonly options: ToolMediaAttachmentStoreOptions) {
     this.rootDir = join(options.artifactDir, "tool-media");
     this.maxImageBytes = options.maxImageBytes ?? MAX_CHAT_IMAGE_BYTES;
+    this.maxDocumentBytes =
+      options.maxDocumentBytes ?? MAX_EXTERNAL_DOCUMENT_BYTES;
   }
 
   async persistImages(input: {
@@ -178,6 +191,153 @@ export class ToolMediaAttachmentStore
         });
       } catch (error) {
         references.push(externalCaptureFailure(candidate, error));
+      }
+    }
+    return references;
+  }
+
+  async captureExternalRuntimeDocuments(
+    input: ExternalRuntimeDocumentCaptureInput,
+  ): Promise<readonly ExternalRuntimeDocumentReference[]> {
+    if (input.sessionId === undefined) {
+      return input.candidates.map((candidate) => ({
+        documentIndex: candidate.documentIndex,
+        captureSource: candidate.source,
+        captureState: "failed",
+        reasonCode: "external_document_session_unbound",
+      }));
+    }
+    const references: ExternalRuntimeDocumentReference[] = [];
+    for (const candidate of input.candidates) {
+      try {
+        const identity = [
+          input.runtimeId,
+          input.bindingId ?? input.sessionId,
+          input.nativeThreadId ?? "thread-unknown",
+          input.nativeTurnId ?? "turn-unknown",
+          input.itemId ?? input.externalEventId,
+          String(candidate.documentIndex),
+        ].join(":");
+        const existing = await this.findAttachmentOptional(
+          input.sessionId,
+          stableId("attachment", identity),
+        );
+        if (existing !== undefined && existing.status === "active") {
+          const metadata = recordValue(existing.metadata_json);
+          await readFile(this.pathFromAttachment(existing));
+          references.push({
+            documentIndex: candidate.documentIndex,
+            captureSource: candidate.source,
+            captureState: "available",
+            attachmentId: existing.attachment_id,
+            filename: existing.filename,
+            mimeType: existing.mime_type,
+            ...(typeof metadata.language_hint === "string"
+              ? { languageHint: metadata.language_hint }
+              : {}),
+            byteSize: existing.byte_size,
+            ...(typeof metadata.content_sha256 === "string"
+              ? { sha256: metadata.content_sha256 }
+              : {}),
+            contentUrl: existing.download_url ?? "",
+          });
+          continue;
+        }
+        const descriptor = documentDescriptor(candidate.path);
+        if (descriptor === undefined) {
+          references.push(documentCaptureFailure(candidate, "unsupported"));
+          continue;
+        }
+        const before = await stat(candidate.path).catch((error) => {
+          throw documentReadError(error);
+        });
+        if (!before.isFile()) {
+          references.push(documentCaptureFailure(candidate, "unsupported"));
+          continue;
+        }
+        if (before.size > this.maxDocumentBytes) {
+          references.push({
+            documentIndex: candidate.documentIndex,
+            captureSource: candidate.source,
+            captureState: "oversized",
+            reasonCode: "external_document_oversized",
+            filename: basename(candidate.path),
+            mimeType: descriptor.mimeType,
+            languageHint: descriptor.languageHint,
+            byteSize: before.size,
+          });
+          continue;
+        }
+        const bytes = await readFile(candidate.path).catch((error) => {
+          throw documentReadError(error);
+        });
+        const after = await stat(candidate.path).catch((error) => {
+          throw documentReadError(error);
+        });
+        if (
+          before.dev !== after.dev ||
+          before.ino !== after.ino ||
+          before.size !== after.size ||
+          before.mtimeMs !== after.mtimeMs ||
+          bytes.length !== before.size
+        ) {
+          references.push(documentCaptureFailure(candidate, "changed"));
+          continue;
+        }
+        if (bytes.length === 0) {
+          references.push(documentCaptureFailure(candidate, "empty"));
+          continue;
+        }
+        if (!isUtf8Text(bytes)) {
+          references.push(documentCaptureFailure(candidate, "binary"));
+          continue;
+        }
+        const sha256 = createHash("sha256").update(bytes).digest("hex");
+        const stored = await this.persistStoredDocument({
+          sessionId: input.sessionId,
+          identity,
+          filename: basename(candidate.path),
+          extension: descriptor.extension,
+          mimeType: descriptor.mimeType,
+          bytes,
+          metadata: {
+            source: "external_runtime_document",
+            runtime_id: input.runtimeId,
+            binding_id: input.bindingId ?? null,
+            native_thread_id: input.nativeThreadId ?? null,
+            native_turn_id: input.nativeTurnId ?? null,
+            item_id: input.itemId ?? null,
+            external_event_id: input.externalEventId,
+            document_index: candidate.documentIndex,
+            capture_source: candidate.source,
+            language_hint: descriptor.languageHint,
+          },
+        });
+        references.push({
+          documentIndex: candidate.documentIndex,
+          captureSource: candidate.source,
+          captureState: "available",
+          attachmentId: stored.attachmentId,
+          filename: stored.filename,
+          mimeType: descriptor.mimeType,
+          languageHint: descriptor.languageHint,
+          byteSize: bytes.length,
+          sha256,
+          contentUrl: stored.downloadUrl,
+        });
+      } catch (error) {
+        references.push(
+          documentCaptureFailure(
+            candidate,
+            error instanceof ToolMediaAttachmentError &&
+              error.reasonCode === "external_document_missing"
+              ? "missing"
+              : "failed",
+            error instanceof ToolMediaAttachmentError
+              ? error.reasonCode
+              : "external_document_capture_failed",
+          ),
+        );
       }
     }
     return references;
@@ -643,6 +803,101 @@ export class ToolMediaAttachmentStore
     }
   }
 
+  private async persistStoredDocument(input: {
+    sessionId: string;
+    identity: string;
+    filename: string;
+    extension: string;
+    mimeType: string;
+    bytes: Buffer;
+    metadata: Record<string, unknown>;
+  }): Promise<{
+    attachmentId: string;
+    filename: string;
+    downloadUrl: string;
+  }> {
+    const attachmentId = stableId("attachment", input.identity);
+    const filename = safeDisplayFilename(input.filename, input.extension);
+    const sessionDir = join(this.rootDir, digest(input.sessionId));
+    const finalPath = join(
+      sessionDir,
+      `${digest(attachmentId)}.${input.extension}`,
+    );
+    const temporaryPath = `${finalPath}.tmp-${process.pid}-${Date.now()}`;
+    const downloadUrl = toolMediaDownloadUrl(input.sessionId, attachmentId);
+    const contentSha256 = createHash("sha256")
+      .update(input.bytes)
+      .digest("hex");
+    const existing = await this.findAttachmentOptional(
+      input.sessionId,
+      attachmentId,
+    );
+    if (existing !== undefined) {
+      const metadata = recordValue(existing.metadata_json);
+      if (
+        existing.status !== "active" ||
+        existing.mime_type !== input.mimeType ||
+        existing.byte_size !== input.bytes.length ||
+        metadata.content_sha256 !== contentSha256
+      ) {
+        throw new ToolMediaAttachmentError(
+          "attachment_idempotency_conflict",
+          `document attachment ${attachmentId} conflicts with an existing record`,
+        );
+      }
+      await readFile(this.pathFromAttachment(existing));
+      return { attachmentId, filename: existing.filename, downloadUrl };
+    }
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(temporaryPath, input.bytes, { flag: "wx", mode: 0o600 });
+    await rename(temporaryPath, finalPath).catch(async (error) => {
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      throw error;
+    });
+    try {
+      const now = this.options.now();
+      const result = (await this.options.bridge.createChatAttachment({
+        attachment: {
+          attachment_id: attachmentId,
+          session_id: input.sessionId,
+          status: "active",
+          filename,
+          mime_type: input.mimeType,
+          byte_size: input.bytes.length,
+          storage_url: `artifact://tool-media/${digest(input.sessionId)}/${basename(finalPath)}`,
+          download_url: downloadUrl,
+          thumbnail_url: null,
+          extracted_text: null,
+          extracted_text_truncated: false,
+          metadata_json: {
+            ...input.metadata,
+            storage_extension: input.extension,
+            content_sha256: contentSha256,
+          },
+          created_at: now,
+          updated_at: now,
+          expires_at: null,
+          link: null,
+        },
+      })) as { attachment: AttachmentRecord };
+      await this.options.appendChatEvent(input.sessionId as SessionId, {
+        kind: "attachment_uploaded",
+        payload: { attachment: result.attachment },
+      });
+      return { attachmentId, filename, downloadUrl };
+    } catch (error) {
+      await rm(finalPath, { force: true }).catch(() => undefined);
+      await this.options.bridge
+        .removeChatAttachment({
+          session_id: input.sessionId,
+          attachment_id: attachmentId,
+          updated_at: this.options.now(),
+        })
+        .catch(() => undefined);
+      throw error;
+    }
+  }
+
   private async findAttachment(
     sessionId: string,
     attachmentId: string,
@@ -713,7 +968,12 @@ export class ToolMediaAttachmentStore
   }
 
   private pathFromAttachment(attachment: AttachmentRecord): string {
-    const extension = MIME_EXTENSIONS.get(attachment.mime_type);
+    const metadata = recordValue(attachment.metadata_json);
+    const storedExtension = metadata.storage_extension;
+    const extension =
+      typeof storedExtension === "string" && /^[a-z0-9]+$/.test(storedExtension)
+        ? storedExtension
+        : MIME_EXTENSIONS.get(attachment.mime_type);
     if (!extension) {
       throw new ToolMediaAttachmentError(
         "attachment_content_unavailable",
@@ -1189,10 +1449,105 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+const DOCUMENT_DESCRIPTORS = new Map<
+  string,
+  { mimeType: string; languageHint: string }
+>([
+  ["md", { mimeType: "text/markdown", languageHint: "markdown" }],
+  ["markdown", { mimeType: "text/markdown", languageHint: "markdown" }],
+  ["mdown", { mimeType: "text/markdown", languageHint: "markdown" }],
+  ["txt", { mimeType: "text/plain", languageHint: "text" }],
+  ["rs", { mimeType: "text/x-rust", languageHint: "rust" }],
+  ["ts", { mimeType: "text/typescript", languageHint: "typescript" }],
+  ["tsx", { mimeType: "text/typescript", languageHint: "tsx" }],
+  ["js", { mimeType: "text/javascript", languageHint: "javascript" }],
+  ["jsx", { mimeType: "text/javascript", languageHint: "jsx" }],
+  ["json", { mimeType: "application/json", languageHint: "json" }],
+  ["toml", { mimeType: "application/toml", languageHint: "toml" }],
+  ["yaml", { mimeType: "application/yaml", languageHint: "yaml" }],
+  ["yml", { mimeType: "application/yaml", languageHint: "yaml" }],
+  ["css", { mimeType: "text/css", languageHint: "css" }],
+  ["scss", { mimeType: "text/x-scss", languageHint: "scss" }],
+  ["html", { mimeType: "text/html", languageHint: "html" }],
+  ["xml", { mimeType: "application/xml", languageHint: "xml" }],
+  ["sh", { mimeType: "text/x-shellscript", languageHint: "shell" }],
+  ["bash", { mimeType: "text/x-shellscript", languageHint: "shell" }],
+  ["py", { mimeType: "text/x-python", languageHint: "python" }],
+  ["go", { mimeType: "text/x-go", languageHint: "go" }],
+  ["java", { mimeType: "text/x-java-source", languageHint: "java" }],
+  ["kt", { mimeType: "text/x-kotlin", languageHint: "kotlin" }],
+  ["c", { mimeType: "text/x-c", languageHint: "c" }],
+  ["h", { mimeType: "text/x-c", languageHint: "c" }],
+  ["cc", { mimeType: "text/x-c++", languageHint: "cpp" }],
+  ["cpp", { mimeType: "text/x-c++", languageHint: "cpp" }],
+  ["hpp", { mimeType: "text/x-c++", languageHint: "cpp" }],
+  ["cs", { mimeType: "text/x-csharp", languageHint: "csharp" }],
+  ["rb", { mimeType: "text/x-ruby", languageHint: "ruby" }],
+  ["php", { mimeType: "text/x-php", languageHint: "php" }],
+  ["sql", { mimeType: "application/sql", languageHint: "sql" }],
+  ["graphql", { mimeType: "application/graphql", languageHint: "graphql" }],
+  ["proto", { mimeType: "text/x-protobuf", languageHint: "protobuf" }],
+  ["swift", { mimeType: "text/x-swift", languageHint: "swift" }],
+  ["vue", { mimeType: "text/x-vue", languageHint: "vue" }],
+  ["svelte", { mimeType: "text/x-svelte", languageHint: "svelte" }],
+]);
+
+function documentDescriptor(
+  path: string,
+): { extension: string; mimeType: string; languageHint: string } | undefined {
+  const extension = extname(path).slice(1).toLowerCase();
+  const descriptor = DOCUMENT_DESCRIPTORS.get(extension);
+  return descriptor === undefined ? undefined : { extension, ...descriptor };
+}
+
+function isUtf8Text(bytes: Buffer): boolean {
+  if (bytes.includes(0)) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function documentReadError(error: unknown): ToolMediaAttachmentError {
+  return isNodeError(error) &&
+    (error.code === "ENOENT" || error.code === "ENOTDIR")
+    ? new ToolMediaAttachmentError(
+        "external_document_missing",
+        "external document no longer exists",
+      )
+    : new ToolMediaAttachmentError(
+        "external_document_read_failed",
+        error instanceof Error ? error.message : String(error),
+      );
+}
+
+function documentCaptureFailure(
+  candidate: ExternalRuntimeDocumentCaptureInput["candidates"][number],
+  state:
+    | "missing"
+    | "binary"
+    | "empty"
+    | "oversized"
+    | "changed"
+    | "unsupported"
+    | "failed",
+  reasonCode = `external_document_${state}`,
+): ExternalRuntimeDocumentReference {
+  return {
+    documentIndex: candidate.documentIndex,
+    captureSource: candidate.source,
+    captureState: state,
+    reasonCode,
+  };
+}
+
 function isToolMediaSource(value: unknown): boolean {
   return (
     value === "brain_tool_media" ||
     value === "external_runtime_media" ||
+    value === "external_runtime_document" ||
     value === "chat_upload"
   );
 }
