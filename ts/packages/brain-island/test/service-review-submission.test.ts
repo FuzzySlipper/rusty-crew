@@ -358,6 +358,77 @@ test("restart reconciliation records an independently finalized round exactly on
   assert.equal(durable.phase, "review_terminal");
 });
 
+test("a durable result survives authority loss after dispatch and reconciles after restoration", async () => {
+  let authorityAvailable = false;
+  let durable = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "test",
+      idempotencyKey: "authority-restoration",
+    }),
+    phase: "den_finalization_pending" as const,
+    reviewRoundId: 4089,
+    reviewResultJson: JSON.stringify({ verdict: "looks_good" }),
+  } as ReviewSubmissionRecord;
+  const transitionTypes: string[] = [];
+  const context = {
+    bridge: {
+      listReviewSubmissions: async () =>
+        durable.phase === "review_terminal" ? [] : [durable],
+      transitionReviewSubmission: async (request: {
+        transition: { type: string; verdict?: string };
+      }) => {
+        transitionTypes.push(request.transition.type);
+        durable = {
+          ...durable,
+          ...(request.transition.type === "den_already_finalized"
+            ? {
+                phase: "review_terminal" as const,
+                reviewVerdict: request.transition.verdict,
+              }
+            : {}),
+          revision: durable.revision + 1,
+          updatedAt: "2026-08-05T00:00:00.000Z",
+        } as ReviewSubmissionRecord;
+        return durable;
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-08T09:30:00.000Z",
+    callDenTool: async () => {
+      if (!authorityAvailable) throw new Error("service authority unavailable");
+      return {
+        project_id: "rusty-crew",
+        items: [
+          {
+            id: 4089,
+            project_id: "rusty-crew",
+            head_commit: durable.commitSha,
+            verdict: "looks_good",
+          },
+        ],
+      };
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  };
+
+  await reconcileReviewSubmissions(context);
+  assert.equal(durable.phase, "den_finalization_pending");
+  assert.equal(
+    durable.reviewResultJson,
+    JSON.stringify({ verdict: "looks_good" }),
+  );
+  authorityAvailable = true;
+  await reconcileReviewSubmissions(context);
+  assert.deepEqual(transitionTypes, [
+    "adapter_failed",
+    "den_already_finalized",
+  ]);
+  assert.equal(durable.phase, "review_terminal");
+  assert.equal(durable.reviewVerdict, "looks_good");
+});
+
 test("reconciliation does not reuse an older verdict past a newer pending same-head round", async () => {
   const pending = scopedSubmissionRecord("rusty-crew", {
     type: "external_cli",

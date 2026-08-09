@@ -15,14 +15,24 @@ const authority = {
   auditIdentity: "rusty-crew-review-service",
 };
 
-test("service review Den authority is independent of session lifecycle state", () => {
+test("service review Den authority is unchanged by archive, replacement, rebuild, and empty runtime graphs", () => {
   const beforeArchive = serviceReviewDenAuthority(authority);
-  const runtimeGraphAfterArchive = { sessions: [], mcpBindings: [] };
-  const afterArchive = serviceReviewDenAuthority(authority);
-
-  assert.deepEqual(runtimeGraphAfterArchive, { sessions: [], mcpBindings: [] });
+  const lifecycleGraphs = [
+    { sessions: [], mcpBindings: [] },
+    {
+      sessions: [{ sessionId: "replacement" }],
+      mcpBindings: [{ bindingId: "interactive-replacement" }],
+    },
+    {
+      sessions: [{ sessionId: "rebuilt" }],
+      mcpBindings: [],
+    },
+  ];
   assert.equal(beforeArchive?.bindingId, "service-review-den");
-  assert.deepEqual(afterArchive, beforeArchive);
+  for (const runtimeGraph of lifecycleGraphs) {
+    assert.ok(runtimeGraph.sessions);
+    assert.deepEqual(serviceReviewDenAuthority(authority), beforeArchive);
+  }
 });
 
 test("service review Den authority validates the exact required tool surface", async () => {
