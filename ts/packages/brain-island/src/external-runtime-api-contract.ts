@@ -6,7 +6,7 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.17.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.18.0";
 
 export const EXTERNAL_BINDING_PROFILE_REFRESH_API_REASON_CODES = [
   "external_binding_profile_refresh_invalid_request",
@@ -1579,6 +1579,17 @@ function routeSchemas(): Record<string, JsonSchema> {
         argument: nullableString,
         controlId: { type: "string" },
         reasonCode: nullableString,
+        predecessorBindingId: { type: "string" },
+        predecessorSessionId: { type: "string" },
+        predecessorNativeThreadId: { type: "string" },
+        successorBindingId: { type: "string" },
+        successorSessionId: { type: "string" },
+        successorNativeThreadId: { type: "string" },
+        predecessorLifecycle: {
+          type: "string",
+          enum: ["retained", "archived"],
+        },
+        movedRouteCount: { type: "integer", minimum: 0 },
         cwd: { type: "string" },
         output: { type: "string" },
         exitCode: { type: "number" },

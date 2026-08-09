@@ -20,7 +20,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.17.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.18.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -89,6 +89,14 @@ assert.ok(schema("ExternalRuntimeCommandCatalog").properties?.models);
 assert.ok(schema("ExternalRuntimeCommandExecutionResult").properties?.receipt);
 assert.ok(schema("ExternalRuntimeEventPayload").properties?.settings);
 assert.ok(schema("ExternalRuntimeEventPayload").properties?.usage);
+assert.deepEqual(
+  propertySchema("ExternalRuntimeEventPayload", "predecessorLifecycle").enum,
+  ["retained", "archived"],
+);
+assert.equal(
+  propertySchema("ExternalRuntimeEventPayload", "movedRouteCount").minimum,
+  0,
+);
 assert.deepEqual(propertySchema("ExternalRuntimeEventPayload", "error"), {
   $ref: "#/components/schemas/ExternalThreadTurnErrorProjection",
 });

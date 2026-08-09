@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.17.0",
+    "version": "0.18.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -1880,13 +1880,13 @@
               { "type": "null" }
             ]
           },
+          "workdir": { "type": ["string", "null"] },
           "workspace": {
             "anyOf": [
               { "$ref": "#/components/schemas/SessionWorkspace" },
               { "type": "null" }
             ]
-          },
-          "workdir": { "type": ["string", "null"] }
+          }
         },
         "required": [
           "agentId",
@@ -7736,6 +7736,17 @@
           "argument": { "type": ["string", "null"] },
           "controlId": { "type": "string" },
           "reasonCode": { "type": ["string", "null"] },
+          "predecessorBindingId": { "type": "string" },
+          "predecessorSessionId": { "type": "string" },
+          "predecessorNativeThreadId": { "type": "string" },
+          "successorBindingId": { "type": "string" },
+          "successorSessionId": { "type": "string" },
+          "successorNativeThreadId": { "type": "string" },
+          "predecessorLifecycle": {
+            "type": "string",
+            "enum": ["retained", "archived"]
+          },
+          "movedRouteCount": { "type": "integer", "minimum": 0 },
           "cwd": { "type": "string" },
           "output": { "type": "string" },
           "exitCode": { "type": "number" },
