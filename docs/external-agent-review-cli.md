@@ -23,13 +23,29 @@ CLI does not infer a deployment from a port, hostname, or a mutable profile.
 The selected service must have these review settings:
 
 ```dotenv
-RUSTY_CREW_REVIEW_DEN_BINDING_ID=<active MCP binding containing server name den>
+RUSTY_CREW_REVIEW_DEN_AUTHORITY_ID=service-review-den
+RUSTY_CREW_REVIEW_DEN_ENDPOINT_REF=config://mcp/den
+RUSTY_CREW_REVIEW_DEN_AUDIT_IDENTITY=rusty-crew-review-service
+# Optional when the Den MCP endpoint authenticates callers:
+RUSTY_CREW_REVIEW_DEN_BEARER_TOKEN=<dedicated review automation credential>
 ```
 
-The binding is a service-owned adapter binding. It must not depend on the
-external caller having a Crew profile or session. The existing
+The authority is service-owned configuration outside the runtime binding
+graph. It must not depend on the external caller having a Crew profile or
+session. The existing
 `RUSTY_CREW_REVIEW_URL`, `RUSTY_CREW_REVIEW_BEARER_TOKEN`, and GitHub gate
 consumer settings remain responsible for the Den Review/GitHub event adapter.
+
+### Migration from a session binding
+
+Remove `RUSTY_CREW_REVIEW_DEN_BINDING_ID`; do not restore or preserve the old
+binding in `service.json`. Configure the authority variables above in the
+service environment, restart the service, and read
+`GET /v1/admin/diagnostics/review-den-authority`. The status must be `ready`,
+the server must be `den`, and `missingTools` must be empty. Startup
+reconciliation resumes existing durable submissions, including a round that
+Den finalized while Crew was unable to call it; do not submit a replacement
+review or change its idempotency key.
 
 Set `RUSTY_CREW_ADMIN_TOKEN` in the shell when the selected service uses
 bearer authentication. Do not put the token in a task, review summary,
@@ -168,9 +184,11 @@ capability inventory and generated OpenAPI artifact expose these routes as
   configuration, and poll the same submission.
 - `deployment_role_mismatch` means the URL and role flag disagree. Check the
   URL, service port, and service environment before retrying.
-- `den_mcp_binding_unavailable` means the selected service is missing the
-  configured active binding or that binding does not expose a server named
-  `den`.
+- `review_den_authority_unavailable` means the dedicated service authority is
+  unconfigured, unreachable, or missing one of the exact review workflow
+  operations. No new external submission is durably admitted in this state;
+  existing submissions remain pending and reconciliation retries after the
+  authority is restored.
 - A non-`passed` `gateStatus` means no reviewer request was sent. The durable
   record may settle into `review_terminal` after the task is reset; use
   `gateStatus` and `terminalReason`, not only `phase`, to classify that outcome.

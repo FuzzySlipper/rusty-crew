@@ -420,6 +420,10 @@ import {
   submitExternalReview,
   type ServiceReviewSubmissionContext,
 } from "./service-review-submission.js";
+import {
+  validateServiceReviewDenAuthority,
+  type ReviewDenAuthorityDiagnostics,
+} from "./service-review-den-authority.js";
 import { runManualContextCompaction } from "./manual-compaction.js";
 
 export {
@@ -452,7 +456,7 @@ export interface RustyCrewServiceApp {
 
 interface ServiceState {
   readonly config: RustyCrewServiceConfig;
-  readonly reviewDenBindingId?: string;
+  reviewDenAuthorityDiagnostics: ReviewDenAuthorityDiagnostics;
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
   readonly lock: RustyCrewServiceLock;
@@ -1104,7 +1108,14 @@ export async function createRustyCrewServiceApp(
 
     const state: ServiceState = {
       config,
-      reviewDenBindingId: options.env?.RUSTY_CREW_REVIEW_DEN_BINDING_ID?.trim(),
+      reviewDenAuthorityDiagnostics: {
+        serverName: "den",
+        status: "unconfigured",
+        requiredTools: [],
+        missingTools: [],
+        checkedAt: (options.now ?? (() => new Date().toISOString()))(),
+        message: "Dedicated service review Den authority has not been checked.",
+      },
       bridge,
       engine,
       lock,
@@ -1161,6 +1172,7 @@ export async function createRustyCrewServiceApp(
       stopping: false,
     };
     liveState = state;
+    await refreshReviewDenAuthorityDiagnostics(state);
     const chatRestartReconciliation = await reconcileInterruptedChatTurns({
       bridge: state.bridge,
       now: state.now,
@@ -1197,6 +1209,7 @@ export async function createRustyCrewServiceApp(
       adapterLifecycleContext(state),
     );
     await startTelegramConnectorFromModule(adapterLifecycleContext(state));
+    await reconcileReviewSubmissions(reviewSubmissionContext(state));
     const backgroundLoops: ServiceBackgroundLoopPort = {
       intervals: {
         schedulerTickIntervalMs:
@@ -1384,6 +1397,21 @@ async function handleHttpRequest(
     return successRoute(
       requestId(request),
       await state.bridge.listReviewSubmissions({ pendingOnly: false }),
+    );
+  }
+
+  if (url.pathname === "/v1/admin/diagnostics/review-den-authority") {
+    if ((request.method ?? "GET").toUpperCase() !== "GET") {
+      return failure(405, requestId(request), {
+        code: "method_not_allowed",
+        reason_code: "review_den_authority_method_not_allowed",
+        message: "review Den authority diagnostics support GET only",
+        retryable: false,
+      });
+    }
+    return successRoute(
+      requestId(request),
+      state.reviewDenAuthorityDiagnostics,
     );
   }
 
@@ -2311,16 +2339,29 @@ async function buildDiagnosticsContextUncached(
       searchHealthy: storage?.searchHealthy ?? true,
       databaseBytes: storage?.size.databaseBytes,
     },
-    recentErrors: state.stopping
-      ? [
-          {
-            source: "service-host",
-            message: "service shutdown is in progress",
-            reasonCode: "blocked_dependency",
-            observedAt: now,
-          },
-        ]
-      : [],
+    recentErrors: [
+      ...(state.reviewDenAuthorityDiagnostics.status === "ready"
+        ? []
+        : [
+            {
+              source: "service-review-den-authority",
+              message: state.reviewDenAuthorityDiagnostics.message,
+              reasonCode: "blocked_dependency" as const,
+              observedAt: state.reviewDenAuthorityDiagnostics.checkedAt,
+              blocked: true,
+            },
+          ]),
+      ...(state.stopping
+        ? [
+            {
+              source: "service-host",
+              message: "service shutdown is in progress",
+              reasonCode: "blocked_dependency" as const,
+              observedAt: now,
+            },
+          ]
+        : []),
+    ],
     runtimePauses: runtimePauseDiagnostics(state, sessions),
   });
   const health = buildRuntimeHealthProjection(diagnostics, {
@@ -5924,13 +5965,26 @@ function reviewSubmissionContext(
 ): ServiceReviewSubmissionContext {
   return {
     bridge: state.bridge,
-    reviewDenBindingId: state.reviewDenBindingId,
     runtimeConfig: state.runtimeConfig,
     serviceConfig: state.config,
     now: state.now,
+    validateServiceDenAuthority: () =>
+      refreshReviewDenAuthorityDiagnostics(state),
     applyCoordinationDelivery: (receipt) =>
       state.externalRuntimeController.applyCoordinationDelivery(receipt),
   };
+}
+
+async function refreshReviewDenAuthorityDiagnostics(
+  state: ServiceState,
+): Promise<ReviewDenAuthorityDiagnostics> {
+  const diagnostics = await validateServiceReviewDenAuthority({
+    authority: state.config.reviewDenAuthority,
+    mcpConfig: state.config.mcp,
+    now: state.now,
+  });
+  state.reviewDenAuthorityDiagnostics = diagnostics;
+  return diagnostics;
 }
 
 function externalReviewApiFailure(

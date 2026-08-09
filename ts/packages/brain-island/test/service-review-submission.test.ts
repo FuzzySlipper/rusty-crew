@@ -16,6 +16,21 @@ import {
   submitExternalReview,
 } from "../src/service-review-submission.js";
 
+function reviewServiceConfig(
+  deploymentRole: "production" | "debug" = "production",
+) {
+  return {
+    deploymentRole,
+    reviewDenAuthority: {
+      authorityId: "service-review-den",
+      endpointRef: "config://mcp/den",
+      serverName: "den",
+      toolProfileKey: "direct",
+      auditIdentity: "rusty-crew-review-service",
+    },
+  } as never;
+}
+
 test("Den finalization request sizing matches the 4096-byte boundary", () => {
   const request = {
     review_round_id: 4150,
@@ -157,7 +172,7 @@ test("managed reviews prefer a submitter session Den binding", () => {
         },
       ],
     },
-    reviewDenBindingId: "service-den",
+    serviceConfig: reviewServiceConfig(),
   } as never;
 
   assert.equal(
@@ -166,7 +181,7 @@ test("managed reviews prefer a submitter session Den binding", () => {
   );
 });
 
-test("managed reviews fall back to the configured service Den binding", () => {
+test("managed reviews fall back to the dedicated service Den authority", () => {
   const context = {
     runtimeConfig: {
       sessions: [
@@ -180,20 +195,20 @@ test("managed reviews fall back to the configured service Den binding", () => {
         },
       ],
     },
-    reviewDenBindingId: "service-den",
+    serviceConfig: reviewServiceConfig(),
   } as never;
 
   assert.equal(
     selectReviewDenBinding(context, "session-1")?.bindingId,
-    "service-den",
+    "service-review-den",
   );
   assert.equal(
     selectReviewDenBinding(context, "missing")?.bindingId,
-    "service-den",
+    "service-review-den",
   );
 });
 
-test("managed reviews reject inactive or absent Den bindings", () => {
+test("managed reviews remain available with zero sessions and bindings", () => {
   const context = {
     runtimeConfig: {
       sessions: [],
@@ -201,10 +216,13 @@ test("managed reviews reject inactive or absent Den bindings", () => {
         { bindingId: "service-den", status: "inactive", serverNames: ["den"] },
       ],
     },
-    reviewDenBindingId: "service-den",
+    serviceConfig: reviewServiceConfig(),
   } as never;
 
-  assert.equal(selectReviewDenBinding(context, "missing"), undefined);
+  assert.equal(
+    selectReviewDenBinding(context, "missing")?.bindingId,
+    "service-review-den",
+  );
 });
 
 test("reconciliation settles an exact-head Den round finalized outside Crew", async () => {
@@ -232,7 +250,6 @@ test("reconciliation settles an exact-head Den round finalized outside Crew", as
         };
       },
     } as never,
-    reviewDenBindingId: "service-den",
     runtimeConfig: {
       sessions: [],
       mcpBindings: [
@@ -244,7 +261,7 @@ test("reconciliation settles an exact-head Den round finalized outside Crew", as
       ],
       mcpServers: [],
     } as never,
-    serviceConfig: { deploymentRole: "production" } as never,
+    serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-08T09:30:00.000Z",
     callDenTool: async (_binding: unknown, toolName: string) => {
       assert.equal(toolName, "list_review_rounds");
@@ -279,6 +296,68 @@ test("reconciliation settles an exact-head Den round finalized outside Crew", as
   ]);
 });
 
+test("restart reconciliation records an independently finalized round exactly once", async () => {
+  let durable = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "test",
+      idempotencyKey: "restart-exact-once",
+    }),
+    phase: "den_finalization_pending" as const,
+    reviewRoundId: 4089,
+    reviewResultJson: JSON.stringify({ verdict: "looks_good" }),
+  } as ReviewSubmissionRecord;
+  let transitions = 0;
+  let denReads = 0;
+  const context = {
+    bridge: {
+      listReviewSubmissions: async ({
+        pendingOnly,
+      }: {
+        pendingOnly: boolean;
+      }) =>
+        pendingOnly && durable.phase === "review_terminal" ? [] : [durable],
+      transitionReviewSubmission: async (request: {
+        transition: { type: string; verdict?: string };
+      }) => {
+        transitions += 1;
+        durable = {
+          ...durable,
+          phase: "review_terminal",
+          reviewVerdict: request.transition.verdict,
+          revision: durable.revision + 1,
+        } as ReviewSubmissionRecord;
+        return durable;
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-08T09:30:00.000Z",
+    callDenTool: async (_authority: unknown, toolName: string) => {
+      denReads += 1;
+      assert.equal(toolName, "list_review_rounds");
+      return {
+        project_id: "rusty-crew",
+        items: [
+          {
+            id: 4089,
+            project_id: "rusty-crew",
+            head_commit: durable.commitSha,
+            verdict: "looks_good",
+          },
+        ],
+      };
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  };
+
+  await reconcileReviewSubmissions(context);
+  await reconcileReviewSubmissions(context);
+  assert.equal(denReads, 1);
+  assert.equal(transitions, 1);
+  assert.equal(durable.phase, "review_terminal");
+});
+
 test("reconciliation does not reuse an older verdict past a newer pending same-head round", async () => {
   const pending = scopedSubmissionRecord("rusty-crew", {
     type: "external_cli",
@@ -306,7 +385,6 @@ test("reconciliation does not reuse an older verdict past a newer pending same-h
         };
       },
     } as never,
-    reviewDenBindingId: "service-den",
     runtimeConfig: {
       sessions: [],
       mcpBindings: [
@@ -318,7 +396,7 @@ test("reconciliation does not reuse an older verdict past a newer pending same-h
       ],
       mcpServers: [],
     } as never,
-    serviceConfig: { deploymentRole: "production" } as never,
+    serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-08T09:30:00.000Z",
     callDenTool: async (_binding: unknown, toolName: string) => {
       denCalls.push(toolName);
@@ -405,7 +483,17 @@ function reviewScopeContext(
       },
     } as never,
     runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
-    serviceConfig: { deploymentRole: "debug" } as never,
+    serviceConfig: reviewServiceConfig("debug"),
+    validateServiceDenAuthority: async () => ({
+      authorityId: "service-review-den",
+      auditIdentity: "rusty-crew-review-service",
+      serverName: "den" as const,
+      status: "ready" as const,
+      requiredTools: [],
+      missingTools: [],
+      checkedAt: "2026-08-05T00:01:00.000Z",
+      message: "ready",
+    }),
     now: () => "2026-08-05T00:01:00.000Z",
     applyCoordinationDelivery: async (receipt: never) => receipt,
   };
@@ -463,7 +551,6 @@ function gateReconciliationContext(
         return pending;
       },
     } as never,
-    reviewDenBindingId: "den-review",
     runtimeConfig: {
       sessions: [],
       mcpBindings: [
@@ -475,7 +562,7 @@ function gateReconciliationContext(
       ],
       mcpServers: [],
     } as never,
-    serviceConfig: { deploymentRole: "production" } as never,
+    serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-05T00:01:00.000Z",
     callDenTool: async (_binding: unknown, toolName: string) => {
       assert.equal(toolName, "get_github_check_gate");
@@ -545,6 +632,45 @@ test("external review receipt preserves the caller-supplied project scope", asyn
 
   assert.equal(receipt.projectId, "den-services");
   assert.equal(receipt.phase, "gate_pending");
+});
+
+test("external review admission stops before durable dispatch when service authority is invalid", async () => {
+  let began = false;
+  const context = reviewScopeContext(() => {
+    began = true;
+  });
+  await assert.rejects(
+    submitExternalReview(
+      {
+        ...context,
+        validateServiceDenAuthority: async () => ({
+          authorityId: "service-review-den",
+          auditIdentity: "rusty-crew-review-service",
+          serverName: "den" as const,
+          status: "missing_tools" as const,
+          requiredTools: [],
+          missingTools: ["finalize_review"],
+          checkedAt: "2026-08-05T00:01:00.000Z",
+          message: "finalize_review is missing",
+        }),
+      },
+      {
+        projectId: "den-services",
+        taskId: 6662,
+        repository: "FuzzySlipper/rusty-crew",
+        commitSha: "a".repeat(40),
+        ref: "main",
+        requiredChecks: ["Verify Offline"],
+        baseCommit: "0".repeat(40),
+        reviewSummaryMd: "Managed review.",
+        clientId: "external-test",
+        idempotencyKey: "invalid-authority",
+        expectedDeploymentRole: "debug",
+      },
+    ),
+    /finalize_review is missing/,
+  );
+  assert.equal(began, false);
 });
 
 test("managed gate reconciliation routes a failed gate to terminal failure", async () => {

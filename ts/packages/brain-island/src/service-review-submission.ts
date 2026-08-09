@@ -3,7 +3,6 @@ import type {
   AgentCoordinationCaller,
   AgentMessageDeliveryReceipt,
   AgentRouteResolution,
-  McpBindingRecord,
   ReviewFindingStatus,
   ReviewSubmissionRecord,
   SessionId,
@@ -11,6 +10,12 @@ import type {
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
+import {
+  isReviewDenToolName,
+  serviceReviewDenAuthority,
+  type ReviewDenAuthority,
+  type ReviewDenAuthorityDiagnostics,
+} from "./service-review-den-authority.js";
 import type {
   ReviewSubmissionToolReceipt,
   ReviewSubmissionToolRuntime,
@@ -26,14 +31,14 @@ import {
 
 export interface ServiceReviewSubmissionContext {
   readonly bridge: NativeBridgeModule;
-  readonly reviewDenBindingId?: string;
   readonly runtimeConfig: RustyCrewRuntimeConfig;
   readonly serviceConfig: RustyCrewServiceConfig;
   readonly callDenTool?: (
-    binding: McpBindingRecord,
+    authority: ReviewDenAuthority,
     toolName: string,
     args: Record<string, unknown>,
   ) => Promise<unknown>;
+  validateServiceDenAuthority?(): Promise<ReviewDenAuthorityDiagnostics>;
   now(): string;
   applyCoordinationDelivery(
     receipt: AgentMessageDeliveryReceipt,
@@ -87,6 +92,22 @@ export async function submitExternalReview(
   input: ExternalReviewSubmissionRequest,
 ): Promise<ExternalReviewSubmissionReceipt> {
   validateExternalReviewInput(context, input);
+  const authorityStatus = await context.validateServiceDenAuthority?.();
+  if (authorityStatus !== undefined && authorityStatus.status !== "ready") {
+    throw new ReviewSubmissionAdapterError(
+      "review_den_authority_unavailable",
+      authorityStatus.message,
+    );
+  }
+  if (
+    serviceReviewDenAuthority(context.serviceConfig.reviewDenAuthority) ===
+    undefined
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "review_den_authority_unavailable",
+      "Dedicated service review Den authority is not configured.",
+    );
+  }
   let record = await context.bridge.beginReviewSubmission({
     caller: {
       type: "external_cli",
@@ -739,9 +760,11 @@ async function resumeRoutedReview(
         return completionFailed(
           context,
           record,
-          "den_mcp_binding_unavailable",
           isExternalCliSubmission(record)
-            ? "The configured service Den MCP binding is unavailable."
+            ? "review_den_authority_unavailable"
+            : "den_mcp_binding_unavailable",
+          isExternalCliSubmission(record)
+            ? "The dedicated service review Den authority is unavailable."
             : "Submitting session has no active Den MCP binding.",
         );
       }
@@ -1077,12 +1100,19 @@ async function advanceDenHandoff(
     record = await recordAdapterFailure(
       context,
       record,
-      "den_mcp_binding_unavailable",
       isExternalCliSubmission(record)
-        ? "The configured service Den MCP binding is unavailable."
+        ? "review_den_authority_unavailable"
+        : "den_mcp_binding_unavailable",
+      isExternalCliSubmission(record)
+        ? "The dedicated service review Den authority is unavailable."
         : "Submitting session has no active Den MCP binding.",
     );
-    return failed(record, "den_mcp_binding_unavailable");
+    return failed(
+      record,
+      isExternalCliSubmission(record)
+        ? "review_den_authority_unavailable"
+        : "den_mcp_binding_unavailable",
+    );
   }
 
   try {
@@ -1119,7 +1149,7 @@ async function advanceDenHandoff(
         requiredNumericId(
           await denCall(context, binding, "request_review", {
             task_id: Number(record.taskId),
-            requested_by: record.submitterAgentId,
+            requested_by: binding.auditIdentity,
             branch: record.gitRef,
             base_branch: record.gitRef,
             base_commit: baseCommit,
@@ -1142,11 +1172,12 @@ async function advanceDenHandoff(
       commit_sha: record.commitSha,
       ref: record.gitRef,
       required_checks: record.requiredChecks,
-      requested_by: record.submitterAgentId,
-      ...(record.submitterSessionId === undefined
+      requested_by: binding.auditIdentity,
+      ...(binding.kind !== "submitter_binding" ||
+      record.submitterSessionId === undefined
         ? {}
         : { session_key: record.submitterSessionId }),
-      agent_profile: record.submitterAgentId,
+      agent_profile: binding.auditIdentity,
     });
     assertDenProjectScope(
       gate,
@@ -1186,7 +1217,7 @@ async function settleFailedGate(
     await denCall(context, binding, "update_task", {
       task_id: Number(record.taskId),
       status: "in_progress",
-      agent: record.submitterAgentId,
+      agent: binding.auditIdentity,
     });
     await context.bridge.transitionReviewSubmission({
       submissionId: record.submissionId,
@@ -1320,7 +1351,7 @@ export function reviewerDispatchIdentity(
 export function selectReviewDenBinding(
   context: ServiceReviewSubmissionContext,
   sessionId?: string | null,
-): McpBindingRecord | undefined {
+): ReviewDenAuthority | undefined {
   if (sessionId !== undefined && sessionId !== null) {
     const session = context.runtimeConfig.sessions.find(
       (candidate) => candidate.sessionId === sessionId,
@@ -1335,36 +1366,50 @@ export function selectReviewDenBinding(
             binding.sessionId === sessionId) &&
           binding.serverNames.includes("den"),
       );
-      if (sessionBinding !== undefined) return sessionBinding;
+      if (sessionBinding !== undefined) {
+        return {
+          kind: "submitter_binding",
+          binding: sessionBinding,
+          bindingId: sessionBinding.bindingId,
+          auditIdentity: session.agentId,
+        };
+      }
     }
   }
-  const configuredBindingId = context.reviewDenBindingId?.trim();
-  if (!configuredBindingId) return undefined;
-  return context.runtimeConfig.mcpBindings.find(
-    (binding) =>
-      binding.status === "active" &&
-      binding.bindingId === configuredBindingId &&
-      binding.serverNames.includes("den"),
-  );
+  return serviceReviewDenAuthority(context.serviceConfig.reviewDenAuthority);
 }
 
 async function denCall(
   context: ServiceReviewSubmissionContext,
-  binding: McpBindingRecord,
+  binding: ReviewDenAuthority,
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<unknown> {
+  if (binding.kind === "service" && !isReviewDenToolName(toolName)) {
+    throw new ReviewSubmissionAdapterError(
+      "review_den_tool_not_allowed",
+      `Dedicated review Den authority cannot call ${toolName}.`,
+    );
+  }
   if (context.callDenTool !== undefined) {
     return context.callDenTool(binding, toolName, args);
   }
   const result = await callConfiguredMcpTool({
-    binding,
+    binding: binding.binding,
     config: buildServiceMcpEndpointConfig({
       mcpConfig: context.serviceConfig.mcp,
-      mcpServers: context.runtimeConfig.mcpServers,
+      ...(binding.kind === "submitter_binding"
+        ? { mcpServers: context.runtimeConfig.mcpServers }
+        : {}),
     }),
     toolName,
     arguments: args,
+    ...(binding.kind === "service" && binding.config.bearerToken !== undefined
+      ? { bearerToken: binding.config.bearerToken }
+      : {}),
+    ...(binding.kind === "service"
+      ? { clientName: binding.auditIdentity }
+      : {}),
   });
   if (result.isError) {
     const content =
@@ -1430,7 +1475,7 @@ function existingGateState(
 
 async function reviewRounds(
   context: ServiceReviewSubmissionContext,
-  binding: McpBindingRecord,
+  binding: ReviewDenAuthority,
   taskId: number,
   projectId: string,
 ): Promise<Record<string, unknown>[]> {

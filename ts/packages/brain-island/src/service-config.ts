@@ -44,7 +44,10 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_DEN_RUNTIME_HEARTBEAT_INTERVAL_MS?: string;
   RUSTY_CREW_DEN_DELIVERY_POLL_INTERVAL_MS?: string;
   RUSTY_CREW_DEN_CONVERSATION_PROJECT_ID?: string;
-  RUSTY_CREW_REVIEW_DEN_BINDING_ID?: string;
+  RUSTY_CREW_REVIEW_DEN_AUTHORITY_ID?: string;
+  RUSTY_CREW_REVIEW_DEN_ENDPOINT_REF?: string;
+  RUSTY_CREW_REVIEW_DEN_BEARER_TOKEN?: string;
+  RUSTY_CREW_REVIEW_DEN_AUDIT_IDENTITY?: string;
   RUSTY_CREW_DEN_MEMORY_BASE_URL?: string;
   RUSTY_CREW_DEN_MEMORY_TOKEN?: string;
   RUSTY_CREW_DEN_MEMORY_BEARER_TOKEN?: string;
@@ -139,6 +142,16 @@ export interface RustyCrewMcpConfig {
   servers: RustyCrewMcpServerConfig[];
 }
 
+export interface RustyCrewReviewDenAuthorityConfig {
+  /** Stable service identity. This is deliberately not an MCP binding id. */
+  authorityId: string;
+  endpointRef: string;
+  serverName: "den";
+  toolProfileKey: "direct";
+  auditIdentity: string;
+  bearerToken?: string;
+}
+
 export interface RustyCrewTelegramConfig {
   enabled: boolean;
   adapterId: string;
@@ -194,6 +207,7 @@ export interface RustyCrewServiceConfig {
   denConversationProjectId: string;
   denMemory: RustyCrewDenMemoryConfig;
   mcp: RustyCrewMcpConfig;
+  reviewDenAuthority?: RustyCrewReviewDenAuthorityConfig;
   telegram: RustyCrewTelegramConfig;
   storage: RustyCrewStorageConfig;
   environmentVariablePresent(name: string): boolean;
@@ -313,6 +327,7 @@ export function loadRustyCrewServiceConfig(
     "rusty-crew";
   const denMemory = loadRustyCrewDenMemoryConfig(env);
   const mcp = loadRustyCrewMcpConfig(env);
+  const reviewDenAuthority = loadReviewDenAuthorityConfig(env);
   const telegram = loadRustyCrewTelegramConfig(env);
   const storage = loadRustyCrewStorageConfig(env, paths);
   const environmentVariablePresent = (name: string) =>
@@ -327,6 +342,7 @@ export function loadRustyCrewServiceConfig(
     denConversationProjectId,
     denMemory,
     mcp,
+    ...(reviewDenAuthority === undefined ? {} : { reviewDenAuthority }),
     telegram,
     storage,
     environmentVariablePresent,
@@ -342,6 +358,7 @@ export function loadRustyCrewServiceConfig(
     denConversationProjectId,
     denMemory,
     mcp,
+    ...(reviewDenAuthority === undefined ? {} : { reviewDenAuthority }),
     telegram,
     storage,
     environmentVariablePresent,
@@ -430,6 +447,7 @@ export function validateRustyCrewServiceConfig(
   validateDenMemoryConfig(config.denMemory);
   validateOpenAiOauthConfig(config.openAiOauth);
   validateMcpConfig(config.mcp);
+  validateReviewDenAuthorityConfig(config.reviewDenAuthority);
   validateTelegramConfig(config.telegram);
   validateStorageConfig(config.storage);
 }
@@ -945,6 +963,54 @@ function validateMcpConfig(config: RustyCrewMcpConfig): void {
   for (const item of urls) {
     validateHttpUrl(item.value, `${item.label} must be a valid HTTP(S) URL`);
   }
+}
+
+function loadReviewDenAuthorityConfig(
+  env: RustyCrewServiceEnv,
+): RustyCrewReviewDenAuthorityConfig | undefined {
+  const authorityId = normalizeOptional(env.RUSTY_CREW_REVIEW_DEN_AUTHORITY_ID);
+  const endpointRef = normalizeOptional(env.RUSTY_CREW_REVIEW_DEN_ENDPOINT_REF);
+  const bearerToken = normalizeOptional(env.RUSTY_CREW_REVIEW_DEN_BEARER_TOKEN);
+  const auditIdentity = normalizeOptional(
+    env.RUSTY_CREW_REVIEW_DEN_AUDIT_IDENTITY,
+  );
+  if (
+    authorityId === undefined &&
+    endpointRef === undefined &&
+    bearerToken === undefined &&
+    auditIdentity === undefined
+  ) {
+    return undefined;
+  }
+  if (authorityId === undefined || endpointRef === undefined) {
+    throw new Error(
+      "RUSTY_CREW_REVIEW_DEN_AUTHORITY_ID and RUSTY_CREW_REVIEW_DEN_ENDPOINT_REF must be configured together",
+    );
+  }
+  return {
+    authorityId,
+    endpointRef,
+    serverName: "den",
+    toolProfileKey: "direct",
+    auditIdentity: auditIdentity ?? "rusty-crew-review-service",
+    ...(bearerToken === undefined ? {} : { bearerToken }),
+  };
+}
+
+function validateReviewDenAuthorityConfig(
+  config: RustyCrewReviewDenAuthorityConfig | undefined,
+): void {
+  if (config === undefined) return;
+  if (!config.authorityId.trim() || !config.auditIdentity.trim()) {
+    throw new Error(
+      "review Den authority id and audit identity must not be empty",
+    );
+  }
+  if (config.endpointRef === "config://mcp/den") return;
+  validateHttpUrl(
+    config.endpointRef,
+    "RUSTY_CREW_REVIEW_DEN_ENDPOINT_REF must be config://mcp/den or a valid HTTP(S) URL",
+  );
 }
 
 function validateHttpUrl(value: string, message: string): void {

@@ -72,6 +72,7 @@ assert.equal(defaultConfig.denMemory.apiMode, "v1");
 assert.equal(defaultConfig.denMemory.timeoutMs, 5_000);
 assert.equal(defaultConfig.mcp.baseUrl, undefined);
 assert.equal(defaultConfig.mcp.requestTimeoutMs, 30_000);
+assert.equal(defaultConfig.reviewDenAuthority, undefined);
 assert.equal(defaultConfig.telegram.enabled, false);
 assert.equal(defaultConfig.telegram.adapterId, "telegram-main");
 assert.equal(defaultConfig.telegram.pollIntervalMs, 2_000);
@@ -115,6 +116,10 @@ try {
     RUSTY_CREW_DEN_MEMORY_RECALL_PATH: "/memory/recall",
     RUSTY_CREW_MCP_BASE_URL: "http://127.0.0.1:5199/mcp",
     RUSTY_CREW_MCP_REQUEST_TIMEOUT_MS: "12000",
+    RUSTY_CREW_REVIEW_DEN_AUTHORITY_ID: "service-review-den",
+    RUSTY_CREW_REVIEW_DEN_ENDPOINT_REF: "config://mcp/den",
+    RUSTY_CREW_REVIEW_DEN_BEARER_TOKEN: "review-den-token",
+    RUSTY_CREW_REVIEW_DEN_AUDIT_IDENTITY: "rusty-crew-review-service",
     RUSTY_CREW_TELEGRAM_ENABLED: "true",
     RUSTY_CREW_TELEGRAM_BOT_TOKEN: "telegram-token",
     RUSTY_CREW_TELEGRAM_API_BASE_URL: "http://127.0.0.1:19998",
@@ -147,6 +152,14 @@ try {
   assert.equal(config.paths.runDir, join(root, "run"));
   assert.equal(config.paths.artifactDir, join(root, "artifacts"));
   assert.equal(config.paths.backupDir, join(root, "backups"));
+  assert.deepEqual(config.reviewDenAuthority, {
+    authorityId: "service-review-den",
+    endpointRef: "config://mcp/den",
+    serverName: "den",
+    toolProfileKey: "direct",
+    auditIdentity: "rusty-crew-review-service",
+    bearerToken: "review-den-token",
+  });
   assert.equal(config.paths.staticDir, undefined);
   assert.equal(config.admin.authMode, "bearer");
   assert.equal(config.admin.token, "local-token");

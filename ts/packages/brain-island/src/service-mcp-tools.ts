@@ -56,6 +56,13 @@ export interface ServiceMcpServerEndpointConfig {
   requestTimeoutMs?: number;
 }
 
+/** Endpoint identity shared by session bindings and service-owned callers. */
+export interface ServiceMcpEndpointIdentity {
+  bindingId: string;
+  endpointRef: string;
+  toolProfileKey: string;
+}
+
 export interface ServiceMcpToolCatalogInput {
   bridge: Pick<NativeBridgeModule, "validateToolMetadataPolicy">;
   runtimeConfig: {
@@ -461,25 +468,63 @@ function createDefaultMcpToolExecutor(
 }
 
 export async function callConfiguredMcpTool(input: {
-  binding: McpBindingRecord;
+  binding: ServiceMcpEndpointIdentity;
   config?: ServiceMcpEndpointConfig;
   toolName: string;
   arguments: Record<string, unknown>;
+  bearerToken?: string;
+  clientName?: string;
 }): Promise<McpToolExecutionResult> {
-  const executor = createDefaultMcpToolExecutor(input.binding, input.config);
-  if (executor === undefined) {
+  const endpoint = endpointForBinding(input.binding, input.config);
+  if (endpoint === undefined) {
     throw new Error(`MCP endpoint unavailable for ${input.binding.bindingId}`);
   }
-  return executor.callTool({
-    binding: input.binding,
-    toolName: input.toolName,
+  const client = new DefaultMcpHttpClient(
+    endpoint.url,
+    endpoint.timeoutMs,
+    undefined,
+    input.bearerToken,
+    input.clientName,
+  );
+  const response = await client.request("tools/call", {
+    name: input.toolName,
     arguments: input.arguments,
-    toolCallId: `review-submission:${input.toolName}`,
   });
+  const result = jsonRpcResult(response);
+  const record = resultRecord(result);
+  return {
+    content: mcpResultContent(record.content, result),
+    details: record,
+    isError: record.isError === true,
+  };
+}
+
+export async function listConfiguredMcpTools(input: {
+  binding: ServiceMcpEndpointIdentity;
+  config?: ServiceMcpEndpointConfig;
+  bearerToken?: string;
+  clientName?: string;
+}): Promise<unknown[]> {
+  const endpoint = endpointForBinding(input.binding, input.config);
+  if (endpoint === undefined) {
+    throw new Error(`MCP endpoint unavailable for ${input.binding.bindingId}`);
+  }
+  const client = new DefaultMcpHttpClient(
+    endpoint.url,
+    endpoint.timeoutMs,
+    input.binding.toolProfileKey,
+    input.bearerToken,
+    input.clientName,
+  );
+  const response = await client.request("tools/list", {
+    toolProfile: input.binding.toolProfileKey,
+  });
+  const tools = resultRecord(jsonRpcResult(response)).tools;
+  return Array.isArray(tools) ? tools : [];
 }
 
 function endpointForBinding(
-  binding: McpBindingRecord,
+  binding: ServiceMcpEndpointIdentity,
   config: ServiceMcpEndpointConfig | undefined,
 ): { url: URL; timeoutMs: number | undefined } | undefined {
   const direct = httpEndpoint(binding.endpointRef);
@@ -505,7 +550,7 @@ function httpEndpoint(endpointRef: string): URL | undefined {
 }
 
 function configuredMcpEndpoint(
-  binding: McpBindingRecord,
+  binding: ServiceMcpEndpointIdentity,
   config: ServiceMcpEndpointConfig | undefined,
 ): { url: URL; timeoutMs: number | undefined } | undefined {
   try {
@@ -563,6 +608,8 @@ class DefaultMcpHttpClient {
     private readonly endpoint: URL,
     private readonly timeoutMs: number | undefined,
     private readonly discoveryProfile?: string,
+    private readonly bearerToken?: string,
+    private readonly clientName = "rusty-crew",
   ) {}
 
   async request(
@@ -577,6 +624,7 @@ class DefaultMcpHttpClient {
           params,
           sessionId: this.sessionId,
           timeoutMs: this.timeoutMs,
+          bearerToken: this.bearerToken,
         })
       ).body;
     }
@@ -587,6 +635,7 @@ class DefaultMcpHttpClient {
         method,
         params,
         timeoutMs: this.timeoutMs,
+        bearerToken: this.bearerToken,
       });
       this.sessionId = response.sessionId ?? this.sessionId;
       return response.body;
@@ -602,6 +651,7 @@ class DefaultMcpHttpClient {
         params,
         sessionId: this.sessionId,
         timeoutMs: this.timeoutMs,
+        bearerToken: this.bearerToken,
       })
     ).body;
   }
@@ -614,7 +664,7 @@ class DefaultMcpHttpClient {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: {},
         clientInfo: {
-          name: "rusty-crew",
+          name: this.clientName,
           version: "0.1.0",
         },
         ...(this.discoveryProfile === undefined
@@ -622,6 +672,7 @@ class DefaultMcpHttpClient {
           : { toolProfile: this.discoveryProfile }),
       },
       timeoutMs: this.timeoutMs,
+      bearerToken: this.bearerToken,
     });
     if (!response.sessionId) {
       throw new Error("MCP initialize response did not include a session id");
@@ -634,6 +685,7 @@ class DefaultMcpHttpClient {
       sessionId: this.sessionId,
       timeoutMs: this.timeoutMs,
       expectResponse: false,
+      bearerToken: this.bearerToken,
     });
   }
 }
@@ -645,6 +697,7 @@ interface JsonRpcPostInput {
   timeoutMs: number | undefined;
   sessionId?: string;
   expectResponse?: boolean;
+  bearerToken?: string;
 }
 
 interface JsonRpcPostResponse {
@@ -677,6 +730,9 @@ async function postJsonRpc(
     };
     if (input.sessionId) {
       headers["Mcp-Session-Id"] = input.sessionId;
+    }
+    if (input.bearerToken) {
+      headers.authorization = `Bearer ${input.bearerToken}`;
     }
     const response = await fetch(input.endpoint, {
       method: "POST",
