@@ -117,6 +117,7 @@ export interface NativeExternalRuntimeBridgeMethods
   }): Promise<NormalizedExternalRuntimeEvent>;
   queryExternalRuntimeEvents(input: {
     runtimeId: string;
+    nativeThreadId?: string;
     afterSequence: number;
     limit: number;
     tail?: boolean;

@@ -1028,6 +1028,30 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn query_external_runtime_thread_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        match self {
+            Self::Sqlite(store) => store.query_external_runtime_thread_events(
+                runtime_id,
+                native_thread_id,
+                after_sequence,
+                limit,
+            ),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.query_external_runtime_thread_events(
+                runtime_id,
+                native_thread_id,
+                after_sequence,
+                limit,
+            ),
+        }
+    }
+
     pub fn query_external_runtime_event_tail(
         &self,
         runtime_id: &ExternalRuntimeId,

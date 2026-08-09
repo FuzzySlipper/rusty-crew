@@ -954,7 +954,6 @@ impl CoreEngine {
         self.store
             .query_external_runtime_events(runtime_id, after_sequence, limit)
     }
-
     pub fn query_external_runtime_event_tail(
         &self,
         runtime_id: &ExternalRuntimeId,

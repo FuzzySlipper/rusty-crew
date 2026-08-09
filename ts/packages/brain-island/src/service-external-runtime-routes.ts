@@ -681,9 +681,22 @@ export async function handleExternalRuntimeRequest(
           return successRoute(requestId, { event: events.at(-1) ?? null });
         }
         if (parts.length !== 4) return methodNotAllowed(requestId);
+        const nativeThreadId = stringParam(url, "native_thread_id");
+        if (
+          url.searchParams.has("native_thread_id") &&
+          nativeThreadId === undefined
+        ) {
+          return failure(400, requestId, {
+            code: "invalid_input",
+            reason_code: "native_thread_id_required",
+            message: "native_thread_id must be a non-empty string",
+            retryable: false,
+          });
+        }
         return successRoute(requestId, {
           events: await context.bridge.queryExternalRuntimeEvents({
             runtimeId,
+            ...(nativeThreadId === undefined ? {} : { nativeThreadId }),
             afterSequence: numberParam(url, "after") ?? 0,
             limit: Math.min(numberParam(url, "limit") ?? 200, 1_000),
           }),

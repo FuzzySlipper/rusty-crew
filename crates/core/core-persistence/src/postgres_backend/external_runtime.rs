@@ -1522,6 +1522,31 @@ impl PostgresBackendStore {
         )
     }
 
+    pub fn query_external_runtime_thread_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        let schema = self.quoted_schema();
+        load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_events
+                 WHERE runtime_id = $1 AND native_thread_id = $2 AND sequence_id > $3
+                 ORDER BY sequence_id LIMIT $4"
+            ),
+            &[
+                &runtime_id.0,
+                &native_thread_id,
+                &(after_sequence as i64),
+                &(limit.clamp(1, 1_000) as i64),
+            ],
+            "query PostgreSQL external runtime thread events",
+        )
+    }
+
     pub fn query_external_runtime_event_tail(
         &self,
         runtime_id: &ExternalRuntimeId,

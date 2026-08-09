@@ -878,6 +878,66 @@ test("external runtime event head reads one indexed tail cursor", async () => {
   });
 });
 
+test("external runtime event list forwards a native thread filter", async () => {
+  let query: Record<string, unknown> | undefined;
+  const context = {
+    bridge: {
+      async getExternalRuntime(runtimeId: string) {
+        return { runtimeId };
+      },
+      async queryExternalRuntimeEvents(input: Record<string, unknown>) {
+        query = input;
+        return [];
+      },
+    },
+    controller: {},
+    requestId: () => "req-external-thread-events",
+  } as unknown as ExternalRuntimeRouteContext;
+
+  await handleExternalRuntimeRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL(
+      "http://local/v1/external-runtimes/runtime-1/events?native_thread_id=thread-1&after=20&limit=25",
+    ),
+    context,
+  );
+
+  assert.deepEqual(query, {
+    runtimeId: "runtime-1",
+    nativeThreadId: "thread-1",
+    afterSequence: 20,
+    limit: 25,
+  });
+});
+
+test("external runtime event list rejects an empty native thread filter", async () => {
+  let queried = false;
+  const context = {
+    bridge: {
+      async getExternalRuntime(runtimeId: string) {
+        return { runtimeId };
+      },
+      async queryExternalRuntimeEvents() {
+        queried = true;
+        return [];
+      },
+    },
+    controller: {},
+    requestId: () => "req-empty-external-thread-events",
+  } as unknown as ExternalRuntimeRouteContext;
+
+  const result = await handleExternalRuntimeRequest(
+    { method: "GET" } as IncomingMessage,
+    new URL(
+      "http://local/v1/external-runtimes/runtime-1/events?native_thread_id=",
+    ),
+    context,
+  );
+
+  assert.equal(result.status, 400);
+  assert.equal(queried, false);
+});
+
 test("external command routes are typed and recognized commands cannot leak to messages", async () => {
   let body: Record<string, unknown> = {};
   let delivered = false;

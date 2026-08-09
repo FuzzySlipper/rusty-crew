@@ -747,6 +747,12 @@
             "schema": { "type": "integer", "minimum": 0, "default": 0 }
           },
           {
+            "name": "native_thread_id",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,

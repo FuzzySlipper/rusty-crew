@@ -6,6 +6,21 @@ const MAX_ACTIVITY_PHASE_BYTES: usize = 128;
 const MAX_CENSUS_RECORDS: u32 = 5_000;
 
 impl CoreEngine {
+    pub fn query_external_runtime_thread_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        self.store.query_external_runtime_thread_events(
+            runtime_id,
+            native_thread_id,
+            after_sequence,
+            limit,
+        )
+    }
+
     pub fn begin_runtime_activity(
         &self,
         input: RuntimeActivityBegin,

@@ -116,6 +116,7 @@ struct ControllerInteractionResolution {
 #[serde(rename_all = "camelCase")]
 struct RuntimeEventQuery {
     runtime_id: ExternalRuntimeId,
+    native_thread_id: Option<String>,
     after_sequence: u64,
     limit: u32,
     #[serde(default)]
@@ -612,7 +613,16 @@ impl NativeBridgeBinding {
         let input = parse_json::<RuntimeEventQuery>(&input_json)?;
         let bridge = self.bridge()?;
         let engine = bridge.engine().map_err(to_napi_error)?;
-        let events = if input.tail {
+        let events = if let Some(native_thread_id) = input.native_thread_id.as_deref() {
+            engine
+                .query_external_runtime_thread_events(
+                    &input.runtime_id,
+                    native_thread_id,
+                    input.after_sequence,
+                    input.limit,
+                )
+                .map_err(to_napi_error)?
+        } else if input.tail {
             engine
                 .query_external_runtime_event_tail(&input.runtime_id, input.limit)
                 .map_err(to_napi_error)?

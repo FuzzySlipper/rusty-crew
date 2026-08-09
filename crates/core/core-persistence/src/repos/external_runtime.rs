@@ -1989,6 +1989,29 @@ impl CoordinationStore {
         )
     }
 
+    pub fn query_external_runtime_thread_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        let conn = self.conn()?;
+        load_json_list(
+            &conn,
+            "SELECT record_json FROM external_runtime_events
+             WHERE runtime_id = ?1 AND native_thread_id = ?2 AND sequence_id > ?3
+             ORDER BY sequence_id LIMIT ?4",
+            params![
+                runtime_id.0.as_str(),
+                native_thread_id,
+                after_sequence as i64,
+                limit.clamp(1, 1_000)
+            ],
+            "query external runtime thread events",
+        )
+    }
+
     pub fn query_external_runtime_event_tail(
         &self,
         runtime_id: &ExternalRuntimeId,
@@ -2862,6 +2885,29 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![2, 3]
         );
+        assert_eq!(
+            store
+                .query_external_runtime_thread_events(
+                    &ExternalRuntimeId::new("codex-local"),
+                    "native-thread-a",
+                    1,
+                    1,
+                )
+                .unwrap()
+                .into_iter()
+                .map(|event| event.sequence_id)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert!(store
+            .query_external_runtime_thread_events(
+                &ExternalRuntimeId::new("codex-local"),
+                "native-thread-missing",
+                0,
+                10,
+            )
+            .unwrap()
+            .is_empty());
         remove_temp_db(&path);
     }
 

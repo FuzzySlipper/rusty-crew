@@ -487,6 +487,7 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     undefined,
     [
       { name: "after", schema: { type: "integer", minimum: 0, default: 0 } },
+      { name: "native_thread_id", schema: { type: "string", minLength: 1 } },
       {
         name: "limit",
         schema: { type: "integer", minimum: 1, maximum: 1000, default: 200 },

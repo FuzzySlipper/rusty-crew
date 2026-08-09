@@ -16679,6 +16679,19 @@ mod tests {
                 )
                 .unwrap();
         }
+        assert_eq!(
+            store
+                .query_external_runtime_thread_events(&turn.runtime_id, "native-thread", 1, 1,)
+                .unwrap()
+                .into_iter()
+                .map(|event| event.sequence_id)
+                .collect::<Vec<_>>(),
+            vec![2]
+        );
+        assert!(store
+            .query_external_runtime_thread_events(&turn.runtime_id, "native-thread-missing", 0, 10,)
+            .unwrap()
+            .is_empty());
         let mut completed_turn = active_turn.clone();
         completed_turn.phase = rusty_crew_core_protocol::ExternalTurnPhase::Completed;
         completed_turn.capacity_lease_id = None;
