@@ -23,7 +23,6 @@ CLI does not infer a deployment from a port, hostname, or a mutable profile.
 The selected service must have these review settings:
 
 ```dotenv
-RUSTY_CREW_REVIEW_PROJECT_IDS=rusty-crew,den-services
 RUSTY_CREW_REVIEW_DEN_BINDING_ID=<active MCP binding containing server name den>
 ```
 
@@ -81,9 +80,10 @@ rusty-crew-review submit \
 ```
 
 Use `--summary` for a short inline summary or `--summary-file` for the normal
-markdown handoff. The service bounds the summary and validates the selected
-project against the deployment allowlist, repository, SHA, task, checks, and
-idempotency identity.
+markdown handoff. The caller supplies the Den project for each review; Crew
+does not keep a project allowlist. The service validates the repository, SHA,
+task, checks, and idempotency identity, while Den remains authoritative for the
+project and task.
 
 The receiver is always `@reviewer`. There is deliberately no `--reviewer`
 option and the HTTP API rejects a reviewer field in the external request.

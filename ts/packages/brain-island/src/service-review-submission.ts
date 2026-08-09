@@ -26,7 +26,6 @@ import {
 
 export interface ServiceReviewSubmissionContext {
   readonly bridge: NativeBridgeModule;
-  readonly reviewProjectIds: readonly string[];
   readonly reviewDenBindingId?: string;
   readonly runtimeConfig: RustyCrewRuntimeConfig;
   readonly serviceConfig: RustyCrewServiceConfig;
@@ -83,44 +82,18 @@ export interface ExternalReviewSubmissionReceipt {
   readonly lastAdapterError?: string;
 }
 
-const REVIEW_PROJECT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-
-export function parseReviewProjectIds(raw: string | undefined): string[] {
-  if (raw === undefined || raw.trim() === "") return [];
-  const ids = [...new Set(raw.split(",").map((value) => value.trim()))];
-  if (ids.some((id) => !REVIEW_PROJECT_ID_PATTERN.test(id))) {
-    throw new Error(
-      "RUSTY_CREW_REVIEW_PROJECT_IDS must contain only comma-separated Den project ids",
-    );
-  }
-  return ids;
-}
-
 export async function submitExternalReview(
   context: ServiceReviewSubmissionContext,
   input: ExternalReviewSubmissionRequest,
 ): Promise<ExternalReviewSubmissionReceipt> {
   validateExternalReviewInput(context, input);
-  const projectSelection = selectConfiguredReviewProject(
-    context,
-    input.projectId,
-  );
-  if (!projectSelection.ok) {
-    throw new ReviewSubmissionAdapterError(
-      projectSelection.reasonCode,
-      projectSelection.reasonCode === "review_project_not_allowed"
-        ? `Den project ${input.projectId} is not enabled for managed Rusty Crew reviews.`
-        : "Rusty Crew managed review project integration is not configured.",
-    );
-  }
-  const projectId = projectSelection.projectId;
   let record = await context.bridge.beginReviewSubmission({
     caller: {
       type: "external_cli",
       clientId: input.clientId,
       idempotencyKey: input.idempotencyKey,
     },
-    projectId,
+    projectId: input.projectId,
     taskId: String(input.taskId),
     repository: input.repository,
     commitSha: input.commitSha,
@@ -334,7 +307,6 @@ function validateExternalReviewInput(
   if (
     !Number.isSafeInteger(input.taskId) ||
     input.taskId <= 0 ||
-    !REVIEW_PROJECT_ID_PATTERN.test(input.projectId.trim()) ||
     input.repository.trim() === "" ||
     input.commitSha.trim() === "" ||
     input.ref.trim() === "" ||
@@ -412,17 +384,9 @@ async function submitReview(
     caller: import("@rusty-crew/contracts").AgentCoordinationCaller;
   },
 ): Promise<ReviewSubmissionToolReceipt> {
-  const projectSelection = selectConfiguredReviewProject(
-    context,
-    input.projectId,
-  );
-  if (!projectSelection.ok) {
-    return rejected(input, projectSelection.reasonCode);
-  }
-  const projectId = projectSelection.projectId;
   let record = await context.bridge.beginReviewSubmission({
     caller: input.caller,
-    projectId,
+    projectId: input.projectId,
     taskId: String(input.taskId),
     repository: input.repository,
     commitSha: input.commitSha,
@@ -1655,46 +1619,6 @@ function failed(
     reasonCode,
     summary: record.lastAdapterError ?? "Review submission failed.",
   };
-}
-
-function rejected(
-  input: SubmitTaskForReviewParameters,
-  reasonCode: string,
-): ReviewSubmissionToolReceipt {
-  return {
-    ok: false,
-    projectId: input.projectId,
-    taskId: input.taskId,
-    commitSha: input.commitSha,
-    reasonCode,
-    summary:
-      reasonCode === "review_project_not_allowed"
-        ? `Den project ${input.projectId} is not enabled for managed Rusty Crew reviews.`
-        : "Rusty Crew managed review project integration is not configured.",
-  };
-}
-
-type ReviewProjectSelection =
-  | { readonly ok: true; readonly projectId: string }
-  | {
-      readonly ok: false;
-      readonly reasonCode:
-        | "review_project_not_configured"
-        | "review_project_not_allowed";
-    };
-
-function selectConfiguredReviewProject(
-  context: ServiceReviewSubmissionContext,
-  requestedProjectId: string,
-): ReviewProjectSelection {
-  const projectId = requestedProjectId.trim();
-  if (context.reviewProjectIds.length === 0) {
-    return { ok: false, reasonCode: "review_project_not_configured" };
-  }
-  if (!context.reviewProjectIds.includes(projectId)) {
-    return { ok: false, reasonCode: "review_project_not_allowed" };
-  }
-  return { ok: true, projectId };
 }
 
 function requiredNumericId(value: unknown, keys: string[]): number {

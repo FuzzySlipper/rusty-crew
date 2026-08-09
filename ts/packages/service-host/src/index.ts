@@ -8,7 +8,6 @@ import {
 import {
   createRustyCrewServiceApp,
   loadRustyCrewServiceConfig,
-  parseReviewProjectIds,
   type ServiceAdapterFactories,
   type RustyCrewServiceApp,
   type RustyCrewServiceAppOptions,
@@ -116,14 +115,17 @@ export async function startRustyCrewServiceHost(
       app.backgroundLoops,
     );
     const reviewUrl = env.RUSTY_CREW_REVIEW_URL?.trim();
-    const reviewProjectIds = parseReviewProjectIds(
-      env.RUSTY_CREW_REVIEW_PROJECT_IDS,
-    );
-    if (reviewUrl && reviewProjectIds.length > 0) {
+    if (reviewUrl) {
       githubGateConsumerAbort = new AbortController();
       const consumer = new ReviewGitHubGateEventConsumer({
         baseUrl: new URL(reviewUrl),
-        projectIds: reviewProjectIds,
+        projectIds: async () => [
+          ...new Set(
+            (await app.bridge.listReviewSubmissions({ pendingOnly: true })).map(
+              (record) => String(record.projectId),
+            ),
+          ),
+        ],
         bridge: app.bridge,
         bearerToken: env.RUSTY_CREW_REVIEW_BEARER_TOKEN,
       });

@@ -1009,7 +1009,7 @@ export const API_CAPABILITIES = [
     "review.submissions.diagnostics.scope",
     "GET",
     "/v1/admin/diagnostics/review-submission-scope",
-    "Read managed review project allowlist and distinguish Crew-managed records from direct Den reviews.",
+    "Read managed review project scope and distinguish Crew-managed records from direct Den reviews.",
     "admin",
     ["service", "diagnostics", "governance"],
   ),

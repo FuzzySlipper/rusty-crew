@@ -767,7 +767,7 @@
         "id": "review.submissions.diagnostics.scope",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/review-submission-scope",
-        "description": "Read managed review project allowlist and distinguish Crew-managed records from direct Den reviews.",
+        "description": "Read managed review project scope and distinguish Crew-managed records from direct Den reviews.",
         "auth": "admin",
         "mutation": "read",
         "stability": "stable",

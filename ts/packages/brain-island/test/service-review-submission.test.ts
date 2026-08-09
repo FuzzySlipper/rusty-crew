@@ -9,7 +9,6 @@ import {
   createServiceReviewSubmissionRuntime,
   denReviewRequestByteLength,
   parseExternalReviewSubmissionRequest,
-  parseReviewProjectIds,
   reconcileReviewSubmissions,
   reviewerDispatchIdentity,
   selectReviewDenBinding,
@@ -62,7 +61,6 @@ test("oversized managed review result is rejected before persistence", async () 
         throw new Error("oversized result must not transition");
       },
     } as never,
-    reviewProjectIds: ["rusty-crew"],
     runtimeConfig: {
       sessions: [
         {
@@ -234,7 +232,6 @@ test("reconciliation settles an exact-head Den round finalized outside Crew", as
         };
       },
     } as never,
-    reviewProjectIds: ["rusty-crew"],
     reviewDenBindingId: "service-den",
     runtimeConfig: {
       sessions: [],
@@ -309,7 +306,6 @@ test("reconciliation does not reuse an older verdict past a newer pending same-h
         };
       },
     } as never,
-    reviewProjectIds: ["rusty-crew"],
     reviewDenBindingId: "service-den",
     runtimeConfig: {
       sessions: [],
@@ -396,7 +392,6 @@ function scopedSubmissionRecord(
 }
 
 function reviewScopeContext(
-  reviewProjectIds: readonly string[],
   onBegin?: (request: { projectId: string }) => void,
 ) {
   return {
@@ -409,7 +404,6 @@ function reviewScopeContext(
         return scopedSubmissionRecord(request.projectId, request.caller);
       },
     } as never,
-    reviewProjectIds,
     runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
     serviceConfig: { deploymentRole: "debug" } as never,
     now: () => "2026-08-05T00:01:00.000Z",
@@ -469,7 +463,6 @@ function gateReconciliationContext(
         return pending;
       },
     } as never,
-    reviewProjectIds: ["den-services"],
     reviewDenBindingId: "den-review",
     runtimeConfig: {
       sessions: [],
@@ -520,76 +513,35 @@ test("managed gate reconciliation advances an exact-SHA passed gate", async () =
   });
 });
 
-test("review project configuration deduplicates valid ids and rejects malformed ids", () => {
-  assert.deepEqual(
-    parseReviewProjectIds("rusty-crew, den-services, rusty-crew"),
-    ["rusty-crew", "den-services"],
-  );
-  assert.throws(
-    () => parseReviewProjectIds("rusty-crew,../other-project"),
-    /comma-separated Den project ids/,
-  );
-});
-
-test("managed review submission carries an explicitly allowed cross-project scope", async () => {
+test("managed review submission forwards any caller-supplied Den project", async () => {
   let selectedProject: string | undefined;
   const runtime = createServiceReviewSubmissionRuntime(() =>
-    reviewScopeContext(["rusty-crew", "den-services"], (request) => {
+    reviewScopeContext((request) => {
       selectedProject = request.projectId;
     }),
   );
 
-  const result = await runtime.submit(directReviewInput("den-services"));
+  const result = await runtime.submit(directReviewInput("rusty-engine-demo"));
 
-  assert.equal(selectedProject, "den-services");
+  assert.equal(selectedProject, "rusty-engine-demo");
   assert.equal(result.ok, true);
-  assert.equal(result.projectId, "den-services");
+  assert.equal(result.projectId, "rusty-engine-demo");
 });
 
-test("managed review submission rejects an unconfigured project before Rust persistence", async () => {
-  let beginCalled = false;
-  const runtime = createServiceReviewSubmissionRuntime(() =>
-    reviewScopeContext(["rusty-crew"], () => {
-      beginCalled = true;
-    }),
-  );
-
-  const result = await runtime.submit(directReviewInput("den-services"));
-
-  assert.equal(beginCalled, false);
-  assert.equal(result.ok, false);
-  assert.equal(result.projectId, "den-services");
-  assert.equal(result.reasonCode, "review_project_not_allowed");
-});
-
-test("managed review submission reports missing project integration distinctly", async () => {
-  const runtime = createServiceReviewSubmissionRuntime(() =>
-    reviewScopeContext([]),
-  );
-
-  const result = await runtime.submit(directReviewInput("rusty-crew"));
-
-  assert.equal(result.ok, false);
-  assert.equal(result.reasonCode, "review_project_not_configured");
-});
-
-test("external review receipt preserves an allowed project scope", async () => {
-  const receipt = await submitExternalReview(
-    reviewScopeContext(["rusty-crew", "den-services"]),
-    {
-      projectId: "den-services",
-      taskId: 6662,
-      repository: "FuzzySlipper/rusty-crew",
-      commitSha: "a".repeat(40),
-      ref: "main",
-      requiredChecks: ["Verify Offline"],
-      baseCommit: "0".repeat(40),
-      reviewSummaryMd: "Managed review.",
-      clientId: "scope-test-cli",
-      idempotencyKey: "scope-test-6662",
-      expectedDeploymentRole: "debug",
-    },
-  );
+test("external review receipt preserves the caller-supplied project scope", async () => {
+  const receipt = await submitExternalReview(reviewScopeContext(), {
+    projectId: "den-services",
+    taskId: 6662,
+    repository: "FuzzySlipper/rusty-crew",
+    commitSha: "a".repeat(40),
+    ref: "main",
+    requiredChecks: ["Verify Offline"],
+    baseCommit: "0".repeat(40),
+    reviewSummaryMd: "Managed review.",
+    clientId: "scope-test-cli",
+    idempotencyKey: "scope-test-6662",
+    expectedDeploymentRole: "debug",
+  });
 
   assert.equal(receipt.projectId, "den-services");
   assert.equal(receipt.phase, "gate_pending");
@@ -728,7 +680,6 @@ test("managed closeout uses the explicit target within a reused reviewer session
     bridge: {
       listReviewSubmissions: async () => [first, second],
     } as never,
-    reviewProjectIds: ["rusty-crew"],
     runtimeConfig: { sessions: [] } as never,
     serviceConfig: { deploymentRole: "production" } as never,
     now: () => "2026-08-05T00:00:00.000Z",
@@ -753,7 +704,6 @@ test("managed closeout explains when a direct Den review has no Crew attachment"
     bridge: {
       listReviewSubmissions: async () => [],
     } as never,
-    reviewProjectIds: ["rusty-crew"],
     runtimeConfig: { sessions: [] } as never,
     serviceConfig: { deploymentRole: "production" } as never,
     now: () => "2026-08-05T00:00:00.000Z",

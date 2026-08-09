@@ -1600,7 +1600,7 @@
     "/v1/admin/diagnostics/review-submission-scope": {
       "get": {
         "operationId": "reviewSubmissionsDiagnosticsScope",
-        "summary": "Read managed review project allowlist and distinguish Crew-managed records from direct Den reviews.",
+        "summary": "Read managed review project scope and distinguish Crew-managed records from direct Den reviews.",
         "tags": ["service", "diagnostics", "governance"],
         "security": [{ "AdminBearer": [] }],
         "responses": {

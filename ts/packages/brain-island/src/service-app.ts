@@ -414,7 +414,6 @@ import {
   assertExpectedDeploymentRole,
   getExternalReviewStatus,
   parseExternalReviewSubmissionRequest,
-  parseReviewProjectIds,
   reconcileReviewSubmissions,
   ReviewSubmissionAdapterError,
   submitExternalReview,
@@ -452,7 +451,6 @@ export interface RustyCrewServiceApp {
 
 interface ServiceState {
   readonly config: RustyCrewServiceConfig;
-  readonly reviewProjectIds: readonly string[];
   readonly reviewDenBindingId?: string;
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
@@ -1105,9 +1103,6 @@ export async function createRustyCrewServiceApp(
 
     const state: ServiceState = {
       config,
-      reviewProjectIds: parseReviewProjectIds(
-        options.env?.RUSTY_CREW_REVIEW_PROJECT_IDS,
-      ),
       reviewDenBindingId: options.env?.RUSTY_CREW_REVIEW_DEN_BINDING_ID?.trim(),
       bridge,
       engine,
@@ -1405,7 +1400,7 @@ async function handleHttpRequest(
     });
     return successRoute(requestId(request), {
       management: "rusty_crew_managed",
-      configuredProjectIds: [...state.reviewProjectIds],
+      projectScope: "caller_supplied_den_project",
       directDenReviews: "not_tracked_by_rusty_crew",
       submissions: submissions.map((record) => ({
         submissionId: record.submissionId,
@@ -5927,7 +5922,6 @@ function reviewSubmissionContext(
 ): ServiceReviewSubmissionContext {
   return {
     bridge: state.bridge,
-    reviewProjectIds: state.reviewProjectIds,
     reviewDenBindingId: state.reviewDenBindingId,
     runtimeConfig: state.runtimeConfig,
     serviceConfig: state.config,
@@ -5952,9 +5946,7 @@ function externalReviewApiFailure(
       : reasonCode === "deployment_role_mismatch" ||
           reasonCode === "review_submission_duplicate_payload_mismatch"
         ? 409
-        : reasonCode.startsWith("invalid_") ||
-            reasonCode === "review_project_not_configured" ||
-            reasonCode === "review_project_not_allowed"
+        : reasonCode.startsWith("invalid_")
           ? 400
           : 500;
   return failure(status, requestIdValue, {
