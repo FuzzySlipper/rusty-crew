@@ -526,6 +526,31 @@ class FakeCreationTransport implements CodexJsonRpcTransport {
       this.emit({ id: parsed.id, result: { turn } });
       return;
     }
+    if (parsed.method === "turn/steer") {
+      const thread = this.threads.find(
+        (candidate) => candidate.id === params.threadId,
+      );
+      const turn = (
+        thread?.turns as Array<Record<string, unknown>> | undefined
+      )?.find((candidate) => candidate.id === params.expectedTurnId);
+      if (turn === undefined) {
+        this.emit({
+          id: parsed.id,
+          error: { code: -32000, message: "turn not found" },
+        });
+        return;
+      }
+      const textInput = (params.input as Array<Record<string, unknown>>).find(
+        (input) => input.type === "text",
+      );
+      (turn.items as Array<Record<string, unknown>>).push({
+        id: params.clientUserMessageId,
+        type: "userMessage",
+        content: [{ type: "text", text: textInput?.text ?? "" }],
+      });
+      this.emit({ id: parsed.id, result: { turnId: params.expectedTurnId } });
+      return;
+    }
     if (parsed.method === "thread/fork") {
       const source = this.threads.find(
         (candidate) => candidate.id === params.threadId,
@@ -1175,6 +1200,153 @@ test("controller captures explicit document links while persisting only opaque r
     ]);
     assert.equal(JSON.stringify(payload).includes("/home/dev/project"), false);
   } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("immediate-steer images retain ordered durable readback after controller restart", async () => {
+  const resolveInputImage = async (_sessionId: string, storageUrl: string) =>
+    `/tmp/${storageUrl.slice(storageUrl.lastIndexOf("/") + 1)}`;
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    undefined,
+    false,
+    "creation-profile",
+    undefined,
+    undefined,
+    resolveInputImage,
+  );
+  let restarted: ServiceExternalRuntimeController | undefined;
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "browser-create-steer-images",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const now = new Date().toISOString();
+    for (const [index, attachmentId] of [
+      "steer-image-a",
+      "steer-image-b",
+    ].entries()) {
+      await fixture.bridge.createChatAttachment({
+        attachment: {
+          attachment_id: attachmentId,
+          session_id: created.creation.session.sessionId,
+          status: "active",
+          filename: `${attachmentId}.png`,
+          mime_type: "image/png",
+          byte_size: 128 + index,
+          storage_url: `artifact://tool-media/steer/${attachmentId}.png`,
+          download_url: null,
+          thumbnail_url: null,
+          extracted_text: null,
+          extracted_text_truncated: false,
+          metadata_json: { content_sha256: String(index + 1).repeat(64) },
+          created_at: now,
+          updated_at: now,
+          expires_at: null,
+          link: null,
+        },
+      });
+    }
+
+    const initial = await fixture.bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "steer-initial-delivery",
+      idempotencyKey: "steer-initial-delivery",
+      messageId: "steer-initial-message",
+      toAddress: created.creation.session.agentId,
+      inputKind: "operator",
+      body: "initial message",
+      requireWake: true,
+      createdAt: now,
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(initial.activation?.type, "external_turn_requested");
+    await fixture.controller.start();
+    await waitUntil(
+      async () => (await fixture.bridge.listActiveExternalTurns()).length === 1,
+      "initial steer test turn",
+    );
+    const nativeTurn = (
+      fixture.transport.threads[0]?.turns as
+        | Array<Record<string, unknown>>
+        | undefined
+    )?.[0];
+    assert.ok(nativeTurn);
+    (nativeTurn.items as Array<Record<string, unknown>>).push({
+      id: "initial-user-item",
+      type: "userMessage",
+      content: [{ type: "text", text: "initial message" }],
+    });
+
+    const steer = async (suffix: string, imageAttachmentIds: string[]) => {
+      const receipt = await fixture.bridge.deliverAgentMessage({
+        caller: { type: "system", senderAgentId: "operator" },
+        deliveryId: `steer-${suffix}-delivery`,
+        idempotencyKey: `steer-${suffix}-delivery`,
+        messageId: `steer-${suffix}-message`,
+        toAddress: created.creation.session.agentId,
+        inputKind: "operator",
+        body: `steer ${suffix}`,
+        imageAttachmentIds,
+        requireWake: true,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      assert.equal(receipt.activation?.type, "external_turn_steer_requested");
+      const completed =
+        await fixture.controller.applyCoordinationDelivery(receipt);
+      assert.equal(completed.status, "accepted");
+    };
+    await steer("text", []);
+    await steer("images", ["steer-image-a", "steer-image-b"]);
+
+    const beforeRestart = await fixture.controller.readThread(
+      fixture.runtimeId,
+      { threadId: created.thread.threadId, includeTurns: true },
+    );
+    assert.equal(
+      beforeRestart.thread.turns[0]?.items[1]?.inputImages,
+      undefined,
+    );
+    assert.deepEqual(
+      beforeRestart.thread.turns[0]?.items[2]?.inputImages?.map(
+        (image) => image.attachmentId,
+      ),
+      ["steer-image-a", "steer-image-b"],
+    );
+
+    await fixture.controller.stop();
+    restarted = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      resolveInputImage,
+      instanceId: "creation-test-controller-restarted",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+    await restarted.connect(fixture.runtimeId);
+    const afterRestart = await restarted.readThread(fixture.runtimeId, {
+      threadId: created.thread.threadId,
+      includeTurns: true,
+    });
+    assert.deepEqual(
+      afterRestart.thread.turns[0]?.items[2]?.inputImages?.map(
+        (image) => image.attachmentId,
+      ),
+      ["steer-image-a", "steer-image-b"],
+    );
+    assert.equal(
+      JSON.stringify(afterRestart).includes("artifact://tool-media"),
+      false,
+    );
+  } finally {
+    await restarted?.stop().catch(() => undefined);
     await fixture.cleanup();
   }
 });
@@ -4067,6 +4239,10 @@ async function externalCreationFixture(
   profileIdOverride = "creation-profile",
   mediaCaptureSink?: ExternalRuntimeMediaCaptureSink,
   documentCaptureSink?: ExternalRuntimeDocumentCaptureSink,
+  resolveInputImage?: (
+    sessionId: string,
+    storageUrl: string,
+  ) => Promise<string>,
 ) {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-creation-controller-"),
@@ -4117,6 +4293,7 @@ async function externalCreationFixture(
     bridge: controllerBridge,
     mediaCaptureSink,
     documentCaptureSink,
+    resolveInputImage,
     instanceId: "creation-test-controller",
     driverFactory: (_registration, authority) =>
       new CodexAppServerDriver(transport, authority, {

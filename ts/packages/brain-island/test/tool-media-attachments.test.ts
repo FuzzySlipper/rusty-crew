@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -601,6 +601,45 @@ test("external document checkpoints preserve exact revisions and typed failures"
     failures.map((failure) => failure.captureState),
     ["missing", "binary", "oversized", "unsupported"],
   );
+});
+
+test("external document capture bounds reads from zero-sized virtual files", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-external-document-bound-"));
+  const virtualSource = "/proc/kallsyms";
+  try {
+    await stat(virtualSource);
+  } catch {
+    t.skip(`${virtualSource} is unavailable on this platform`);
+    return;
+  }
+  const linkedPath = join(root, "virtual.txt");
+  await symlink(virtualSource, linkedPath);
+  const testHarness = harness(root);
+  const store = new ToolMediaAttachmentStore({
+    artifactDir: root,
+    bridge: testHarness.bridge as never,
+    now: () => "2026-07-25T12:00:00.000Z",
+    maxDocumentBytes: 1024,
+    appendChatEvent: testHarness.appendChatEvent,
+  });
+
+  const [capture] = await store.captureExternalRuntimeDocuments({
+    runtimeId: "runtime-1",
+    sessionId: "session-1",
+    externalEventId: "event-virtual",
+    candidates: [
+      {
+        source: "agent_message_file_link",
+        documentIndex: 0,
+        path: linkedPath,
+        displayName: "virtual",
+      },
+    ],
+  });
+
+  assert.equal(capture?.captureState, "oversized");
+  assert.equal(capture?.byteSize, 1025);
+  assert.equal(testHarness.attachments.size, 0);
 });
 
 test("tool image validation rejects malformed, oversized, and unsupported media", async () => {

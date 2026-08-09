@@ -298,6 +298,44 @@ test("explicit agent file links become transient document candidates without exp
   assert.ok(event.rawDetail.redactedKeys.includes("agentMessage.fileLink"));
 });
 
+test("document capture waits for completed messages and supports angle paths with parentheses", () => {
+  const params = {
+    threadId: "thread-1",
+    turnId: "turn-1",
+    item: {
+      id: "message-1",
+      type: "agentMessage",
+      text: "Open [Doc](</tmp/a(b).md>)",
+    },
+  };
+  const started = mapNotification(
+    { method: "item/started", params },
+    15,
+    16_384,
+    true,
+  );
+  assert.equal(started.documentCandidates, undefined);
+  assert.equal(started.payload.text, "Open Doc");
+  assert.equal(started.rawDetail.json.includes("/tmp/a(b).md"), false);
+
+  const completed = mapNotification(
+    { method: "item/completed", params },
+    16,
+    16_384,
+    true,
+  );
+  assert.deepEqual(completed.documentCandidates, [
+    {
+      source: "agent_message_file_link",
+      documentIndex: 0,
+      path: "/tmp/a(b).md",
+      displayName: "Doc",
+    },
+  ]);
+  assert.equal(completed.payload.text, "Open Doc");
+  assert.equal(completed.rawDetail.json.includes("/tmp/a(b).md"), false);
+});
+
 test("error diagnostics bound and sanitize every browser-facing string", () => {
   const oversizedCode = `code\u0000${"x".repeat(1_000)}`;
   const diagnostic = projectCodexErrorDiagnostic({

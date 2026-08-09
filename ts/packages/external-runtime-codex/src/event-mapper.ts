@@ -26,7 +26,10 @@ export function mapNotification(
   const kind = known
     ? classifyNotification(notification.method, item)
     : "unknown_native_notification";
-  const documents = projectDocumentCandidates(item);
+  const documents = projectDocumentCandidates(
+    item,
+    notification.method === "item/completed",
+  );
   return {
     transportSequence,
     method: notification.method,
@@ -49,7 +52,10 @@ export function mapNotification(
   };
 }
 
-function projectDocumentCandidates(item: Record<string, unknown>): {
+function projectDocumentCandidates(
+  item: Record<string, unknown>,
+  captureCompletedMessage: boolean,
+): {
   candidates: readonly ExternalRuntimeDocumentCaptureCandidate[];
   sanitizedItem: Record<string, unknown>;
 } {
@@ -60,16 +66,26 @@ function projectDocumentCandidates(item: Record<string, unknown>): {
   if (text === undefined) return { candidates: [], sanitizedItem: item };
   const candidates: ExternalRuntimeDocumentCaptureCandidate[] = [];
   const sanitized = text.replace(
-    /(?<!!)\[([^\]]+)\]\((?:<)?(\/[^)\n>]+?)(?::\d+)?(?:>)?\)/g,
-    (_match, label: string, path: string) => {
-      const decodedPath = decodeURIComponentSafe(path.trim());
-      candidates.push({
-        source: "agent_message_file_link",
-        documentIndex: candidates.length,
-        path: decodedPath,
-        displayName: label.trim() || basenameFromPath(decodedPath),
-      });
-      return label.trim() || basenameFromPath(decodedPath);
+    /(?<!!)\[([^\]\n]+)\]\((?:<(\/[^>\n]+)>|(\/[^)\n]+))\)/g,
+    (
+      _match,
+      label: string,
+      anglePath: string | undefined,
+      barePath: string | undefined,
+    ) => {
+      const pathWithLine = (anglePath ?? barePath ?? "").trim();
+      const path = pathWithLine.replace(/:\d+$/, "");
+      const decodedPath = decodeURIComponentSafe(path);
+      const displayName = label.trim() || basenameFromPath(decodedPath);
+      if (captureCompletedMessage) {
+        candidates.push({
+          source: "agent_message_file_link",
+          documentIndex: candidates.length,
+          path: decodedPath,
+          displayName,
+        });
+      }
+      return displayName;
     },
   );
   return {

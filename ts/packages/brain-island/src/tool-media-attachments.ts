@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { SessionId } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
@@ -248,14 +256,15 @@ export class ToolMediaAttachmentStore
           references.push(documentCaptureFailure(candidate, "unsupported"));
           continue;
         }
-        const before = await stat(candidate.path).catch((error) => {
-          throw documentReadError(error);
-        });
-        if (!before.isFile()) {
+        const materialized = await readExternalDocumentBounded(
+          candidate.path,
+          this.maxDocumentBytes,
+        );
+        if (materialized.state === "unsupported") {
           references.push(documentCaptureFailure(candidate, "unsupported"));
           continue;
         }
-        if (before.size > this.maxDocumentBytes) {
+        if (materialized.state === "oversized") {
           references.push({
             documentIndex: candidate.documentIndex,
             captureSource: candidate.source,
@@ -264,26 +273,15 @@ export class ToolMediaAttachmentStore
             filename: basename(candidate.path),
             mimeType: descriptor.mimeType,
             languageHint: descriptor.languageHint,
-            byteSize: before.size,
+            byteSize: materialized.byteSize,
           });
           continue;
         }
-        const bytes = await readFile(candidate.path).catch((error) => {
-          throw documentReadError(error);
-        });
-        const after = await stat(candidate.path).catch((error) => {
-          throw documentReadError(error);
-        });
-        if (
-          before.dev !== after.dev ||
-          before.ino !== after.ino ||
-          before.size !== after.size ||
-          before.mtimeMs !== after.mtimeMs ||
-          bytes.length !== before.size
-        ) {
+        if (materialized.state === "changed") {
           references.push(documentCaptureFailure(candidate, "changed"));
           continue;
         }
+        const bytes = materialized.bytes;
         if (bytes.length === 0) {
           references.push(documentCaptureFailure(candidate, "empty"));
           continue;
@@ -1529,6 +1527,64 @@ function documentDescriptor(
   const extension = extname(path).slice(1).toLowerCase();
   const descriptor = DOCUMENT_DESCRIPTORS.get(extension);
   return descriptor === undefined ? undefined : { extension, ...descriptor };
+}
+
+async function readExternalDocumentBounded(
+  path: string,
+  maxBytes: number,
+): Promise<
+  | { state: "available"; bytes: Buffer }
+  | { state: "changed" }
+  | { state: "oversized"; byteSize: number }
+  | { state: "unsupported" }
+> {
+  const handle = await open(path, "r").catch((error) => {
+    throw documentReadError(error);
+  });
+  try {
+    const before = await handle.stat().catch((error) => {
+      throw documentReadError(error);
+    });
+    if (!before.isFile()) return { state: "unsupported" };
+    if (before.size > maxBytes) {
+      return { state: "oversized", byteSize: before.size };
+    }
+
+    // Do not use FileHandle.readFile here. Procfs and similar files can report a
+    // zero size while yielding an effectively unbounded stream. Reading at most
+    // maxBytes + 1 makes the byte policy an I/O bound rather than a post-read
+    // validation.
+    const buffer = Buffer.allocUnsafe(maxBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle
+        .read(buffer, length, buffer.length - length, length)
+        .catch((error) => {
+          throw documentReadError(error);
+        });
+      if (bytesRead === 0) break;
+      length += bytesRead;
+    }
+    if (length > maxBytes) {
+      return { state: "oversized", byteSize: length };
+    }
+
+    const after = await handle.stat().catch((error) => {
+      throw documentReadError(error);
+    });
+    if (
+      before.dev !== after.dev ||
+      before.ino !== after.ino ||
+      before.size !== after.size ||
+      before.mtimeMs !== after.mtimeMs ||
+      length !== before.size
+    ) {
+      return { state: "changed" };
+    }
+    return { state: "available", bytes: buffer.subarray(0, length) };
+  } finally {
+    await handle.close();
+  }
 }
 
 function isUtf8Text(bytes: Buffer): boolean {

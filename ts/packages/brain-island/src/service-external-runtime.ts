@@ -1602,10 +1602,11 @@ export class ServiceExternalRuntimeController {
     const controlled = await this.#requireControlled(binding.runtimeId);
     try {
       const imageInput = await this.#resolveDeliveryInputImages(receipt);
+      const clientUserMessageId = `rusty-crew:${receipt.request.messageId}`;
       await controlled.driver.turnSteer({
         threadId: activation.nativeThreadId,
         expectedTurnId: activation.nativeTurnId,
-        clientUserMessageId: `rusty-crew:${receipt.request.messageId}`,
+        clientUserMessageId,
         input: [
           {
             type: "text" as const,
@@ -1614,6 +1615,28 @@ export class ServiceExternalRuntimeController {
           },
           ...imageInput,
         ],
+      });
+      await this.#bridge.recordExternalRuntimeEvent({
+        controller: this.#controllerContext(controlled),
+        event: {
+          eventId: `${receipt.request.deliveryId}:external-turn-steer-input`,
+          ...(receipt.request.toSessionId == null
+            ? {}
+            : { sessionId: receipt.request.toSessionId }),
+          createdAt: this.#now().toISOString(),
+          kind: "external_turn_steer_input",
+          runtimeId: controlled.registration.runtimeId,
+          nativeThreadId: activation.nativeThreadId,
+          nativeTurnId: activation.nativeTurnId,
+          itemId: clientUserMessageId,
+          requestId: activation.requestId,
+          payload: {
+            source: "agent_message_delivery",
+            messageId: receipt.request.messageId,
+            imageAttachmentIds: receipt.request.imageAttachmentIds ?? [],
+          },
+          rawDetailRef: null,
+        },
       });
       return this.#bridge.completeAgentMessageDelivery({
         deliveryId: receipt.request.deliveryId,
@@ -2671,18 +2694,23 @@ export class ServiceExternalRuntimeController {
       identified,
       correlations,
     );
-    return binding?.sessionId == null
-      ? reconciled
-      : await this.#attachExternalInputImages(
-          reconciled,
-          correlations,
-          binding.sessionId,
-        );
+    if (binding?.sessionId == null) return reconciled;
+    const events = await this.#queryThreadEvents(
+      controlled.registration.runtimeId,
+      threadId,
+    );
+    return this.#attachExternalInputImages(
+      reconciled,
+      correlations,
+      events,
+      binding.sessionId,
+    );
   }
 
   async #attachExternalInputImages(
     thread: ExternalThreadProjection,
     correlations: readonly ExternalTurnCorrelation[],
+    events: readonly NormalizedExternalRuntimeEvent[],
     sessionId: string,
   ): Promise<ExternalThreadProjection> {
     const imageUrlsByTurn = new Map(
@@ -2695,9 +2723,34 @@ export class ServiceExternalRuntimeController {
           : [[correlation.nativeTurnId, urls] as const];
       }),
     );
-    if (imageUrlsByTurn.size === 0) return thread;
+    const steerInputsByTurn = new Map<
+      string,
+      Array<{ itemId: string | null; attachmentIds: string[] }>
+    >();
+    for (const event of events) {
+      if (
+        event.kind !== "external_turn_steer_input" ||
+        event.sessionId !== sessionId ||
+        event.nativeTurnId == null ||
+        !isRecord(event.payload)
+      ) {
+        continue;
+      }
+      const attachmentIds = Array.isArray(event.payload.imageAttachmentIds)
+        ? event.payload.imageAttachmentIds.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [];
+      const inputs = steerInputsByTurn.get(event.nativeTurnId) ?? [];
+      inputs.push({ itemId: event.itemId ?? null, attachmentIds });
+      steerInputsByTurn.set(event.nativeTurnId, inputs);
+    }
+    if (imageUrlsByTurn.size === 0 && steerInputsByTurn.size === 0) {
+      return thread;
+    }
     const attachments = await this.#querySessionAttachments(sessionId);
     const referencesByUrl = new Map<string, ExternalInputImageReference>();
+    const referencesById = new Map<string, ExternalInputImageReference>();
     for (const attachment of attachments) {
       const storageUrl = nativeString(attachment.storage_url);
       const attachmentId = nativeString(attachment.attachment_id);
@@ -2716,37 +2769,89 @@ export class ServiceExternalRuntimeController {
       const metadata = isRecord(attachment.metadata_json)
         ? attachment.metadata_json
         : {};
-      referencesByUrl.set(storageUrl, {
+      const reference = {
         attachmentId,
         filename,
         mimeType,
         byteSize,
         sha256: nativeString(metadata.content_sha256) ?? null,
         contentUrl: `/v1/chat/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
-      });
+      };
+      referencesByUrl.set(storageUrl, reference);
+      referencesById.set(attachmentId, reference);
     }
     return {
       ...thread,
       turns: thread.turns.map((turn) => {
-        const inputImages = (imageUrlsByTurn.get(turn.turnId) ?? []).flatMap(
-          (url) => {
-            const reference = referencesByUrl.get(url);
+        const initialInputImages = (
+          imageUrlsByTurn.get(turn.turnId) ?? []
+        ).flatMap((url) => {
+          const reference = referencesByUrl.get(url);
+          return reference === undefined ? [] : [reference];
+        });
+        const steerInputs = steerInputsByTurn.get(turn.turnId) ?? [];
+        if (initialInputImages.length === 0 && steerInputs.length === 0) {
+          return turn;
+        }
+        const userIndexes = turn.items.flatMap((item, index) =>
+          item.kind === "userMessage" ? [index] : [],
+        );
+        if (userIndexes.length === 0) return turn;
+        const imagesByItemIndex = new Map<
+          number,
+          ExternalInputImageReference[]
+        >();
+        if (initialInputImages.length > 0) {
+          imagesByItemIndex.set(userIndexes[0]!, initialInputImages);
+        }
+        for (const [steerIndex, input] of steerInputs.entries()) {
+          const exactIndex =
+            input.itemId == null
+              ? -1
+              : turn.items.findIndex((item) => item.itemId === input.itemId);
+          const itemIndex =
+            exactIndex >= 0 ? exactIndex : (userIndexes[steerIndex + 1] ?? -1);
+          if (itemIndex < 0) continue;
+          const inputImages = input.attachmentIds.flatMap((attachmentId) => {
+            const reference = referencesById.get(attachmentId);
             return reference === undefined ? [] : [reference];
-          },
-        );
-        if (inputImages.length === 0) return turn;
-        const userIndex = turn.items.findIndex(
-          (item) => item.kind === "userMessage",
-        );
-        if (userIndex < 0) return turn;
+          });
+          if (inputImages.length > 0) {
+            imagesByItemIndex.set(itemIndex, inputImages);
+          }
+        }
+        if (imagesByItemIndex.size === 0) return turn;
         return {
           ...turn,
           items: turn.items.map((item, index) =>
-            index === userIndex ? { ...item, inputImages } : item,
+            imagesByItemIndex.has(index)
+              ? { ...item, inputImages: imagesByItemIndex.get(index)! }
+              : item,
           ),
         };
       }),
     };
+  }
+
+  async #queryThreadEvents(
+    runtimeId: string,
+    nativeThreadId: string,
+  ): Promise<NormalizedExternalRuntimeEvent[]> {
+    const events: NormalizedExternalRuntimeEvent[] = [];
+    let afterSequence = 0;
+    for (;;) {
+      const page = await this.#bridge.queryExternalRuntimeEvents({
+        runtimeId,
+        nativeThreadId,
+        afterSequence,
+        limit: 1_000,
+      });
+      events.push(...page);
+      if (page.length < 1_000) return events;
+      const last = page.at(-1);
+      if (last === undefined || last.sequenceId <= afterSequence) return events;
+      afterSequence = last.sequenceId;
+    }
   }
 
   async #querySessionAttachments(
