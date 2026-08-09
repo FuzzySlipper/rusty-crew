@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { SessionId } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
+import sharp from "sharp";
 import type { BrainToolResult } from "./brain-tool.js";
 import type {
   BrainToolMediaReference,
@@ -209,6 +210,14 @@ export class ToolMediaAttachmentStore
     mimeType: string;
     bytes: Buffer;
   }): Promise<ToolMediaAttachmentContent> {
+    if (input.bytes.length === 0 || input.bytes.length > this.maxImageBytes) {
+      throw new ToolMediaAttachmentError(
+        "invalid_image_byte_size",
+        `chat image byte size ${input.bytes.length} is outside 1..${this.maxImageBytes}`,
+      );
+    }
+    imageDimensions(input.bytes, input.mimeType);
+    await validateDecodableUpload(input.bytes, input.mimeType);
     const stored = await this.persistStoredImage({
       sessionId: input.sessionId,
       identity: `${input.sessionId}:chat-upload:${input.idempotencyKey}`,
@@ -720,6 +729,52 @@ export class ToolMediaAttachmentStore
 
   private async removeStoredBytes(attachment: AttachmentRecord): Promise<void> {
     await rm(this.pathFromAttachment(attachment), { force: true });
+  }
+}
+
+async function validateDecodableUpload(
+  bytes: Buffer,
+  mimeType: string,
+): Promise<void> {
+  const expectedFormat =
+    mimeType === "image/png"
+      ? "png"
+      : mimeType === "image/jpeg"
+        ? "jpeg"
+        : mimeType === "image/webp"
+          ? "webp"
+          : undefined;
+  if (expectedFormat === undefined) return;
+  try {
+    const decoded = await sharp(bytes, {
+      failOn: "warning",
+      limitInputPixels: 25_000_000,
+      sequentialRead: true,
+    })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    if (
+      decoded.info.format !== "raw" ||
+      decoded.info.width < 1 ||
+      decoded.info.height < 1
+    ) {
+      throw new Error("decoder returned invalid image metadata");
+    }
+    const metadata = await sharp(bytes, {
+      failOn: "warning",
+      limitInputPixels: 25_000_000,
+      sequentialRead: true,
+    }).metadata();
+    if (metadata.format !== expectedFormat) {
+      throw new Error(
+        `declared ${mimeType} content decoded as ${metadata.format ?? "unknown"}`,
+      );
+    }
+  } catch (error) {
+    throw new ToolMediaAttachmentError(
+      "invalid_image_content",
+      `image bytes are not a decodable ${mimeType}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 }
 

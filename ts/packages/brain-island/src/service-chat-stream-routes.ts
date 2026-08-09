@@ -241,6 +241,7 @@ async function handleAttachmentUploadRequest(
       "unsupported_image_mime_type",
       "invalid_image_byte_size",
       "invalid_image_dimensions",
+      "invalid_image_content",
     ].includes(reasonCode);
     return failure(invalid ? 400 : 500, requestIdValue, {
       code: invalid ? "invalid_input" : "internal_error",

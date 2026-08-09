@@ -288,8 +288,19 @@ test("raw image upload rejects incomplete and corrupt PNG containers before pers
   const imageDataTypeOffset = corrupt.indexOf(Buffer.from("IDAT"));
   assert.ok(imageDataTypeOffset > 0);
   corrupt[imageDataTypeOffset + 4] ^= 0xff;
+  const invalidIdat = Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", Buffer.from([0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0])),
+    pngChunk("IDAT", Buffer.from([0])),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
 
-  for (const [index, bytes] of [headerOnly, truncated, corrupt].entries()) {
+  for (const [index, bytes] of [
+    headerOnly,
+    truncated,
+    corrupt,
+    invalidIdat,
+  ].entries()) {
     await assert.rejects(
       testHarness.createStore().persistUploadedImage({
         sessionId: "session-1",
@@ -298,9 +309,7 @@ test("raw image upload rejects incomplete and corrupt PNG containers before pers
         mimeType: "image/png",
         bytes,
       }),
-      (error: unknown) =>
-        error instanceof ToolMediaAttachmentError &&
-        error.reasonCode === "invalid_image_dimensions",
+      (error: unknown) => error instanceof ToolMediaAttachmentError,
     );
   }
 
@@ -313,11 +322,11 @@ test("raw image upload admits real JPEG and WebP containers and rejects truncati
   const root = await mkdtemp(join(tmpdir(), "rusty-chat-upload-containers-"));
   const testHarness = harness(root);
   const jpeg = Buffer.from(
-    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q==",
+    "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJUAB//Z",
     "base64",
   );
   const webp = Buffer.from(
-    "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA",
+    "UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAUAmJaQAA3AA/v02aAA=",
     "base64",
   );
 
