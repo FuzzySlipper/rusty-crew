@@ -726,6 +726,20 @@ fn agent_directory_projects_same_service_direct_and_external_routability() {
     assert!(direct.routable);
     assert!(direct.binding_id.is_none());
     assert_eq!(
+        direct
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.cwd.as_str()),
+        Some("/home/dev/rusty-crew")
+    );
+    assert_eq!(
+        direct
+            .workspace
+            .as_ref()
+            .map(|workspace| workspace.revision),
+        Some(1)
+    );
+    assert_eq!(
         direct.execution.as_ref().map(|execution| execution.phase),
         Some(SessionExecutionPhase::Idle)
     );

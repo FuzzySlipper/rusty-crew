@@ -162,6 +162,7 @@ export type AgentDirectoryEntry = {
   sessionStatus: SessionStatus;
   taskRef?: DenRuntimeReference | null;
   workdir?: string | null;
+  workspace?: SessionWorkspace | null;
 };
 
 export type AgentDirectoryRuntimeKind = "direct_brain" | "codex_app_server";

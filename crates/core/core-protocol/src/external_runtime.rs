@@ -67,6 +67,7 @@ pub struct AgentDirectoryEntry {
     pub binding_id: Option<ExternalBindingId>,
     pub binding_status: Option<ExternalBindingStatus>,
     pub task_ref: Option<DenRuntimeReference>,
+    pub workspace: Option<crate::SessionWorkspace>,
     pub workdir: Option<String>,
     pub routable: bool,
     pub routability_reason_code: Option<String>,

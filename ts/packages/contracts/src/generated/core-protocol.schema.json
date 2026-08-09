@@ -450,6 +450,16 @@
             "string",
             "null"
           ]
+        },
+        "workspace": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionWorkspace"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

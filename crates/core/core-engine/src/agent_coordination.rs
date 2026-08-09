@@ -166,7 +166,8 @@ impl CoreEngine {
                     ExternalBindingStatus::Archived => 0,
                 });
 
-            let workspace_cwd = session.workspace.as_ref().map(|w| w.cwd.clone());
+            let workspace = session.workspace.clone();
+            let workspace_cwd = workspace.as_ref().map(|w| w.cwd.clone());
             let (
                 runtime_kind,
                 runtime_id,
@@ -241,6 +242,7 @@ impl CoreEngine {
                 binding_id,
                 binding_status,
                 task_ref,
+                workspace,
                 workdir,
                 routable,
                 routability_reason_code: reason_code,

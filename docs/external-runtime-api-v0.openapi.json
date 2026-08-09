@@ -1880,6 +1880,12 @@
               { "type": "null" }
             ]
           },
+          "workspace": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/SessionWorkspace" },
+              { "type": "null" }
+            ]
+          },
           "workdir": { "type": ["string", "null"] }
         },
         "required": [
