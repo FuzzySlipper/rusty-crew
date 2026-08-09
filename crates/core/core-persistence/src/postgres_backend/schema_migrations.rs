@@ -7,7 +7,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 50;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 52;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -270,7 +270,98 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "store first-class session workspace in session JSON",
         apply: Some(apply_postgres_session_workspace),
     },
+    PostgresSchemaMigration {
+        version: 51,
+        description: "migrate legacy delegated workspace constraints",
+        apply: Some(apply_postgres_delegated_workspace_constraints),
+    },
+    PostgresSchemaMigration {
+        version: 52,
+        description: "migrate legacy session workspace event payloads",
+        apply: Some(apply_postgres_session_workspace_events),
+    },
 ];
+
+fn apply_postgres_session_workspace_events(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.event_history
+            SET event_json = (
+                CASE
+                    WHEN event_json::jsonb #>> '{{state,kind}}' = 'full'
+                         AND event_json::jsonb #> '{{state,workspace}}' IS NULL
+                    THEN jsonb_set(
+                        event_json::jsonb,
+                        '{{state,workspace}}',
+                        jsonb_build_object(
+                            'cwd', event_json::jsonb #> '{{state,resource_limits,workdir}}',
+                            'revision', 1,
+                            'updated_at', COALESCE(
+                                event_json::jsonb #> '{{state,last_active_at}}',
+                                to_jsonb(recorded_at)
+                            )
+                        )
+                    )
+                    WHEN event_json::jsonb #>> '{{state,kind}}' = 'delegated'
+                         AND event_json::jsonb #> '{{state,delegation,workspace_constraint}}' IS NULL
+                    THEN jsonb_set(
+                        event_json::jsonb,
+                        '{{state,delegation,workspace_constraint}}',
+                        jsonb_build_object(
+                            'cwd', event_json::jsonb #> '{{state,resource_limits,workdir}}'
+                        )
+                    )
+                    ELSE event_json::jsonb
+                END #- '{{state,resource_limits,workdir}}'
+            )::text
+          WHERE event_kind = 'SessionCreated'
+            AND event_json::jsonb #> '{{state,resource_limits,workdir}}' IS NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("migrate session workspace event payloads", error))
+}
+
+fn apply_postgres_delegated_workspace_constraints(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "UPDATE {schema}.sessions
+            SET state_json = (
+                CASE
+                    WHEN state_json::jsonb #> '{{delegation,workspace_constraint}}' IS NULL
+                    THEN jsonb_set(
+                        state_json::jsonb,
+                        '{{delegation,workspace_constraint}}',
+                        jsonb_build_object(
+                            'cwd', state_json::jsonb #> '{{resource_limits,workdir}}'
+                        )
+                    )
+                    ELSE state_json::jsonb
+                END #- '{{resource_limits,workdir}}'
+            )::text
+          WHERE kind = 'delegated'
+            AND state_json::jsonb #> '{{resource_limits,workdir}}' IS NOT NULL;
+         UPDATE {schema}.session_configs
+            SET record_json = (
+                CASE
+                    WHEN record_json::jsonb #> '{{delegation,workspace_constraint}}' IS NULL
+                    THEN jsonb_set(
+                        record_json::jsonb,
+                        '{{delegation,workspace_constraint}}',
+                        jsonb_build_object(
+                            'cwd', record_json::jsonb #> '{{resource_limits,workdir}}'
+                        )
+                    )
+                    ELSE record_json::jsonb
+                END #- '{{resource_limits,workdir}}'
+            )::text
+          WHERE kind = 'delegated'
+            AND record_json::jsonb #> '{{resource_limits,workdir}}' IS NOT NULL;"
+    ))
+    .map_err(|error| postgres_error("migrate delegated workspace constraints", error))
+}
 
 fn apply_postgres_session_workspace(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
     tx.batch_execute(&format!(
@@ -2255,6 +2346,306 @@ mod tests {
         let error = validate_postgres_migration_catalog(&migrations).unwrap_err();
         assert_eq!(error.kind, CoreErrorKind::PersistenceFailure);
         assert!(error.message.contains("expected version 2"));
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_version_50_migrates_legacy_delegated_workspace_constraints() {
+        let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
+            .or_else(|_| std::env::var("RUSTY_CREW_TEST_DATABASE_URL"))
+            .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
+            .expect("PostgreSQL test database URL");
+        let schema = format!(
+            "rusty_crew_delegated_workspace_migration_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let mut client = Client::connect(&database_url, NoTls).unwrap();
+        prepare_postgres_migration_metadata(&mut client, &schema).unwrap();
+        let mut tx = client.transaction().unwrap();
+        apply_postgres_baseline_schema(&mut tx, &schema).unwrap();
+        for migration in &POSTGRES_SCHEMA_MIGRATIONS[..50] {
+            insert_postgres_schema_migration(&mut tx, &schema, migration).unwrap();
+        }
+        tx.commit().unwrap();
+
+        let delegated_state = |session_id: &str,
+                               constraint: Option<&str>|
+         -> rusty_crew_core_protocol::SessionState {
+            rusty_crew_core_protocol::SessionState {
+                handle: rusty_crew_core_protocol::SessionHandle::new(1),
+                session_id: rusty_crew_core_protocol::SessionId::new(session_id),
+                agent_id: rusty_crew_core_protocol::AgentId::new("delegated-agent"),
+                profile_id: rusty_crew_core_protocol::ProfileId::new("delegated-profile"),
+                kind: rusty_crew_core_protocol::SessionKind::Delegated,
+                delegation: Some(rusty_crew_core_protocol::DelegationLineage {
+                    parent_session_id: rusty_crew_core_protocol::SessionId::new("parent-session"),
+                    parent_agent_id: rusty_crew_core_protocol::AgentId::new("parent-agent"),
+                    source_wake_id: "wake-1".to_string(),
+                    source_action_index: 0,
+                    requested_task_id: None,
+                    correlation_id: format!("delegation:{session_id}"),
+                    workspace_constraint: constraint.map(|cwd| {
+                        rusty_crew_core_protocol::DelegatedWorkspaceConstraint {
+                            cwd: cwd.to_string(),
+                        }
+                    }),
+                }),
+                workspace: None,
+                resource_limits: rusty_crew_core_protocol::ResourceLimits {
+                    max_duration_ms: None,
+                    max_delegation_depth: None,
+                },
+                tool_profile: rusty_crew_core_protocol::ToolProfile { tools: Vec::new() },
+                history_window: None,
+                inference_overrides: Default::default(),
+                status: rusty_crew_core_protocol::SessionStatus::Idle,
+                brain_turn_count: 0,
+                created_at: "2026-08-08T00:00:00Z".to_string(),
+                last_active_at: "2026-08-08T00:00:00Z".to_string(),
+            }
+        };
+
+        for (session_id, existing_constraint) in [
+            ("legacy-delegated", None),
+            ("typed-delegated", Some("/typed")),
+        ] {
+            let state = delegated_state(session_id, existing_constraint);
+            let mut state_json = serde_json::to_value(&state).unwrap();
+            state_json["resource_limits"]["workdir"] = serde_json::json!("/legacy");
+            let mut config_json = serde_json::to_value(rusty_crew_core_protocol::SessionConfig {
+                session_id: state.session_id.clone(),
+                agent_id: state.agent_id.clone(),
+                profile_id: state.profile_id.clone(),
+                kind: state.kind.clone(),
+                delegation: state.delegation.clone(),
+                workspace: state.workspace.clone(),
+                resource_limits: state.resource_limits.clone(),
+                tool_profile: state.tool_profile.clone(),
+                history_window: state.history_window.clone(),
+            })
+            .unwrap();
+            config_json["resource_limits"]["workdir"] = serde_json::json!("/legacy");
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO {schema}.sessions(
+                            session_id, handle, agent_id, profile_id, kind, status,
+                            state_json, created_at, last_active_at
+                         ) VALUES ($1, 1, 'delegated-agent', 'delegated-profile', 'delegated',
+                             'idle', $2, '2026-08-08T00:00:00Z', '2026-08-08T00:00:00Z')"
+                    ),
+                    &[&session_id, &serde_json::to_string(&state_json).unwrap()],
+                )
+                .unwrap();
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO {schema}.session_configs(
+                            session_id, profile_id, kind, record_json, created_at
+                         ) VALUES ($1, 'delegated-profile', 'delegated', $2,
+                             '2026-08-08T00:00:00Z')"
+                    ),
+                    &[&session_id, &serde_json::to_string(&config_json).unwrap()],
+                )
+                .unwrap();
+        }
+
+        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+
+        for (session_id, expected_constraint) in [
+            ("legacy-delegated", "/legacy"),
+            ("typed-delegated", "/typed"),
+        ] {
+            let row = client
+                .query_one(
+                    &format!(
+                        "SELECT state_json, record_json
+                           FROM {schema}.sessions
+                           JOIN {schema}.session_configs USING(session_id)
+                          WHERE session_id = $1"
+                    ),
+                    &[&session_id],
+                )
+                .unwrap();
+            let state_json = row.get::<_, String>(0);
+            let config_json = row.get::<_, String>(1);
+            let state: rusty_crew_core_protocol::SessionState =
+                serde_json::from_str(&state_json).unwrap();
+            let config: rusty_crew_core_protocol::SessionConfig =
+                serde_json::from_str(&config_json).unwrap();
+            assert_eq!(
+                state
+                    .delegation
+                    .as_ref()
+                    .and_then(|lineage| lineage.workspace_constraint.as_ref())
+                    .map(|constraint| constraint.cwd.as_str()),
+                Some(expected_constraint)
+            );
+            assert_eq!(
+                config
+                    .delegation
+                    .as_ref()
+                    .and_then(|lineage| lineage.workspace_constraint.as_ref())
+                    .map(|constraint| constraint.cwd.as_str()),
+                Some(expected_constraint)
+            );
+            assert!(!state_json.contains("workdir"));
+            assert!(!config_json.contains("workdir"));
+        }
+
+        assert_eq!(
+            current_postgres_schema_version(&mut client, &schema).unwrap(),
+            POSTGRES_SCHEMA_VERSION
+        );
+        client
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_version_51_migrates_legacy_session_created_events() {
+        let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
+            .or_else(|_| std::env::var("RUSTY_CREW_TEST_DATABASE_URL"))
+            .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
+            .expect("PostgreSQL test database URL");
+        let schema = format!(
+            "rusty_crew_workspace_event_migration_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let mut client = Client::connect(&database_url, NoTls).unwrap();
+        prepare_postgres_migration_metadata(&mut client, &schema).unwrap();
+        let mut tx = client.transaction().unwrap();
+        apply_postgres_baseline_schema(&mut tx, &schema).unwrap();
+        for migration in &POSTGRES_SCHEMA_MIGRATIONS[..51] {
+            insert_postgres_schema_migration(&mut tx, &schema, migration).unwrap();
+        }
+        tx.commit().unwrap();
+
+        let session_created =
+            |session_id: &str, kind: &str, delegation: serde_json::Value, workdir: &str| {
+                serde_json::json!({
+                    "type": "session_created",
+                    "state": {
+                        "handle": 1,
+                        "session_id": session_id,
+                        "agent_id": "migration-agent",
+                        "profile_id": "migration-profile",
+                        "kind": kind,
+                        "delegation": delegation,
+                        "resource_limits": {
+                            "workdir": workdir,
+                            "max_duration_ms": null,
+                            "max_delegation_depth": null
+                        },
+                        "tool_profile": { "tools": [] },
+                        "history_window": null,
+                        "inference_overrides": {},
+                        "status": "idle",
+                        "brain_turn_count": 0,
+                        "created_at": "2026-08-08T00:00:00Z",
+                        "last_active_at": "2026-08-08T00:01:00Z"
+                    }
+                })
+            };
+        let delegated_lineage = |constraint: Option<&str>| {
+            let mut lineage = serde_json::json!({
+                "parent_session_id": "parent-session",
+                "parent_agent_id": "parent-agent",
+                "source_wake_id": "wake-1",
+                "source_action_index": 0,
+                "requested_task_id": null,
+                "correlation_id": "delegation:migration"
+            });
+            if let Some(cwd) = constraint {
+                lineage["workspace_constraint"] = serde_json::json!({ "cwd": cwd });
+            }
+            lineage
+        };
+        let events = [
+            (
+                1_i64,
+                session_created("legacy-full", "full", serde_json::Value::Null, "/full"),
+            ),
+            (
+                2_i64,
+                session_created(
+                    "legacy-delegated",
+                    "delegated",
+                    delegated_lineage(None),
+                    "/delegated",
+                ),
+            ),
+            (
+                3_i64,
+                session_created(
+                    "typed-delegated",
+                    "delegated",
+                    delegated_lineage(Some("/typed")),
+                    "/legacy",
+                ),
+            ),
+        ];
+        for (sequence, event) in events {
+            client
+                .execute(
+                    &format!(
+                        "INSERT INTO {schema}.event_history(sequence, event_kind, event_json)
+                         VALUES ($1, 'SessionCreated', $2)"
+                    ),
+                    &[&sequence, &serde_json::to_string(&event).unwrap()],
+                )
+                .unwrap();
+        }
+
+        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+
+        for (sequence, expected_cwd) in [(1_i64, "/full"), (2, "/delegated"), (3, "/typed")] {
+            let event_json = client
+                .query_one(
+                    &format!("SELECT event_json FROM {schema}.event_history WHERE sequence = $1"),
+                    &[&sequence],
+                )
+                .unwrap()
+                .get::<_, String>(0);
+            assert!(!event_json.contains("workdir"));
+            let event: rusty_crew_core_protocol::CoreEvent =
+                serde_json::from_str(&event_json).unwrap();
+            let rusty_crew_core_protocol::CoreEvent::SessionCreated { state } = event else {
+                panic!("expected migrated session-created event");
+            };
+            let migrated_cwd = match state.kind {
+                rusty_crew_core_protocol::SessionKind::Full => state
+                    .workspace
+                    .as_ref()
+                    .map(|workspace| workspace.cwd.as_str()),
+                rusty_crew_core_protocol::SessionKind::Delegated => state
+                    .delegation
+                    .as_ref()
+                    .and_then(|lineage| lineage.workspace_constraint.as_ref())
+                    .map(|constraint| constraint.cwd.as_str()),
+                rusty_crew_core_protocol::SessionKind::Worker => None,
+            };
+            assert_eq!(migrated_cwd, Some(expected_cwd));
+        }
+
+        assert_eq!(
+            current_postgres_schema_version(&mut client, &schema).unwrap(),
+            POSTGRES_SCHEMA_VERSION
+        );
+        client
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .unwrap();
     }
 
     #[test]
