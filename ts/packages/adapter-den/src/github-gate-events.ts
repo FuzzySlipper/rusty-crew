@@ -28,6 +28,7 @@ export class ReviewGitHubGateEventConsumer {
   readonly #fetch: typeof fetch;
   readonly #bearerToken?: string;
   readonly #waitMs: number;
+  readonly #projectCursors = new Map<string, number>();
   readonly #status: ReviewGitHubGateEventConsumerStatus = {
     state: "stopped",
     cursor: 0,
@@ -76,14 +77,16 @@ export class ReviewGitHubGateEventConsumer {
             .filter((projectId) => projectId !== ""),
         ),
       ];
-      const afterCursor = this.#status.cursor;
       const pages = await Promise.all(
         projectIds.map(async (projectId) => {
           const url = new URL(
             `/v1/projects/${encodeURIComponent(projectId)}/review/github-check-gate-events`,
             this.#baseUrl,
           );
-          url.searchParams.set("after_id", String(afterCursor));
+          url.searchParams.set(
+            "after_id",
+            String(this.#projectCursors.get(projectId) ?? 0),
+          );
           url.searchParams.set("limit", "100");
           url.searchParams.set("wait_ms", String(this.#waitMs));
           const response = await this.#fetch(url, {
@@ -97,11 +100,11 @@ export class ReviewGitHubGateEventConsumer {
               `Review terminal events for ${projectId} returned HTTP ${response.status}`,
             );
           }
-          return parseEventPage(await response.json());
+          return { projectId, page: parseEventPage(await response.json()) };
         }),
       );
       const events = pages
-        .flatMap((page) => page.events)
+        .flatMap(({ page }) => page.events)
         .sort((left, right) => left.eventId - right.eventId);
       for (const event of events) {
         const receipt =
@@ -114,7 +117,8 @@ export class ReviewGitHubGateEventConsumer {
         if (receipt.ignoredReason !== undefined)
           this.#status.ignoredEvents += 1;
       }
-      for (const page of pages) {
+      for (const { projectId, page } of pages) {
+        this.#projectCursors.set(projectId, page.nextCursor);
         this.#status.cursor = Math.max(this.#status.cursor, page.nextCursor);
       }
       this.#status.state = "connected";

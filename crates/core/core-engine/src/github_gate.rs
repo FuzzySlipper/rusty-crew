@@ -52,7 +52,8 @@ impl CoreEngine {
         })?;
         validate_github_gate_terminal_event(&event)?;
         let cursor = load_github_gate_cursor(&self.store)?;
-        if event.event_id <= cursor {
+        let project_cursor = load_github_gate_project_cursor(&self.store, &event.project_id)?;
+        if event.event_id <= project_cursor {
             return Ok(GitHubGateTerminalReceipt {
                 event_id: event.event_id,
                 cursor,
@@ -71,10 +72,10 @@ impl CoreEngine {
             });
         let Some(mut wait) = matching else {
             let review_submission = self.apply_review_gate_terminal(&event)?;
-            save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
+            self.save_github_gate_event_cursors(&event)?;
             return Ok(GitHubGateTerminalReceipt {
                 event_id: event.event_id,
-                cursor: event.event_id,
+                cursor: cursor.max(event.event_id),
                 duplicate: false,
                 wake_scheduled: false,
                 ignored_reason: Some(if review_submission.is_some() && event.status == "passed" {
@@ -93,10 +94,10 @@ impl CoreEngine {
             wait.terminal_event_id = Some(event.event_id);
             wait.updated_at = event.completed_at.clone();
             save_github_gate_wait(&self.store, &wait)?;
-            save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
+            self.save_github_gate_event_cursors(&event)?;
             return Ok(GitHubGateTerminalReceipt {
                 event_id: event.event_id,
-                cursor: event.event_id,
+                cursor: cursor.max(event.event_id),
                 duplicate: false,
                 wake_scheduled: false,
                 ignored_reason: Some("session_cancelled_or_archived".to_string()),
@@ -109,10 +110,10 @@ impl CoreEngine {
             wait.terminal_event_id = Some(event.event_id);
             wait.updated_at = event.completed_at.clone();
             save_github_gate_wait(&self.store, &wait)?;
-            save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
+            self.save_github_gate_event_cursors(&event)?;
             return Ok(GitHubGateTerminalReceipt {
                 event_id: event.event_id,
-                cursor: event.event_id,
+                cursor: cursor.max(event.event_id),
                 duplicate: false,
                 wake_scheduled: false,
                 ignored_reason: Some("review_submission_dispatch_pending".to_string()),
@@ -122,11 +123,11 @@ impl CoreEngine {
         let result = GitHubGateWakeResult {
             event_id: event.event_id,
             gate_id: event.gate_id,
-            commit_sha: event.commit_sha,
-            status: event.status,
-            terminal_reason: event.terminal_reason,
-            summary: event.summary,
-            failure_summary: event.failure_summary,
+            commit_sha: event.commit_sha.clone(),
+            status: event.status.clone(),
+            terminal_reason: event.terminal_reason.clone(),
+            summary: event.summary.clone(),
+            failure_summary: event.failure_summary.clone(),
             completed_at: event.completed_at.clone(),
         };
         let body = serde_json::to_string(&serde_json::json!({
@@ -168,13 +169,13 @@ impl CoreEngine {
         wait.terminal_event_id = Some(event.event_id);
         wait.updated_at = event.completed_at.clone();
         save_github_gate_wait(&self.store, &wait)?;
-        save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)?;
+        self.save_github_gate_event_cursors(&event)?;
         self.bus.publish(CoreEvent::BrainWakeRequested {
             session_id: wait.session_id.clone(),
         })?;
         Ok(GitHubGateTerminalReceipt {
             event_id: event.event_id,
-            cursor: event.event_id,
+            cursor: cursor.max(event.event_id),
             duplicate: false,
             wake_scheduled: true,
             ignored_reason: None,
@@ -212,6 +213,16 @@ impl CoreEngine {
 
     pub fn github_gate_event_cursor(&self) -> CoreResult<u64> {
         load_github_gate_cursor(&self.store)
+    }
+
+    fn save_github_gate_event_cursors(&self, event: &GitHubGateTerminalEvent) -> CoreResult<()> {
+        save_github_gate_project_cursor(
+            &self.store,
+            &event.project_id,
+            event.event_id,
+            &event.completed_at,
+        )?;
+        save_github_gate_cursor(&self.store, event.event_id, &event.completed_at)
     }
 }
 

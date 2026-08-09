@@ -151,3 +151,38 @@ fn newer_github_gate_wait_rejects_stale_sha_terminal_event() {
         2
     );
 }
+
+#[test]
+fn github_gate_event_cursors_are_isolated_per_den_project() {
+    let engine = test_engine();
+    let event = |event_id, project_id: &str| GitHubGateTerminalEvent {
+        event_id,
+        gate_id: event_id,
+        project_id: ProjectId::new(project_id),
+        task_id: TaskId::new(format!("task-{event_id}")),
+        commit_sha: format!("{event_id:040x}"),
+        status: "passed".to_string(),
+        terminal_reason: "checks_passed".to_string(),
+        summary: None,
+        failure_summary: None,
+        completed_at: "2026-08-09T01:00:00Z".to_string(),
+    };
+
+    let newer = engine
+        .consume_github_gate_terminal_event(event(2, "project-a"))
+        .unwrap();
+    let older_other_project = engine
+        .consume_github_gate_terminal_event(event(1, "project-b"))
+        .unwrap();
+
+    assert!(!newer.duplicate);
+    assert!(!older_other_project.duplicate);
+    assert_eq!(older_other_project.cursor, 2);
+    assert_eq!(engine.github_gate_event_cursor().unwrap(), 2);
+    assert!(
+        engine
+            .consume_github_gate_terminal_event(event(1, "project-b"))
+            .unwrap()
+            .duplicate
+    );
+}

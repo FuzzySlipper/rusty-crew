@@ -69,7 +69,8 @@ use delegation_store::{
 };
 use github_gate_wait::{
     list_waits as list_github_gate_waits, load_cursor as load_github_gate_cursor,
-    load_wait as load_github_gate_wait, save_cursor as save_github_gate_cursor,
+    load_project_cursor as load_github_gate_project_cursor, load_wait as load_github_gate_wait,
+    save_cursor as save_github_gate_cursor, save_project_cursor as save_github_gate_project_cursor,
     save_wait as save_github_gate_wait,
 };
 use memory_store::CrewMemoryStore;
