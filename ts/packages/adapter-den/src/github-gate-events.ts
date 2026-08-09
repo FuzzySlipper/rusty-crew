@@ -28,6 +28,10 @@ export class ReviewGitHubGateEventConsumer {
   readonly #fetch: typeof fetch;
   readonly #bearerToken?: string;
   readonly #waitMs: number;
+  readonly #minimumSuccessfulPollCycleMs: number;
+  readonly #degradedRetryMs: number;
+  readonly #now: () => number;
+  readonly #sleep: (delayMs: number, signal: AbortSignal) => Promise<void>;
   readonly #projectCursors = new Map<string, number>();
   readonly #status: ReviewGitHubGateEventConsumerStatus = {
     state: "stopped",
@@ -45,6 +49,10 @@ export class ReviewGitHubGateEventConsumer {
     fetch?: typeof fetch;
     bearerToken?: string;
     waitMs?: number;
+    minimumSuccessfulPollCycleMs?: number;
+    degradedRetryMs?: number;
+    now?: () => number;
+    sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
   }) {
     this.#baseUrl = options.baseUrl;
     this.#projectIds = options.projectIds;
@@ -53,6 +61,16 @@ export class ReviewGitHubGateEventConsumer {
     const bearerToken = options.bearerToken?.trim();
     this.#bearerToken = bearerToken === "" ? undefined : bearerToken;
     this.#waitMs = Math.max(0, Math.min(options.waitMs ?? 45_000, 50_000));
+    this.#minimumSuccessfulPollCycleMs = Math.max(
+      0,
+      Math.min(options.minimumSuccessfulPollCycleMs ?? 1_000, 5_000),
+    );
+    this.#degradedRetryMs = Math.max(
+      0,
+      Math.min(options.degradedRetryMs ?? 5_000, 60_000),
+    );
+    this.#now = options.now ?? Date.now;
+    this.#sleep = options.sleep ?? sleepAbortably;
   }
 
   status(): ReviewGitHubGateEventConsumerStatus {
@@ -142,13 +160,40 @@ export class ReviewGitHubGateEventConsumer {
         error instanceof Error ? error.message : String(error);
     }
     while (!signal.aborted) {
-      await this.pollOnce(signal);
+      const pollStartedAt = this.#now();
+      try {
+        await this.pollOnce(signal);
+      } catch (error) {
+        if (signal.aborted) break;
+        throw error;
+      }
+      if (signal.aborted) break;
       if (this.#status.state === "degraded") {
-        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        await this.#sleep(this.#degradedRetryMs, signal);
+        continue;
+      }
+      const elapsedMs = Math.max(0, this.#now() - pollStartedAt);
+      const remainingMs = this.#minimumSuccessfulPollCycleMs - elapsedMs;
+      if (remainingMs > 0) {
+        await this.#sleep(remainingMs, signal);
       }
     }
     this.#status.state = "stopped";
   }
+}
+
+function sleepAbortably(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timeout = setTimeout(finish, delayMs);
+    signal.addEventListener("abort", finish, { once: true });
+
+    function finish(): void {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+  });
 }
 
 function parseEventPage(value: unknown): {
