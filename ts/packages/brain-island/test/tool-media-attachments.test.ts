@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { deflateSync } from "node:zlib";
 import type { SessionId } from "@rusty-crew/contracts";
 import { Type } from "typebox";
 import type { BrainTool } from "../src/brain-tool.js";
@@ -25,12 +26,42 @@ import {
 import { mcpToolExecutionResultToBrainResult } from "../src/mcp-brain-tools.js";
 
 function png(width: number, height: number): Buffer {
-  const bytes = Buffer.alloc(24);
-  bytes.write("\x89PNG\r\n\x1a\n", 0, "binary");
-  bytes.write("IHDR", 12, "ascii");
-  bytes.writeUInt32BE(width, 16);
-  bytes.writeUInt32BE(height, 20);
-  return bytes;
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  const scanlines = Buffer.alloc((width * 4 + 1) * height);
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(scanlines)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const typeBytes = Buffer.from(type, "ascii");
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  typeBytes.copy(chunk, 4);
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(
+    pngCrc32(Buffer.concat([typeBytes, data])),
+    8 + data.length,
+  );
+  return chunk;
+}
+
+function pngCrc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
 }
 
 function harness(rootDir: string, now = "2026-07-25T12:00:00.000Z") {
@@ -241,6 +272,81 @@ test("raw chat image uploads are durable, idempotent, and linkable to user messa
     | Record<string, unknown>
     | undefined;
   assert.equal(linkMetadata?.["source"], "chat_upload");
+});
+
+test("raw image upload rejects incomplete and corrupt PNG containers before persistence", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-chat-upload-invalid-"));
+  const testHarness = harness(root);
+  const valid = png(5, 7);
+  const headerOnly = Buffer.alloc(24);
+  headerOnly.write("\x89PNG\r\n\x1a\n", 0, "binary");
+  headerOnly.write("IHDR", 12, "ascii");
+  headerOnly.writeUInt32BE(5, 16);
+  headerOnly.writeUInt32BE(7, 20);
+  const truncated = valid.subarray(0, valid.length - 4);
+  const corrupt = Buffer.from(valid);
+  const imageDataTypeOffset = corrupt.indexOf(Buffer.from("IDAT"));
+  assert.ok(imageDataTypeOffset > 0);
+  corrupt[imageDataTypeOffset + 4] ^= 0xff;
+
+  for (const [index, bytes] of [headerOnly, truncated, corrupt].entries()) {
+    await assert.rejects(
+      testHarness.createStore().persistUploadedImage({
+        sessionId: "session-1",
+        idempotencyKey: `invalid-${index}`,
+        filename: "broken.png",
+        mimeType: "image/png",
+        bytes,
+      }),
+      (error: unknown) =>
+        error instanceof ToolMediaAttachmentError &&
+        error.reasonCode === "invalid_image_dimensions",
+    );
+  }
+
+  assert.equal(testHarness.attachments.size, 0);
+  assert.equal(testHarness.events.length, 0);
+  await assert.rejects(stat(join(root, "tool-media")), /ENOENT/);
+});
+
+test("raw image upload admits real JPEG and WebP containers and rejects truncation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-chat-upload-containers-"));
+  const testHarness = harness(root);
+  const jpeg = Buffer.from(
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABD/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/EH//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/EH//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/EH//2Q==",
+    "base64",
+  );
+  const webp = Buffer.from(
+    "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA",
+    "base64",
+  );
+
+  for (const [index, candidate] of [
+    { bytes: jpeg, mimeType: "image/jpeg", filename: "pixel.jpg" },
+    { bytes: webp, mimeType: "image/webp", filename: "pixel.webp" },
+  ].entries()) {
+    const stored = await testHarness.createStore().persistUploadedImage({
+      sessionId: "session-1",
+      idempotencyKey: `valid-${index}`,
+      ...candidate,
+    });
+    assert.equal(stored.attachment.byte_size, candidate.bytes.length);
+    const truncated = candidate.bytes.subarray(0, candidate.bytes.length - 2);
+    await assert.rejects(
+      testHarness.createStore().persistUploadedImage({
+        sessionId: "session-1",
+        idempotencyKey: `truncated-${index}`,
+        ...candidate,
+        bytes: truncated,
+      }),
+      (error: unknown) =>
+        error instanceof ToolMediaAttachmentError &&
+        error.reasonCode === "invalid_image_dimensions",
+    );
+  }
+
+  assert.equal(testHarness.attachments.size, 2);
+  assert.equal(testHarness.events.length, 2);
 });
 
 test("external runtime media is ordered, idempotent, durable, and deduplicated within one item", async () => {
@@ -634,9 +740,11 @@ test("production tool debug projection redacts large image bytes and retains att
   const root = await mkdtemp(join(tmpdir(), "rusty-tool-media-debug-"));
   const testHarness = harness(root);
   const marker = "RAW_IMAGE_BODY_MUST_NOT_LEAK";
+  const baseImage = png(2, 3);
   const imageData = Buffer.concat([
-    png(2, 3),
-    Buffer.from(marker.repeat(2_000)),
+    baseImage.subarray(0, -12),
+    pngChunk("tEXt", Buffer.from(marker.repeat(2_000))),
+    baseImage.subarray(-12),
   ]).toString("base64");
   const debugStore = new MemoryToolCallDebugStore({
     maxJsonChars: 1_000,

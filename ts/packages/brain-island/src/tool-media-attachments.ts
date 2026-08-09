@@ -768,13 +768,8 @@ function imageDimensions(
 ): { width: number; height: number } {
   let width = 0;
   let height = 0;
-  if (
-    mimeType === "image/png" &&
-    bytes.length >= 24 &&
-    bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-  ) {
-    width = bytes.readUInt32BE(16);
-    height = bytes.readUInt32BE(20);
+  if (mimeType === "image/png") {
+    ({ width, height } = pngDimensions(bytes));
   } else if (
     mimeType === "image/gif" &&
     bytes.length >= 10 &&
@@ -796,30 +791,139 @@ function imageDimensions(
   return { width, height };
 }
 
+function pngDimensions(bytes: Buffer): { width: number; height: number } {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (bytes.length < 45 || !bytes.subarray(0, 8).equals(signature)) {
+    return { width: 0, height: 0 };
+  }
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let sawHeader = false;
+  let sawImageData = false;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const dataStart = offset + 8;
+    const crcOffset = dataStart + length;
+    const chunkEnd = crcOffset + 4;
+    if (chunkEnd > bytes.length) return { width: 0, height: 0 };
+    const type = bytes.subarray(offset + 4, dataStart).toString("ascii");
+    if (
+      bytes.readUInt32BE(crcOffset) !==
+      pngCrc32(bytes.subarray(offset + 4, crcOffset))
+    ) {
+      return { width: 0, height: 0 };
+    }
+    if (!sawHeader) {
+      if (type !== "IHDR" || length !== 13 || offset !== 8) {
+        return { width: 0, height: 0 };
+      }
+      width = bytes.readUInt32BE(dataStart);
+      height = bytes.readUInt32BE(dataStart + 4);
+      const bitDepth = bytes[dataStart + 8] ?? 0;
+      const colorType = bytes[dataStart + 9] ?? 0;
+      const validDepths = new Map<number, readonly number[]>([
+        [0, [1, 2, 4, 8, 16]],
+        [2, [8, 16]],
+        [3, [1, 2, 4, 8]],
+        [4, [8, 16]],
+        [6, [8, 16]],
+      ]);
+      if (
+        !validDepths.get(colorType)?.includes(bitDepth) ||
+        bytes[dataStart + 10] !== 0 ||
+        bytes[dataStart + 11] !== 0 ||
+        ![0, 1].includes(bytes[dataStart + 12] ?? -1)
+      ) {
+        return { width: 0, height: 0 };
+      }
+      sawHeader = true;
+    } else if (type === "IHDR") {
+      return { width: 0, height: 0 };
+    }
+    if (type === "IDAT") {
+      if (length === 0) return { width: 0, height: 0 };
+      sawImageData = true;
+    }
+    if (type === "IEND") {
+      if (
+        length !== 0 ||
+        !sawHeader ||
+        !sawImageData ||
+        chunkEnd !== bytes.length
+      ) {
+        return { width: 0, height: 0 };
+      }
+      return { width, height };
+    }
+    offset = chunkEnd;
+  }
+  return { width: 0, height: 0 };
+}
+
+function pngCrc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = (crc >>> 8) ^ (PNG_CRC_TABLE[(crc ^ byte) & 0xff] ?? 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const PNG_CRC_TABLE = Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) {
+    crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return crc >>> 0;
+});
+
 function jpegDimensions(bytes: Buffer): { width: number; height: number } {
-  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8)
+  if (
+    bytes.length < 12 ||
+    bytes[0] !== 0xff ||
+    bytes[1] !== 0xd8 ||
+    bytes[bytes.length - 2] !== 0xff ||
+    bytes[bytes.length - 1] !== 0xd9
+  )
     return { width: 0, height: 0 };
   let offset = 2;
-  while (offset + 8 < bytes.length) {
+  let width = 0;
+  let height = 0;
+  while (offset + 4 <= bytes.length - 2) {
     if (bytes[offset] !== 0xff) {
-      offset += 1;
-      continue;
+      return { width: 0, height: 0 };
     }
-    const marker = bytes[offset + 1] ?? 0;
-    offset += 2;
-    if (marker === 0xd8 || marker === 0xd9) continue;
+    while (bytes[offset] === 0xff) offset += 1;
+    const marker = bytes[offset] ?? 0;
+    offset += 1;
+    if (marker === 0xda) {
+      if (offset + 2 > bytes.length - 2) return { width: 0, height: 0 };
+      const length = bytes.readUInt16BE(offset);
+      const scanStart = offset + length;
+      return width > 0 &&
+        height > 0 &&
+        length >= 6 &&
+        scanStart < bytes.length - 2
+        ? { width, height }
+        : { width: 0, height: 0 };
+    }
+    if (marker === 0x00 || marker === 0xd8 || marker === 0xd9) {
+      return { width: 0, height: 0 };
+    }
+    if (offset + 2 > bytes.length - 2) return { width: 0, height: 0 };
     const length = bytes.readUInt16BE(offset);
-    if (length < 2 || offset + length > bytes.length) break;
+    if (length < 2 || offset + length > bytes.length - 2) {
+      return { width: 0, height: 0 };
+    }
     if (
       [
         0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce,
         0xcf,
       ].includes(marker)
     ) {
-      return {
-        height: bytes.readUInt16BE(offset + 3),
-        width: bytes.readUInt16BE(offset + 5),
-      };
+      if (length < 8) return { width: 0, height: 0 };
+      height = bytes.readUInt16BE(offset + 3);
+      width = bytes.readUInt16BE(offset + 5);
     }
     offset += length;
   }
@@ -828,19 +932,68 @@ function jpegDimensions(bytes: Buffer): { width: number; height: number } {
 
 function webpDimensions(bytes: Buffer): { width: number; height: number } {
   if (
-    bytes.length < 30 ||
+    bytes.length < 20 ||
     bytes.subarray(0, 4).toString() !== "RIFF" ||
-    bytes.subarray(8, 12).toString() !== "WEBP"
+    bytes.subarray(8, 12).toString() !== "WEBP" ||
+    bytes.readUInt32LE(4) + 8 !== bytes.length
   )
     return { width: 0, height: 0 };
-  const kind = bytes.subarray(12, 16).toString();
-  if (kind === "VP8X") {
-    return {
-      width: 1 + bytes.readUIntLE(24, 3),
-      height: 1 + bytes.readUIntLE(27, 3),
-    };
+  let offset = 12;
+  let canvas: { width: number; height: number } | undefined;
+  let image: { width: number; height: number } | undefined;
+  while (offset + 8 <= bytes.length) {
+    const kind = bytes.subarray(offset, offset + 4).toString("ascii");
+    const length = bytes.readUInt32LE(offset + 4);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + length;
+    const chunkEnd = dataEnd + (length & 1);
+    if (dataEnd > bytes.length || chunkEnd > bytes.length) {
+      return { width: 0, height: 0 };
+    }
+    if (kind === "VP8X") {
+      if (length !== 10 || canvas !== undefined) return { width: 0, height: 0 };
+      canvas = {
+        width: 1 + bytes.readUIntLE(dataStart + 4, 3),
+        height: 1 + bytes.readUIntLE(dataStart + 7, 3),
+      };
+    } else if (kind === "VP8 ") {
+      if (
+        length < 10 ||
+        !bytes
+          .subarray(dataStart + 3, dataStart + 6)
+          .equals(Buffer.from([0x9d, 0x01, 0x2a]))
+      ) {
+        return { width: 0, height: 0 };
+      }
+      image = {
+        width: bytes.readUInt16LE(dataStart + 6) & 0x3fff,
+        height: bytes.readUInt16LE(dataStart + 8) & 0x3fff,
+      };
+    } else if (kind === "VP8L") {
+      if (length < 5 || bytes[dataStart] !== 0x2f) {
+        return { width: 0, height: 0 };
+      }
+      const b0 = bytes[dataStart + 1] ?? 0;
+      const b1 = bytes[dataStart + 2] ?? 0;
+      const b2 = bytes[dataStart + 3] ?? 0;
+      const b3 = bytes[dataStart + 4] ?? 0;
+      image = {
+        width: 1 + b0 + ((b1 & 0x3f) << 8),
+        height: 1 + (b1 >> 6) + (b2 << 2) + ((b3 & 0x0f) << 10),
+      };
+    }
+    offset = chunkEnd;
   }
-  return { width: 0, height: 0 };
+  if (offset !== bytes.length || image === undefined) {
+    return { width: 0, height: 0 };
+  }
+  if (
+    canvas !== undefined &&
+    (canvas.width !== image.width || canvas.height !== image.height)
+  ) {
+    return { width: 0, height: 0 };
+  }
+  return canvas ?? image;
 }
 
 function safeProvenance(details: unknown): Record<string, unknown> {
