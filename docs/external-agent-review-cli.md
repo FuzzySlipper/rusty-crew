@@ -5,6 +5,10 @@ exact commit to the same durable Rusty Crew review workflow used by native Crew
 brains. It is a Node-only CLI: it does not require Den MCP discovery, a Crew
 brain session, or a fake session created for the external agent.
 
+The canonical submitter/reviewer decision tree and recovery contract is Den
+document `den-services/review-pointer-first-contract`. This guide is the
+external CLI specialization of that contract.
+
 ## Deployment Selection
 
 Always provide both the service URL and its expected deployment role. The role
@@ -144,6 +148,12 @@ Human output includes the
 submission id, selected deployment, exact SHA, phase, gate state, verdict, and
 durable adapter/terminal reasons when present.
 
+The normal durable phase vocabulary is `gate_pending`,
+`reviewer_dispatched`, `den_finalization_pending`, `reply_pending`, and
+`review_terminal`. Accepted or pending state is never review completion.
+Require terminal Crew status plus Den round/task readback before claiming the
+review finished.
+
 Exit codes:
 
 | Code | Meaning |
@@ -196,6 +206,14 @@ capability inventory and generated OpenAPI artifact expose these routes as
 - A pending reviewer phase means the deterministic service workflow is waiting
   on the reviewer. Poll the same submission; do not create a second submission
   for the same exact work.
+- Generic `send_agent_message`, `agent_round`, raw `reply_agent_message`, and
+  Codex app thread steering are collaboration/diagnostic surfaces. None creates,
+  completes, or repairs a managed review submission.
+- After Crew persists a reviewer result, attempts Den finalization, or returns
+  a missing/ambiguous completion receipt, reconcile the same submission and Den
+  round. Do not issue a second completion or finalization. Only an explicit
+  pre-persistence validation rejection that says no result was persisted permits
+  correcting and repeating the managed completion.
 
 The lower-level Den MCP review tools and the managed reviewer tool remain
 available for their intended internal paths. This CLI is the single green path

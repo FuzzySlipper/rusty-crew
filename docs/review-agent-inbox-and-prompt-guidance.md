@@ -5,6 +5,10 @@ Use this guide for a dedicated review agent whose profile sets
 owns the durable FIFO inbox, claim, expiry, reply correlation, and restart
 behavior.
 
+The canonical envelope decision tree and recovery rules are in Den document
+`den-services/review-pointer-first-contract`. This guide supplies the
+Rusty-Crew-specific profile prompt and tool spelling.
+
 The profile setting is persisted in the profile registry and profile runtime
 config. It is used when a new managed external binding is created. Changing the
 profile setting does not mutate an existing binding in place; the binding must
@@ -114,6 +118,7 @@ Managed Codex app-server sessions receive namespaced dynamic tools:
 | `rusty_crew.send_agent_message` | `recipient`, `body` | `correlationId`, `ttlSeconds` |
 | `rusty_crew.reply_agent_message` | `messageId`, `body` | `ttlSeconds` |
 | `rusty_crew.agent_round` | `recipient`, `body` | `correlationId`, `timeoutMs` |
+| `rusty_crew.submit_task_for_review` | `projectId`, `taskId`, `repository`, `commitSha`, `ref`, `requiredChecks`, `reviewSummaryMd` | `baseCommit`, `reviewer` |
 | `rusty_crew.complete_routed_review` | `verdict` | `taskId`, `commitSha`, `notes`, `evidence`, `priorFindingResolutions`, `newFindings` |
 
 Built-in Crew brains receive the same capabilities without the namespace:
@@ -124,6 +129,7 @@ Built-in Crew brains receive the same capabilities without the namespace:
 | `send_agent_message` | `toAddress`, `body` | `correlationId`, `requireWake`, `ttlSeconds` |
 | `reply_agent_message` | `messageId`, `body` | `ttlSeconds` |
 | `agent_round` | `toAddress`, `body` | `correlationId`, `timeoutMs` |
+| `submit_task_for_review` | `projectId`, `taskId`, `repository`, `commitSha`, `ref`, `requiredChecks`, `reviewSummaryMd` | `baseCommit`, `reviewer` |
 | `complete_routed_review` | `verdict` | `taskId`, `commitSha`, `notes`, `evidence`, `priorFindingResolutions`, `newFindings` |
 
 Both message tools default to a 300-second TTL and accept integer `ttlSeconds`

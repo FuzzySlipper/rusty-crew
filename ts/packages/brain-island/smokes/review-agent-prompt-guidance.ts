@@ -54,6 +54,8 @@ for (const heading of [
 
 assert.match(guidance, /no review result was persisted/);
 assert.match(guidance, /Never retry after Crew persists the result/);
+assert.match(guidance, /den-services\/review-pointer-first-contract/);
+assert.match(guidance, /rusty_crew\.submit_task_for_review/);
 
 const codexToolSpecs = CODEX_COORDINATION_DYNAMIC_TOOLS.flatMap((entry) =>
   entry.type === "namespace" ? entry.tools : [],
@@ -65,6 +67,7 @@ for (const tool of [
   "send_agent_message",
   "reply_agent_message",
   "agent_round",
+  "submit_task_for_review",
 ]) {
   assert.ok(codexTools.includes(tool), `Codex tool missing: ${tool}`);
   assert.ok(builtInTools.includes(tool), `built-in tool missing: ${tool}`);

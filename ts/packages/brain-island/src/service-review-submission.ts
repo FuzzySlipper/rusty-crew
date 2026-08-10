@@ -1678,8 +1678,8 @@ function reviewerRequestBody(record: ReviewSubmissionRecord): string {
     record.reviewSummaryMd,
     "",
     isExternalCliSubmission(record)
-      ? "Record findings and the verdict in Den, then call complete_routed_review. This was submitted by an external CLI; do not attempt a requester reply."
-      : "Record findings and the verdict in Den, then call complete_routed_review. Crew sends the one receipt-based reply to the requester.",
+      ? "Return findings and the verdict once through complete_routed_review. Crew owns Den finalization. This was submitted by an external CLI; do not attempt a requester reply."
+      : "Return findings and the verdict once through complete_routed_review. Crew owns Den finalization and sends the one receipt-based reply to the requester.",
   ].join("\n");
 }
 
