@@ -36,10 +36,23 @@ export class CrewSessionLifecycleError extends Error {
     readonly reasonCode: string,
     message: string,
     readonly retryable = false,
+    readonly partialOutcome?: CrewSessionLifecyclePartialOutcome,
   ) {
     super(message);
     this.name = "CrewSessionLifecycleError";
   }
+}
+
+export interface CrewSessionLifecyclePartialOutcome {
+  kind: "workspace_reconciled_forward" | "workspace_reconciliation_failed";
+  sessionId: SessionId;
+  requestedCwd: string;
+  canonicalCwd?: string;
+  canonicalRevision?: number;
+  authoredCwd?: string;
+  primaryError: string;
+  compensationError?: string;
+  reconciliationError?: string;
 }
 
 export interface CrewSessionLifecycleContext {
@@ -322,28 +335,161 @@ export async function switchCrewSessionWorkspace(
     });
     return { update, applyResult };
   } catch (error) {
-    await context
-      .writeRuntimeConfigFile(previousRuntimeConfig)
-      .catch(() => undefined);
-    if (update !== undefined && update.current.cwd !== update.previous.cwd) {
-      await context.bridge
-        .updateSessionWorkspace({
-          sessionId: input.sessionId,
-          cwd: update.previous.cwd,
-          expectedRevision: update.current.revision,
-          requestedAt: context.now(),
-        })
-        .catch(() => undefined);
+    if (update === undefined || update.current.cwd === update.previous.cwd) {
+      throw error;
     }
-    await context
-      .applyRuntimeConfigFromDisk({
+
+    const primaryError = errorMessage(error);
+    let compensationError: string | undefined;
+    try {
+      await context.bridge.updateSessionWorkspace({
+        sessionId: input.sessionId,
+        cwd: update.previous.cwd,
+        expectedRevision: update.current.revision,
+        requestedAt: context.now(),
+      });
+    } catch (compensationFailure) {
+      compensationError = errorMessage(compensationFailure);
+    }
+
+    let canonicalSession: SessionState;
+    try {
+      canonicalSession = await context.sessionById(input.sessionId);
+      if (canonicalSession.workspace === null) {
+        throw new Error("canonical session has no workspace state");
+      }
+    } catch (reconciliationFailure) {
+      throw workspaceReconciliationFailure({
+        input,
+        primaryError,
+        ...(compensationError === undefined ? {} : { compensationError }),
+        reconciliationError: errorMessage(reconciliationFailure),
+      });
+    }
+
+    const canonicalWorkspace = canonicalSession.workspace;
+    const reconciledRuntimeConfig = structuredClone(previousRuntimeConfig);
+    const reconciledSession = runtimeConfigSessionById(
+      reconciledRuntimeConfig,
+      input.sessionId,
+    );
+    if (reconciledSession === undefined) {
+      throw workspaceReconciliationFailure({
+        input,
+        primaryError,
+        ...(compensationError === undefined ? {} : { compensationError }),
+        canonicalCwd: canonicalWorkspace.cwd,
+        canonicalRevision: canonicalWorkspace.revision,
+        reconciliationError:
+          "authored runtime session disappeared during reconciliation",
+      });
+    }
+    reconciledSession.workspaceCwd = canonicalWorkspace.cwd;
+    delete reconciledSession.workspace_cwd;
+
+    try {
+      await assertValidRuntimeConfig(context, reconciledRuntimeConfig);
+      await context.writeRuntimeConfigFile(reconciledRuntimeConfig);
+    } catch (reconciliationFailure) {
+      throw workspaceReconciliationFailure({
+        input,
+        primaryError,
+        ...(compensationError === undefined ? {} : { compensationError }),
+        canonicalCwd: canonicalWorkspace.cwd,
+        canonicalRevision: canonicalWorkspace.revision,
+        reconciliationError: errorMessage(reconciliationFailure),
+      });
+    }
+
+    let settlementApplyError: string | undefined;
+    try {
+      await context.applyRuntimeConfigFromDisk({
         createMissingSessions: false,
-        eventType: "crew_session_workspace_change_rolled_back",
-        summaryPrefix: `Crew session ${input.sessionId} workspace change rolled back`,
-      })
-      .catch(() => undefined);
+        eventType:
+          compensationError === undefined
+            ? "crew_session_workspace_change_rolled_back"
+            : "crew_session_workspace_change_reconciled_forward",
+        summaryPrefix:
+          compensationError === undefined
+            ? `Crew session ${input.sessionId} workspace change rolled back`
+            : `Crew session ${input.sessionId} workspace change reconciled to canonical state`,
+      });
+    } catch (applyFailure) {
+      settlementApplyError = errorMessage(applyFailure);
+    }
+
+    if (compensationError !== undefined) {
+      throw new CrewSessionLifecycleError(
+        "session_workspace_change_reconciled_forward",
+        `Workspace switch failed to apply and rollback was rejected; canonical and authored state were reconciled at ${canonicalWorkspace.cwd}.`,
+        false,
+        {
+          kind: "workspace_reconciled_forward",
+          sessionId: input.sessionId,
+          requestedCwd: input.cwd,
+          canonicalCwd: canonicalWorkspace.cwd,
+          canonicalRevision: canonicalWorkspace.revision,
+          authoredCwd: canonicalWorkspace.cwd,
+          primaryError,
+          compensationError,
+          ...(settlementApplyError === undefined
+            ? {}
+            : { reconciliationError: settlementApplyError }),
+        },
+      );
+    }
     throw error;
   }
+}
+
+function workspaceReconciliationFailure(input: {
+  input: { sessionId: SessionId; cwd: string };
+  primaryError: string;
+  compensationError?: string;
+  canonicalCwd?: string;
+  canonicalRevision?: number;
+  authoredCwd?: string;
+  reconciliationError: string;
+}): CrewSessionLifecycleError {
+  return new CrewSessionLifecycleError(
+    "session_workspace_change_reconciliation_failed",
+    `Workspace switch failed and its authority reconciliation did not complete: ${input.reconciliationError}`,
+    true,
+    {
+      kind: "workspace_reconciliation_failed",
+      sessionId: input.input.sessionId,
+      requestedCwd: input.input.cwd,
+      ...(input.canonicalCwd === undefined
+        ? {}
+        : { canonicalCwd: input.canonicalCwd }),
+      ...(input.canonicalRevision === undefined
+        ? {}
+        : { canonicalRevision: input.canonicalRevision }),
+      ...(input.authoredCwd === undefined
+        ? {}
+        : { authoredCwd: input.authoredCwd }),
+      primaryError: input.primaryError,
+      ...(input.compensationError === undefined
+        ? {}
+        : { compensationError: input.compensationError }),
+      reconciliationError: input.reconciliationError,
+    },
+  );
+}
+
+function runtimeConfigSessionById(
+  value: unknown,
+  sessionId: SessionId,
+): Record<string, unknown> | undefined {
+  if (!isRecord(value) || !Array.isArray(value.sessions)) return undefined;
+  return value.sessions.find(
+    (entry): entry is Record<string, unknown> =>
+      isRecord(entry) && entrySessionId(entry) === sessionId,
+  );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function restoreProfileMcpBindingsForSession(

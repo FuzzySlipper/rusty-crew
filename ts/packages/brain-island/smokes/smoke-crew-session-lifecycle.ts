@@ -261,6 +261,41 @@ assert.deepEqual(
   "failed runtime application must compensate the canonical workspace mutation",
 );
 
+runtimeValue = runtimeConfigWithSession();
+workspaceUpdates.length = 0;
+const rejectedRollbackContext = lifecycleContext(new Set(), false, true, true);
+let partialOutcome: CrewSessionLifecycleError["partialOutcome"];
+await assert.rejects(
+  switchCrewSessionWorkspace(rejectedRollbackContext, {
+    sessionId: session.sessionId,
+    cwd: "/home/dev/reconciled-forward",
+    expectedRevision: 1,
+  }),
+  (error: unknown) => {
+    assert.ok(error instanceof CrewSessionLifecycleError);
+    assert.equal(
+      error.reasonCode,
+      "session_workspace_change_reconciled_forward",
+    );
+    partialOutcome = error.partialOutcome;
+    return true;
+  },
+);
+assert.deepEqual(workspaceUpdates, ["/home/dev/reconciled-forward", "/home"]);
+assert.equal(partialOutcome?.kind, "workspace_reconciled_forward");
+assert.equal(partialOutcome?.canonicalCwd, "/home/dev/reconciled-forward");
+assert.equal(partialOutcome?.authoredCwd, "/home/dev/reconciled-forward");
+assert.equal(
+  (runtimeValue.sessions as Array<Record<string, unknown>>)[0]?.workspaceCwd,
+  "/home/dev/reconciled-forward",
+  "rollback rejection must reconcile authored state to canonical state",
+);
+assert.equal(
+  (await rejectedRollbackContext.sessionById(session.sessionId)).workspace?.cwd,
+  "/home/dev/reconciled-forward",
+  "rollback rejection must leave canonical and authored workspace converged",
+);
+
 const api = await handleRustyViewChatRequest(
   {
     method: "POST",
@@ -303,7 +338,9 @@ function lifecycleContext(
   inFlightWakes: ReadonlySet<SessionId> = new Set(),
   failArchive = false,
   failApply = false,
+  failWorkspaceRollback = false,
 ): CrewSessionLifecycleContext {
+  let canonicalWorkspace = { ...session.workspace! };
   return {
     bridge: {
       archiveSession: async () => {
@@ -315,12 +352,16 @@ function lifecycleContext(
       getProfileRegistryRecord: async () => undefined,
       updateSessionWorkspace: async (request) => {
         workspaceUpdates.push(request.cwd);
-        const previous = session.workspace!;
+        if (failWorkspaceRollback && workspaceUpdates.length > 1) {
+          throw new Error("canonical rollback rejected");
+        }
+        const previous = canonicalWorkspace;
         const current = {
           cwd: request.cwd,
           revision: previous.revision + 1,
           updatedAt: request.requestedAt,
         };
+        canonicalWorkspace = current;
         return {
           previous,
           current,
@@ -354,7 +395,7 @@ function lifecycleContext(
       if (failApply) throw new Error("runtime apply failed");
       return {} as never;
     },
-    sessionById: async () => session,
+    sessionById: async () => ({ ...session, workspace: canonicalWorkspace }),
     appendChatEvent: async (_sessionId, event) => {
       order.push(event.kind);
       return {

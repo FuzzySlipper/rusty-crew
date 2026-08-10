@@ -17,6 +17,7 @@ import type {
   SessionId,
   SessionKind,
   SessionState,
+  SessionWorkspaceUpdateRecord,
   SubscriptionHandle,
 } from "@rusty-crew/contracts";
 import {
@@ -153,6 +154,7 @@ import {
 import {
   archiveCrewSession,
   createFreshCrewSession,
+  CrewSessionLifecycleError,
   switchCrewSessionWorkspace,
   type CrewSessionLifecycleContext,
 } from "./service-crew-session-lifecycle.js";
@@ -4093,13 +4095,30 @@ function createServiceControlExecutor(
       ) {
         throw new Error("expectedRevision must be a positive integer");
       }
-      const { update: result } = await withRuntimeConfigMutation(() =>
-        switchCrewSessionWorkspace(crewSessionLifecycleContext(state), {
-          sessionId,
-          cwd,
-          expectedRevision: Number(expectedRevision),
-        }),
-      );
+      let result: SessionWorkspaceUpdateRecord;
+      try {
+        ({ update: result } = await withRuntimeConfigMutation(() =>
+          switchCrewSessionWorkspace(crewSessionLifecycleContext(state), {
+            sessionId,
+            cwd,
+            expectedRevision: Number(expectedRevision),
+          }),
+        ));
+      } catch (error) {
+        if (
+          error instanceof CrewSessionLifecycleError &&
+          error.partialOutcome !== undefined
+        ) {
+          return {
+            status: "failed",
+            summary: error.message,
+            reasonCode: error.reasonCode,
+            affectedIds: { sessionId },
+            result: error.partialOutcome,
+          };
+        }
+        throw error;
+      }
       return {
         status: "completed",
         summary: `session ${sessionId} workspace is ${result.current.cwd}`,
