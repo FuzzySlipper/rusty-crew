@@ -263,7 +263,7 @@ export async function createOpenAiResponsesBrainHost(
         (context.profile.profile.brain?.strategy === "roleplay_narrator" ||
           context.profile.profile.roleplayNarrator !== undefined);
       const roleplayMetadata = roleplayCompactionEnabled
-        ? await context.bridge.getRoleplaySessionMetadata(wake.sessionId)
+        ? await context.bridge.getRoleplaySessionMetadata?.(wake.sessionId)
         : undefined;
       const input = {
         wakeId: wake.wakeId,

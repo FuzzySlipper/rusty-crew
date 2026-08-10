@@ -210,6 +210,7 @@ test("Responses narrator host forwards the versioned Roleplay adapter context", 
 
   assert.deepEqual(captured?.compactionDomainContext, {
     schemaVersion: 1,
+    deriveSourceRefs: false,
     retentionTiers: [],
     directorsNotes: [],
     extractionRequests: [],

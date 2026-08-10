@@ -17,7 +17,7 @@ restart, preserved durable transcript counts across hydration, and exercised an
 explicit failed-compaction path without replacing the previous provider state.
 Temporary test profiles and providers were archived after the run.
 
-## Roleplay narrator quality probe
+## Initial Roleplay narrator quality probe
 
 The Roleplay narrator quality probe ran against the same debug service after it
 was updated to exact source revision
@@ -48,3 +48,30 @@ across phase-isolated narrator wakes. The follow-up preserves Crew ownership of
 canonical transcript, lifecycle, artifacts, and safe-boundary selection. It
 explicitly excludes write-time deletion or mutation of canonical transcript and
 tool telemetry.
+
+## Passing narrator compaction and restart proof
+
+Task 6754 was then implemented. The narrator wrapper now preserves the compose
+phase provider state across logical turns, and phase construction passes current
+scene and recalled-lore evidence into the Roleplay strategy. Rust resolves the
+evidence to narrative source references before the safe boundary and validates
+the resulting context before producing an artifact.
+
+The corrected quality probe ran on debug service revision
+`8a19c8a893b5182e9383d1ca53f3f4572ca5caee` with the real
+`deepseek-flash` provider. It established eight multi-phase narrator turns,
+completed manual scene-aware compaction artifact
+`manual_quality_quality_spike_1786355899816_1`, paused, restarted
+`rusty-crew-debug.service`, and submitted the continuation after hydration.
+The post-restart response:
+
+- recalled the silver locket;
+- recalled the serpent-and-rose crest / Northern Court connection;
+- remained anchored to the prior orchard scene; and
+- completed without technical artifacts in the narrative.
+
+The artifact used strategy `roleplay_scene_aware_compaction` revision
+`roleplay_scene_aware_v1`. Its preservation payload contained current scene and
+recalled lore director notes with validated `chat-message-*` provenance. The
+test profile and its session were deleted after the proof. The bounded provider
+fixture was archived separately after certification.

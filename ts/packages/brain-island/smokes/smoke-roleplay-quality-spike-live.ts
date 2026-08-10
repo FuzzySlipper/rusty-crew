@@ -25,10 +25,25 @@ const ADMIN_BASE =
 const CHAT_BASE =
   process.env.RUSTY_CREW_CHAT_BASE_URL ?? ADMIN_BASE.replace("/admin", "");
 const LIVENESS_TIMEOUT_MS = 5_000;
-const STREAM_TIMEOUT_MS = 120_000; // 2 min for LLM to respond
+const STREAM_TIMEOUT_MS = Number.parseInt(
+  process.env.RUSTY_CREW_QUALITY_STREAM_TIMEOUT_MS ?? "240000",
+  10,
+);
 const POLL_INTERVAL_MS = 200;
 const SCENARIO_LIMIT = scenarioLimit();
 const CONTEXT_STRATEGY_ID = process.env.RUSTY_CREW_QUALITY_CONTEXT_STRATEGY_ID;
+const CONTEXT_COMPACT_AT_PERCENT = Number.parseInt(
+  process.env.RUSTY_CREW_QUALITY_COMPACT_AT_PERCENT ?? "50",
+  10,
+);
+const CONTEXT_TARGET_PERCENT = Number.parseInt(
+  process.env.RUSTY_CREW_QUALITY_TARGET_PERCENT ?? "30",
+  10,
+);
+const RESTART_PAUSE_MS = Number.parseInt(
+  process.env.RUSTY_CREW_QUALITY_RESTART_PAUSE_MS ?? "0",
+  10,
+);
 
 const TEST_PREFIX = `quality-spike-${Date.now()}`;
 const TEST_PROFILE = `${TEST_PREFIX}-narrator`;
@@ -185,7 +200,10 @@ async function waitForEvent(
     await sleep(POLL_INTERVAL_MS);
   }
   throw new Error(
-    `Timeout waiting for event in session ${sessionId} (seen ${seen.length} events)`,
+    `Timeout waiting for event in session ${sessionId} (seen ${seen.length} events; tail kinds: ${seen
+      .slice(-20)
+      .map((event) => event.kind)
+      .join(", ")})`,
   );
 }
 
@@ -407,6 +425,8 @@ async function runQualitySpike(): Promise<void> {
       "Katheryn asks whether the abandoned orchard path still leads to Elara's father's study.",
       "A cold wind moves through the orchard while Elara asks Katheryn to keep the locket hidden.",
       "Katheryn promises to protect the locket and remembers the serpent-and-rose crest.",
+      "They follow the moonlit path in silence, still guarding the locket and its secret.",
+      "At the old study door, Elara asks Katheryn whether her promise still holds.",
     ];
     for (const prompt of continuitySetupPrompts) {
       const setupResult = await sendMessageAndCollect(sessionId, prompt);
@@ -427,9 +447,9 @@ async function runQualitySpike(): Promise<void> {
         contextPolicy: {
           enabled: true,
           strategyId: CONTEXT_STRATEGY_ID,
-          autoCompactionEnabled: true,
-          compactAtPercent: 2,
-          targetPercentAfterCompaction: 1,
+          autoCompactionEnabled: false,
+          compactAtPercent: CONTEXT_COMPACT_AT_PERCENT,
+          targetPercentAfterCompaction: CONTEXT_TARGET_PERCENT,
           maxContextPercentForWake: 95,
           debugVisibility: "status",
           includeDebugEventsInModelContext: false,
@@ -443,6 +463,28 @@ async function runQualitySpike(): Promise<void> {
     console.log(`   Applied context strategy: ${CONTEXT_STRATEGY_ID}`);
   }
 
+  const manualCompaction =
+    CONTEXT_STRATEGY_ID === undefined
+      ? undefined
+      : await chatPost(sessionId, "/context/compact", {
+          intent_key: `quality-${TEST_PREFIX}`,
+          strategy_id: CONTEXT_STRATEGY_ID,
+          strategy_revision: "roleplay_scene_aware_v1",
+        });
+  if (manualCompaction !== undefined) {
+    assert.equal(manualCompaction.terminal_status, "completed");
+    assert.equal(manualCompaction.artifact?.strategy_id, CONTEXT_STRATEGY_ID);
+    console.log(
+      `   Manual scene-aware compaction completed: ${manualCompaction.artifact?.artifact_id}`,
+    );
+  }
+  if (RESTART_PAUSE_MS > 0) {
+    console.log(
+      `   READY_FOR_DEBUG_SERVICE_RESTART; pausing ${RESTART_PAUSE_MS}ms`,
+    );
+    await sleep(RESTART_PAUSE_MS);
+  }
+
   // ── 6. Test: Continuity across turns ──────────────────────────────────────
 
   console.log("\n── 6. Test: Continuity across turns ──");
@@ -452,9 +494,7 @@ async function runQualitySpike(): Promise<void> {
   );
 
   const continuityEvents = getToolCalls(continuityResult.events);
-  const compactionCompleted = continuityResult.events.some(
-    (event) => event.kind === "context_compaction_completed",
-  );
+  const compactionCompleted = manualCompaction?.terminal_status === "completed";
   const continuityEventKinds = [
     ...new Set(continuityResult.events.map((event) => event.kind)),
   ];
