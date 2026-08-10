@@ -282,6 +282,7 @@ async function runQualitySpike(): Promise<void> {
     displayName: "Quality Spike Narrator",
     providerAlias: process.env.RUSTY_CREW_QUALITY_PROVIDER_ALIAS ?? undefined,
     kind: "full",
+    workspaceCwd: process.cwd(),
     brain: {
       module: "chat-completions",
       strategy: "roleplay_narrator",
@@ -440,6 +441,9 @@ async function runQualitySpike(): Promise<void> {
   const compactionCompleted = continuityResult.events.some(
     (event) => event.kind === "context_compaction_completed",
   );
+  const continuityEventKinds = [
+    ...new Set(continuityResult.events.map((event) => event.kind)),
+  ];
   const sceneStateUpdated = continuityEvents.some(
     (e) =>
       e.kind === "tool_call_completed" && toolName(e) === "update_scene_state",
@@ -449,6 +453,15 @@ async function runQualitySpike(): Promise<void> {
   );
   console.log(`   Scene state updated: ${sceneStateUpdated}`);
   console.log(`   Context compaction completed: ${compactionCompleted}`);
+  console.log(`   Event kinds: ${continuityEventKinds.join(", ")}`);
+  const compactionFailure = continuityResult.events.find(
+    (event) => event.kind === "context_compaction_failed",
+  );
+  if (compactionFailure !== undefined) {
+    console.log(
+      `   Compaction failure: ${JSON.stringify(compactionFailure.payload)}`,
+    );
+  }
 
   const continuityNarrative = getAssistantText(continuityResult.events);
   const referencesLocket = /locket/i.test(continuityNarrative);

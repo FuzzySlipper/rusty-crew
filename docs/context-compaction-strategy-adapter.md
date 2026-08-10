@@ -166,3 +166,15 @@ fact-extraction recall, and voice/emotional selection remain empirical quality
 concerns and must be evaluated with live narrator conversations; deterministic
 fixtures establish lifecycle safety but do not by themselves certify prose
 quality.
+
+The task 6618 live narrator probe also identified a phase-isolation limitation.
+The current narrator creates a fresh provider host for each explore and compose
+phase over the same frozen wake. When context pressure is forced during that
+wake, the phase-local projection has no completed historical exchange before
+Crew's safe boundary. Crew therefore fails compaction retryably instead of
+touching the frozen request or pending tool context. This is the correct safety
+behavior, but it means the adapter cannot yet demonstrate useful live narrator
+compaction. Rusty Roleplay task 6754 owns the follow-up design for a durable,
+source-ref-bound continuity projection across narrator phases and restart. It
+must not implement the old write-time tool-call excision proposal from task
+3438.
