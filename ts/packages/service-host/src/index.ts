@@ -217,6 +217,9 @@ function defaultServiceAdapterFactories(): ServiceAdapterFactories {
         pollIntervalMs: input.pollIntervalMs,
         pollTimeoutSeconds: input.pollTimeoutSeconds,
         updateLimit: input.updateLimit,
+        botUserId: input.botUserId,
+        botUsername: input.botUsername,
+        participationMode: input.participationMode,
         now: input.now,
         ingest: async (message) => {
           return input.onInbound(message);

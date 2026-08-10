@@ -52,6 +52,12 @@ export declare class NativeBridgeBinding {
   deleteServiceCredentialJson(deleteJson: string): string
   linkModelProviderCredentialJson(linkJson: string): string
   unlinkModelProviderCredentialJson(unlinkJson: string): string
+  putInstallDiplomatBindingJson(inputJson: string): string
+  rebindInstallDiplomatJson(inputJson: string): string
+  setInstallDiplomatBindingStatusJson(inputJson: string): string
+  getInstallDiplomatBindingJson(bindingId: string): string
+  listInstallDiplomatBindingsJson(inputJson: string): string
+  planTelegramDiplomatIngressJson(inputJson: string): string
   modelProviderRefreshImpactJson(requestJson: string): string
   planModelProviderRefreshJson(requestJson: string): string
   saveMessageSlotJson(inputJson: string): void

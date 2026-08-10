@@ -502,6 +502,7 @@ export interface McpSurfaceManagerPort {
 }
 
 export interface TelegramBotApiClient {
+  getMe?(): Promise<unknown> | unknown;
   getUpdates?(request?: unknown): Promise<unknown[]> | unknown[];
   sendMessage(request: unknown): Promise<unknown> | unknown;
 }
@@ -520,6 +521,16 @@ export interface TelegramChannelConnectorPort {
     bindingCount: number;
     lastPollAt?: string;
     lastError?: string;
+    botIdentity?: { userId: string; username?: string; displayLabel?: string };
+    candidates?: Array<{
+      externalChatId: string;
+      externalThreadId?: string;
+      chatType: string;
+      title?: string;
+      username?: string;
+      lastObservedAt: string;
+      lastUpdateId: number;
+    }>;
   };
 }
 
@@ -531,6 +542,9 @@ export interface TelegramConnectorFactoryInput {
   pollIntervalMs: number;
   updateLimit: number;
   ttlMs: number;
+  botUserId?: string;
+  botUsername?: string;
+  participationMode?: "mention_or_reply" | "topic_human_messages";
   offsetStorePath: string;
   terminalStorePath: string;
   bindings(): readonly ChannelBindingRecord[];
@@ -572,7 +586,9 @@ export type ChannelIngressResult =
         | "no_binding"
         | "ambiguous"
         | "inactive_binding"
-        | "denied";
+        | "denied"
+        | "loop_terminated"
+        | "rate_limited";
       reason: string;
       reasonCode?: string;
       correlationId?: string;

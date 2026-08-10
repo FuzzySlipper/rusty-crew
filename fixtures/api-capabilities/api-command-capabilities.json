@@ -2007,6 +2007,116 @@
         "public": true
       },
       {
+        "id": "admin.telegram_diplomat.read",
+        "method": "GET",
+        "path_template": "/v1/admin/telegram-diplomat",
+        "description": "Read Telegram diplomat configuration, redacted credential state, bot identity, discovered chat and topic candidates, bindings, and connector diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.credential.update",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/credential",
+        "description": "Create or rotate the Telegram bot token in the service credential store and reload the connector.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.reload",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/reload",
+        "description": "Reload the Telegram connector from the current service credential and durable bindings.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service", "config"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.bindings.create",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings",
+        "description": "Bind an identified install bot and exact Telegram chat or topic to one full Crew session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service", "session"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.bindings.read",
+        "method": "GET",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}",
+        "description": "Read one exact session-scoped Telegram diplomat binding.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "session"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.bindings.move",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/move",
+        "description": "Move only the Telegram surface binding to another exact full session.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service", "session"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.bindings.relabel",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/relabel",
+        "description": "Relabel the installation represented by a diplomat binding without changing its session, profile, or workspace.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service", "session"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.bindings.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/pause",
+        "description": "Pause one Telegram diplomat binding with revision protection.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service", "session"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.bindings.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/resume",
+        "description": "Resume one Telegram diplomat binding with revision protection.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service", "session"],
+        "public": true
+      },
+      {
+        "id": "admin.telegram_diplomat.bindings.remove",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/remove",
+        "description": "Remove one Telegram diplomat binding without archiving its session or changing a profile.",
+        "auth": "admin",
+        "mutation": "control",
+        "stability": "stable",
+        "tags": ["service", "session"],
+        "public": true
+      },
+      {
         "id": "admin.storage.query_catalog",
         "method": "GET",
         "path_template": "/v1/admin/storage/query-catalog",
@@ -3954,6 +4064,76 @@
         "method": "POST",
         "path_template": "/v1/admin/profiles/registry/{profile_id}/runtime-config/apply",
         "route_id": "admin.profile_registry.write",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.read",
+        "method": "GET",
+        "path_template": "/v1/admin/telegram-diplomat",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.credential.update",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/credential",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.reload",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/reload",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.bindings.create",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.bindings.read",
+        "method": "GET",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.bindings.move",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/move",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.bindings.relabel",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/relabel",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.bindings.pause",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/pause",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.bindings.resume",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/resume",
+        "route_id": "admin.telegram_diplomat",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "admin.telegram_diplomat.bindings.remove",
+        "method": "POST",
+        "path_template": "/v1/admin/telegram-diplomat/bindings/{binding_id}/remove",
+        "route_id": "admin.telegram_diplomat",
         "auth_phase": "after_auth"
       },
       {

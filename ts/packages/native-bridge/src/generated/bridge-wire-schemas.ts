@@ -5605,6 +5605,107 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_NormalizedExternalRuntimeEvent",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord>": {
+      "items": {
+        "properties": {
+          "adapterId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "bindingId": {
+            "type": "string"
+          },
+          "botUserId": {
+            "type": "string"
+          },
+          "botUsername": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "degradedReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "externalChatId": {
+            "type": "string"
+          },
+          "externalThreadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installationId": {
+            "type": "string"
+          },
+          "installationLabel": {
+            "type": "string"
+          },
+          "instanceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "participationMode": {
+            "enum": [
+              "mention_or_reply",
+              "topic_human_messages"
+            ],
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schemaVersion": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "paused",
+              "needs_rebind",
+              "removed"
+            ],
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "bindingId",
+          "revision",
+          "installationId",
+          "installationLabel",
+          "adapterId",
+          "botUserId",
+          "botUsername",
+          "agentId",
+          "sessionId",
+          "externalChatId",
+          "participationMode",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_InstallDiplomatBindingRecord",
+      "type": "array"
+    },
     "alloc::vec::Vec<rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord>": {
       "items": {
         "properties": {
@@ -8786,6 +8887,107 @@ export const bridgeWireSchemaArtifact = {
         "updatedAt"
       ],
       "title": "Nullable_ExternalTurnCorrelation",
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "core::option::Option<rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord>": {
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "botUserId": {
+          "type": "string"
+        },
+        "botUsername": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "degradedReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "externalChatId": {
+          "type": "string"
+        },
+        "externalThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "installationId": {
+          "type": "string"
+        },
+        "installationLabel": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participationMode": {
+          "enum": [
+            "mention_or_reply",
+            "topic_human_messages"
+          ],
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "paused",
+            "needs_rebind",
+            "removed"
+          ],
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "bindingId",
+        "revision",
+        "installationId",
+        "installationLabel",
+        "adapterId",
+        "botUserId",
+        "botUsername",
+        "agentId",
+        "sessionId",
+        "externalChatId",
+        "participationMode",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "Nullable_InstallDiplomatBindingRecord",
       "type": [
         "object",
         "null"
@@ -23429,6 +23631,400 @@ export const bridgeWireSchemaArtifact = {
       "title": "NormalizedExternalRuntimeEvent",
       "type": "object"
     },
+    "rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord": {
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "botUserId": {
+          "type": "string"
+        },
+        "botUsername": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "degradedReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "externalChatId": {
+          "type": "string"
+        },
+        "externalThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "installationId": {
+          "type": "string"
+        },
+        "installationLabel": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participationMode": {
+          "enum": [
+            "mention_or_reply",
+            "topic_human_messages"
+          ],
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "active",
+            "paused",
+            "needs_rebind",
+            "removed"
+          ],
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "bindingId",
+        "revision",
+        "installationId",
+        "installationLabel",
+        "adapterId",
+        "botUserId",
+        "botUsername",
+        "agentId",
+        "sessionId",
+        "externalChatId",
+        "participationMode",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "title": "InstallDiplomatBindingRecord",
+      "type": "object"
+    },
+    "rusty_crew_core_protocol::install_diplomat::TelegramDiplomatIngressPlan": {
+      "properties": {
+        "binding": {
+          "properties": {
+            "adapterId": {
+              "type": "string"
+            },
+            "agentId": {
+              "type": "string"
+            },
+            "bindingId": {
+              "type": "string"
+            },
+            "botUserId": {
+              "type": "string"
+            },
+            "botUsername": {
+              "type": "string"
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "degradedReason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "externalChatId": {
+              "type": "string"
+            },
+            "externalThreadId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "installationId": {
+              "type": "string"
+            },
+            "installationLabel": {
+              "type": "string"
+            },
+            "instanceId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "participationMode": {
+              "enum": [
+                "mention_or_reply",
+                "topic_human_messages"
+              ],
+              "type": "string"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "schemaVersion": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "active",
+                "paused",
+                "needs_rebind",
+                "removed"
+              ],
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "bindingId",
+            "revision",
+            "installationId",
+            "installationLabel",
+            "adapterId",
+            "botUserId",
+            "botUsername",
+            "agentId",
+            "sessionId",
+            "externalChatId",
+            "participationMode",
+            "status",
+            "createdAt",
+            "updatedAt"
+          ],
+          "type": "object"
+        },
+        "crewCorrelationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "enum": [
+            "routed",
+            "ignored",
+            "binding_unavailable",
+            "loop_terminated",
+            "rate_limited"
+          ],
+          "type": "string"
+        },
+        "interaction": {
+          "properties": {
+            "bindingId": {
+              "type": "string"
+            },
+            "botDepth": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "botMessageCount": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "botMessageTimestamps": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "botPairKey": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "crewCorrelationId": {
+              "type": "string"
+            },
+            "deadlineAt": {
+              "type": "string"
+            },
+            "interactionId": {
+              "type": "string"
+            },
+            "lastExternalMessageId": {
+              "type": "string"
+            },
+            "lastSender": {
+              "properties": {
+                "displayLabel": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "externalUserId": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "human",
+                    "bot",
+                    "sender_chat"
+                  ],
+                  "type": "string"
+                },
+                "username": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "externalUserId"
+              ],
+              "type": "object"
+            },
+            "revision": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "rootExternalMessageId": {
+              "type": "string"
+            },
+            "schemaVersion": {
+              "type": "string"
+            },
+            "terminalReason": {
+              "enum": [
+                "depth_exceeded",
+                "message_budget_exceeded",
+                "interaction_expired",
+                "bot_pair_rate_limited",
+                "binding_unavailable",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "updatedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "interactionId",
+            "bindingId",
+            "revision",
+            "rootExternalMessageId",
+            "lastExternalMessageId",
+            "lastSender",
+            "botDepth",
+            "botMessageCount",
+            "botMessageTimestamps",
+            "crewCorrelationId",
+            "deadlineAt",
+            "createdAt",
+            "updatedAt"
+          ],
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "reasonCode": {
+          "type": "string"
+        },
+        "replyToExternalMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sender": {
+          "properties": {
+            "displayLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "externalUserId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "human",
+                "bot",
+                "sender_chat"
+              ],
+              "type": "string"
+            },
+            "username": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "externalUserId"
+          ],
+          "type": "object"
+        },
+        "targetSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "decision",
+        "reasonCode",
+        "binding",
+        "sender"
+      ],
+      "title": "TelegramDiplomatIngressPlan",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::memory_space::BackgroundMemoryAutoMutationPlan": {
       "properties": {
         "accepted_count": {
@@ -27942,6 +28538,7 @@ export const bridgeWireSchemaArtifact = {
     "get_external_runtime": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>",
     "get_external_runtime_certification": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord>",
     "get_external_turn": "core::option::Option<rusty_crew_core_protocol::external_runtime::ExternalTurnCorrelation>",
+    "get_install_diplomat_binding": "core::option::Option<rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord>",
     "get_lore_entry": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreRecord>",
     "get_lore_layer": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord>",
     "get_lore_layer_config": "core::option::Option<rusty_crew_core_persistence::contracts::RoleplayLoreLayerConfigRecord>",
@@ -27963,6 +28560,7 @@ export const bridgeWireSchemaArtifact = {
     "list_external_bindings": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalAgentBinding>",
     "list_external_runtime_certifications": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeCertificationRecord>",
     "list_external_runtimes": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalRuntimeRegistration>",
+    "list_install_diplomat_bindings": "alloc::vec::Vec<rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord>",
     "list_lore_layers": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreLayerRecord>",
     "list_pending_external_interactions": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord>",
     "list_recall_traces": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::LoreRecallTraceRecord>",
@@ -28002,12 +28600,14 @@ export const bridgeWireSchemaArtifact = {
     "plan_roleplay_session_lifecycle": "rusty_crew_roleplay_core::RoleplaySessionLifecyclePlan",
     "plan_runtime_config": "rusty_crew_core_config::RuntimeConfigPlan",
     "plan_runtime_graph": "rusty_crew_core_config::runtime_graph::RuntimeGraphPlan",
+    "plan_telegram_diplomat_ingress": "rusty_crew_core_protocol::install_diplomat::TelegramDiplomatIngressPlan",
     "plan_tool_availability": "rusty_crew_core_tool_registry::ToolAvailabilityPlan",
     "plan_web_browser_resource_policy": "rusty_crew_core_tool_registry::WebBrowserResourcePolicyPlan",
     "prepare_external_agent_session_creation": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "progress_runtime_activity": "rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord",
     "promote_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
     "put_agent_route": "rusty_crew_core_protocol::external_runtime::AgentRouteRecord",
+    "put_install_diplomat_binding": "rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord",
     "put_roleplay_character": "rusty_crew_core_persistence::contracts::RoleplayCharacterRecord",
     "put_roleplay_import": "rusty_crew_core_persistence::contracts::RoleplayImportRecord",
     "put_roleplay_player_persona": "rusty_crew_core_persistence::contracts::RoleplayPlayerPersonaRecord",
@@ -28030,6 +28630,7 @@ export const bridgeWireSchemaArtifact = {
     "read_chat_session": "rusty_crew_core_persistence::contracts::ChatSessionReadResult",
     "read_conversation_tree": "rusty_crew_core_persistence::contracts::ConversationTreeReadResult",
     "read_roleplay_scene_state": "rusty_crew_roleplay_core::RoleplaySceneStateReadOutput",
+    "rebind_install_diplomat": "rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord",
     "recall_lore": "rusty_crew_core_persistence::contracts::LoreRecallResult",
     "record_external_agent_session_creation_failure": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
     "record_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
@@ -28066,6 +28667,7 @@ export const bridgeWireSchemaArtifact = {
     "select_active_chat_message_variant": "rusty_crew_core_persistence::contracts::SelectActiveChatMessageVariantResult",
     "select_active_conversation_branch": "rusty_crew_core_persistence::contracts::SelectActiveBranchResult",
     "select_active_message_variant": "rusty_crew_core_persistence::contracts::SelectActiveVariantResult",
+    "set_install_diplomat_binding_status": "rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord",
     "set_lore_layer_config": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerConfigRecord",
     "settle_runtime_activity_wake": "alloc::vec::Vec<rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord>",
     "start_roleplay_narrator_turn": "rusty_crew_roleplay_core::RoleplayNarratorTurnReceipt",

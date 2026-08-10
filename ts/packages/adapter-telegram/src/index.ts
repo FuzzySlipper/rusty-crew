@@ -115,6 +115,7 @@ export interface TelegramSendMessageRequest {
 }
 
 export interface TelegramBotApiClient {
+  getMe?(): Promise<TelegramUser> | TelegramUser;
   getUpdates?(
     request?: TelegramGetUpdatesRequest,
   ): Promise<TelegramUpdate[]> | TelegramUpdate[];
@@ -201,6 +202,14 @@ export function createTelegramBotApiHttpClient(
     `${baseUrl}/file/bot${token}/${filePath.replace(/^\/+/, "")}`;
 
   return {
+    async getMe() {
+      return telegramApiRequest<TelegramUser>(fetchImpl, {
+        url: apiUrl("getMe"),
+        body: {},
+        timeoutMs,
+        resultName: "getMe",
+      });
+    },
     async getUpdates(request = {}) {
       return telegramApiRequest<TelegramUpdate[]>(fetchImpl, {
         url: apiUrl("getUpdates"),
@@ -614,6 +623,12 @@ export interface TelegramConnectorDiagnostics {
   lastUpdateId?: number;
   nextOffset?: number;
   lastError?: string;
+  botIdentity?: {
+    userId: string;
+    username?: string;
+    displayLabel?: string;
+  };
+  candidates: TelegramDiplomatSurfaceCandidate[];
   inbound: {
     routed: number;
     unbound: number;
@@ -651,6 +666,16 @@ export interface TelegramConnectorDiagnostics {
     bytesStored: number;
     lastError?: string;
   };
+}
+
+export interface TelegramDiplomatSurfaceCandidate {
+  externalChatId: string;
+  externalThreadId?: string;
+  chatType: string;
+  title?: string;
+  username?: string;
+  lastObservedAt: string;
+  lastUpdateId: number;
 }
 
 export class TelegramChannelConnector {
@@ -699,6 +724,8 @@ export class TelegramChannelConnector {
   #nextOffset: number | undefined;
   #lastError: string | undefined;
   #pollCount = 0;
+  #botIdentity: TelegramConnectorDiagnostics["botIdentity"];
+  #candidates = new Map<string, TelegramDiplomatSurfaceCandidate>();
   #inboundAttempts = new Map<number, number>();
   #inbound = {
     routed: 0,
@@ -803,6 +830,23 @@ export class TelegramChannelConnector {
     if (this.#running) return;
     this.#running = true;
     this.#nextOffset = await this.#offsetStore.read();
+    if (this.#bot.getMe !== undefined) {
+      try {
+        const identity = await this.#bot.getMe();
+        this.#botIdentity = {
+          userId: String(identity.id),
+          username: identity.username,
+          displayLabel:
+            [identity.first_name, identity.last_name]
+              .filter(Boolean)
+              .join(" ") || undefined,
+        };
+      } catch (error) {
+        this.#lastError = telegramErrorMessage(error);
+        this.#running = false;
+        return;
+      }
+    }
     this.#schedule(0);
   }
 
@@ -910,6 +954,10 @@ export class TelegramChannelConnector {
       lastUpdateId: this.#lastUpdateId,
       nextOffset: this.#nextOffset,
       lastError: this.#lastError,
+      botIdentity: this.#botIdentity,
+      candidates: [...this.#candidates.values()].sort((left, right) =>
+        right.lastObservedAt.localeCompare(left.lastObservedAt),
+      ),
       inbound: { ...this.#inbound },
       outbound: { ...this.#outbound },
       media: { ...this.#media },
@@ -953,6 +1001,7 @@ export class TelegramChannelConnector {
   ): Promise<"advanced" | "retry_pending"> {
     const updateOffset = update.update_id + 1;
     try {
+      this.#observeCandidate(update);
       const updateShape = telegramUpdateShape(update);
       const binding = this.#normalizationBinding(update);
       let message = this.#adapter.normalizeUpdate(update, {
@@ -1028,11 +1077,34 @@ export class TelegramChannelConnector {
     }
   }
 
+  #observeCandidate(update: TelegramUpdate): void {
+    const message =
+      update.message ??
+      update.edited_message ??
+      update.channel_post ??
+      update.edited_channel_post;
+    if (message === undefined) return;
+    const externalChatId = String(message.chat.id);
+    const externalThreadId =
+      message.message_thread_id === undefined
+        ? undefined
+        : String(message.message_thread_id);
+    this.#candidates.set(`${externalChatId}:${externalThreadId ?? ""}`, {
+      externalChatId,
+      externalThreadId,
+      chatType: message.chat.type,
+      title: message.chat.title,
+      username: message.chat.username,
+      lastObservedAt: this.#now(),
+      lastUpdateId: update.update_id,
+    });
+  }
+
   #shouldParticipate(message: NormalizedChannelInboundMessage): boolean {
     if (this.#participationMode === "all_delivered") return true;
     const addressed = telegramMessageAddressesBot(message, {
-      botUserId: this.#botUserId,
-      botUsername: this.#botUsername,
+      botUserId: this.#botIdentity?.userId ?? this.#botUserId,
+      botUsername: this.#botIdentity?.username ?? this.#botUsername,
     });
     if (message.author.isBot) {
       return addressed || (this.#isCorrelatedBotMessage?.(message) ?? false);
@@ -1304,11 +1376,13 @@ export class TelegramChannelConnector {
         this.#inbound.ambiguous += 1;
         return;
       case "telegram_bot_pair_rate_limited":
+      case "rate_limited":
         this.#inbound.rateLimited += 1;
         return;
       case "telegram_bot_loop_depth_exceeded":
       case "telegram_bot_interaction_expired":
       case "telegram_bot_interaction_terminal":
+      case "loop_terminated":
         this.#inbound.loopTerminated += 1;
         return;
       case "no_binding":
@@ -1895,6 +1969,8 @@ function isTerminalTelegramIngestStatus(status: string): boolean {
     "no_binding",
     "inactive_binding",
     "denied",
+    "rate_limited",
+    "loop_terminated",
     "telegram_bot_pair_rate_limited",
     "telegram_bot_loop_depth_exceeded",
     "telegram_bot_interaction_expired",

@@ -101,6 +101,7 @@ import { createNativeBridgeRuntimeActivityMethods } from "./runtime-activity-wra
 import { createNativeBridgeReviewSubmissionMethods } from "./review-submission-wrappers.js";
 import { createNativeBridgeProfileProviderMethods } from "./profile-provider-wrappers.js";
 import { createNativeBridgeServiceCredentialMethods } from "./service-credential-wrappers.js";
+import { createNativeBridgeInstallDiplomatMethods } from "./install-diplomat-wrappers.js";
 import {
   toNativeModelProviderRecord,
   toNativeModelProviderRefreshImpact,
@@ -237,6 +238,7 @@ import type {
 } from "@rusty-crew/contracts";
 
 export * from "./public-api.js";
+export type * from "./install-diplomat-public-api.js";
 import type {
   NativeSessionConfigInput,
   BridgeBufferClient,
@@ -791,6 +793,12 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     deleteServiceCredential: unavailable("initialize_engine"),
     linkModelProviderCredential: unavailable("initialize_engine"),
     unlinkModelProviderCredential: unavailable("initialize_engine"),
+    putInstallDiplomatBinding: unavailable("initialize_engine"),
+    rebindInstallDiplomat: unavailable("initialize_engine"),
+    setInstallDiplomatBindingStatus: unavailable("initialize_engine"),
+    getInstallDiplomatBinding: unavailable("initialize_engine"),
+    listInstallDiplomatBindings: unavailable("initialize_engine"),
+    planTelegramDiplomatIngress: unavailable("initialize_engine"),
     modelProviderRefreshImpact: unavailable("initialize_engine"),
     planModelProviderRefresh: unavailable("initialize_engine"),
     putRoleplayCharacter: unavailable("initialize_engine"),
@@ -1684,6 +1692,7 @@ function createNativeBridgeModule(
     ...createNativeBridgeReviewSubmissionMethods(binding),
     ...createNativeBridgeProfileProviderMethods(binding),
     ...createNativeBridgeServiceCredentialMethods(binding),
+    ...createNativeBridgeInstallDiplomatMethods(binding),
     ...createNativeBridgeRoleplayMethods(binding),
     ...createNativeBridgeRoleplayProposalMethods(binding),
     ...createNativeBridgeRoleplayMechanicMethods(binding),

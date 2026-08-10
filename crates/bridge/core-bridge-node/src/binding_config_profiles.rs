@@ -390,6 +390,95 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn put_install_diplomat_binding_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<InstallDiplomatBindingWrite>(
+            &input_json,
+            "install diplomat binding write",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .put_install_diplomat_binding(input)
+                .map_err(to_napi_error)?,
+            "install diplomat binding record",
+        )
+    }
+
+    #[napi]
+    pub fn rebind_install_diplomat_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<InstallDiplomatRebindRequest>(
+            &input_json,
+            "install diplomat rebind request",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .rebind_install_diplomat(input)
+                .map_err(to_napi_error)?,
+            "install diplomat binding record",
+        )
+    }
+
+    #[napi]
+    pub fn set_install_diplomat_binding_status_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<InstallDiplomatBindingStatusUpdate>(
+            &input_json,
+            "install diplomat binding status update",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .set_install_diplomat_binding_status(input)
+                .map_err(to_napi_error)?,
+            "install diplomat binding record",
+        )
+    }
+
+    #[napi]
+    pub fn get_install_diplomat_binding_json(&self, binding_id: String) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .get_install_diplomat_binding(&binding_id)
+                .map_err(to_napi_error)?,
+            "install diplomat binding record",
+        )
+    }
+
+    #[napi]
+    pub fn list_install_diplomat_bindings_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<InstallDiplomatBindingQuery>(
+            &input_json,
+            "install diplomat binding query",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_install_diplomat_bindings(&input)
+                .map_err(to_napi_error)?,
+            "install diplomat binding records",
+        )
+    }
+
+    #[napi]
+    pub fn plan_telegram_diplomat_ingress_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<TelegramDiplomatIngressRequest>(
+            &input_json,
+            "telegram diplomat ingress request",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .plan_telegram_diplomat_ingress(input)
+                .map_err(to_napi_error)?,
+            "telegram diplomat ingress plan",
+        )
+    }
+
+    #[napi]
     pub fn model_provider_refresh_impact_json(&self, request_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let request = parse_json::<ModelProviderRefreshImpactRequest>(

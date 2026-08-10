@@ -68,6 +68,7 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_TELEGRAM_UPDATE_LIMIT?: string;
   RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS?: string;
   RUSTY_CREW_TELEGRAM_ADAPTER_ID?: string;
+  RUSTY_CREW_TELEGRAM_CREDENTIAL_ID?: string;
   RUSTY_CREW_STORAGE_BACKEND?: string;
   RUSTY_CREW_SQLITE_PATH?: string;
   RUSTY_CREW_SQLITE_WAL?: string;
@@ -155,6 +156,8 @@ export interface RustyCrewReviewDenAuthorityConfig {
 export interface RustyCrewTelegramConfig {
   enabled: boolean;
   adapterId: string;
+  credentialId: string;
+  /** Deprecated bootstrap path; admin provisioning stores the token as a service credential. */
   botToken?: string;
   apiBaseUrl?: string;
   pollIntervalMs: number;
@@ -1036,6 +1039,9 @@ function loadRustyCrewTelegramConfig(
     ),
     adapterId:
       normalizeOptional(env.RUSTY_CREW_TELEGRAM_ADAPTER_ID) ?? "telegram-main",
+    credentialId:
+      normalizeOptional(env.RUSTY_CREW_TELEGRAM_CREDENTIAL_ID) ??
+      "telegram-main",
     botToken,
     apiBaseUrl: normalizeOptional(env.RUSTY_CREW_TELEGRAM_API_BASE_URL),
     pollIntervalMs: parsePositiveInteger(
@@ -1062,10 +1068,8 @@ function loadRustyCrewTelegramConfig(
 }
 
 function validateTelegramConfig(config: RustyCrewTelegramConfig): void {
-  if (config.enabled && !config.botToken) {
-    throw new Error(
-      "RUSTY_CREW_TELEGRAM_BOT_TOKEN is required when RUSTY_CREW_TELEGRAM_ENABLED=true",
-    );
+  if (!config.credentialId.trim()) {
+    throw new Error("RUSTY_CREW_TELEGRAM_CREDENTIAL_ID must not be empty");
   }
   if (config.updateLimit > 100) {
     throw new Error("RUSTY_CREW_TELEGRAM_UPDATE_LIMIT must be at most 100");

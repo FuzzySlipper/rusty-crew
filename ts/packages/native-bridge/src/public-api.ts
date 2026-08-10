@@ -109,6 +109,7 @@ import type {
   NativeRuntimeMaintenancePolicy,
 } from "./external-event-retention-public-api.js";
 import type { NativeExternalRuntimeBridgeMethods } from "./external-runtime-public-api.js";
+import type { NativeInstallDiplomatBridgeMethods } from "./install-diplomat-public-api.js";
 import type {
   NativeModelProviderCredentialKind,
   NativeModelProviderCredentialLink,
@@ -134,31 +135,7 @@ import type {
   NativeChatSessionReadResult,
 } from "./brain-wake-public-api.js";
 
-export type {
-  NativeModelProviderAffectedProfile,
-  NativeModelProviderCredential,
-  NativeModelProviderCredentialKind,
-  NativeModelProviderCredentialLink,
-  NativeModelProviderCredentialLinkResult,
-  NativeModelProviderCredentialUnlink,
-  NativeModelProviderProtocol,
-  NativeModelProviderQuery,
-  NativeModelProviderRecord,
-  NativeModelProviderRefreshImpact,
-  NativeModelProviderRefreshImpactRequest,
-  NativeModelProviderRefreshMode,
-  NativeModelProviderRefreshPlan,
-  NativeModelProviderRefreshPlanRequest,
-  NativeModelProviderRefreshProfileAction,
-  NativeResponsesProviderDialect,
-  NativeResponsesTokenUsage,
-  NativeModelProviderStatus,
-  NativeModelProviderWrite,
-  NativeServiceCredentialQuery,
-  NativeServiceCredentialRecord,
-  NativeServiceCredentialDelete,
-  NativeServiceCredentialWrite,
-} from "./model-provider-public-api.js";
+export type * from "./model-provider-public-api.js";
 
 export type {
   BridgeBufferClient,
@@ -1963,7 +1940,8 @@ export interface NativeBridgeModule
     NativeAgentCoordinationBridgeMethods,
     NativeCrewSessionBridgeMethods,
     NativeRuntimeActivityBridgeMethods,
-    NativeReviewSubmissionBridgeMethods {
+    NativeReviewSubmissionBridgeMethods,
+    NativeInstallDiplomatBridgeMethods {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
   readonly wireShapeFingerprint: string;

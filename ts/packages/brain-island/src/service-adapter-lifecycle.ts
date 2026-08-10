@@ -350,9 +350,58 @@ export async function startTelegramConnector(
   context: ServiceAdapterLifecycleContext,
 ): Promise<void> {
   if (!context.config.telegram.enabled) return;
-  const token = context.config.telegram.botToken;
-  if (!token) return;
+  const token =
+    (await context.bridge.getServiceCredentialSecret(
+      context.config.telegram.credentialId,
+    )) ?? context.config.telegram.botToken;
+  if (!token) {
+    context.recordEvent({
+      source: "telegram",
+      eventType: "telegram_connector_unconfigured",
+      severity: "warning",
+      summary: `Telegram credential ${context.config.telegram.credentialId} has no token secret.`,
+    });
+    return;
+  }
   const adapterId = context.config.telegram.adapterId as never;
+  const [diplomatBindings, sessions] = await Promise.all([
+    context.bridge.listInstallDiplomatBindings({ adapterId }),
+    context.bridge.listSessions(),
+  ]);
+  const sessionsById = new Map(
+    sessions.map((session) => [String(session.sessionId), session]),
+  );
+  const telegramBindings: ChannelBindingRecord[] = diplomatBindings.flatMap(
+    (binding) => {
+      const session = sessionsById.get(String(binding.sessionId));
+      if (session === undefined) return [];
+      return [
+        {
+          bindingId: binding.bindingId,
+          adapterId: binding.adapterId as AdapterId,
+          provider: "telegram",
+          agentId: binding.agentId as AgentId,
+          instanceId: binding.instanceId as AgentInstanceId | undefined,
+          sessionId: binding.sessionId as SessionId,
+          profileId: session.profileId,
+          externalChannelId: binding.externalChatId,
+          externalThreadId: binding.externalThreadId ?? undefined,
+          status:
+            binding.status === "active"
+              ? "active"
+              : binding.status === "removed"
+                ? "archived"
+                : "degraded",
+          degradedReason: binding.degradedReason ?? undefined,
+          createdAt: binding.createdAt,
+          updatedAt: binding.updatedAt,
+        },
+      ];
+    },
+  );
+  const primaryDiplomatBinding = diplomatBindings.find(
+    (binding) => binding.status === "active",
+  );
   try {
     await context.bridge.registerPlatformAdapter(
       context.adapterFactories.createTelegramAdapterRegistration(adapterId),
@@ -382,17 +431,62 @@ export async function startTelegramConnector(
       "telegram",
       `${context.config.telegram.adapterId}-terminal-updates.jsonl`,
     ),
-    bindings: () =>
-      activeTelegramChannelBindings(
-        context.runtimeConfig.channelBindings,
-        context.config.telegram.adapterId,
-      ),
+    bindings: () => telegramBindings,
+    botUserId: primaryDiplomatBinding?.botUserId,
+    botUsername: primaryDiplomatBinding?.botUsername,
+    participationMode: primaryDiplomatBinding?.participationMode,
     ttlMs: context.config.telegram.messageTtlMs,
     pollIntervalMs: context.config.telegram.pollIntervalMs,
     pollTimeoutSeconds: context.config.telegram.pollTimeoutSeconds,
     updateLimit: context.config.telegram.updateLimit,
     now: context.now,
     onInbound: async (message) => {
+      const diplomatBinding = diplomatBindings.find(
+        (binding) => binding.bindingId === message.bindingId,
+      );
+      if (diplomatBinding !== undefined) {
+        const externalMessageId =
+          message.providerRefs.externalMessageId ?? message.idempotencyKey;
+        const plan = await context.bridge.planTelegramDiplomatIngress({
+          bindingId: diplomatBinding.bindingId,
+          interactionId: `telegram:${diplomatBinding.bindingId}:${
+            message.replyToExternalMessageId ?? externalMessageId
+          }`,
+          externalMessageId,
+          replyToExternalMessageId: message.replyToExternalMessageId,
+          sender: {
+            kind: message.author.isBot ? "bot" : "human",
+            externalUserId: message.author.externalUserId,
+            username: message.author.username,
+            displayLabel: message.author.displayLabel,
+          },
+          addressedToBot:
+            diplomatBinding.participationMode === "topic_human_messages" ||
+            message.replyToExternalMessageId !== undefined ||
+            message.mentions.some(
+              (mention) =>
+                mention.toLowerCase() ===
+                diplomatBinding.botUsername.toLowerCase(),
+            ),
+          correlatedInteraction: message.replyToExternalMessageId !== undefined,
+          receivingBotUserId: diplomatBinding.botUserId,
+          receivedAt: message.receivedAt,
+        });
+        if (plan.decision !== "routed") {
+          return {
+            status:
+              plan.decision === "loop_terminated"
+                ? "loop_terminated"
+                : plan.decision === "rate_limited"
+                  ? "rate_limited"
+                  : plan.decision === "binding_unavailable"
+                    ? "inactive_binding"
+                    : "denied",
+            reason: plan.reasonCode,
+            message,
+          };
+        }
+      }
       return context.adapterFactories.ingestChannelInboundMessage(message, {
         bridge: {
           injectExternalEvent: (event) =>

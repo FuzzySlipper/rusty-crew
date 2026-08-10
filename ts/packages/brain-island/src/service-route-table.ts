@@ -27,6 +27,7 @@ export type ServiceApiRouteId =
   | "admin.storage"
   | "admin.model_providers"
   | "admin.service_credentials"
+  | "admin.telegram_diplomat"
   | "admin.profile_registry.write"
   | "admin.memory"
   | "admin.review_submissions.external"
@@ -177,6 +178,13 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
     "after_auth",
     "Shared service credential admin routes",
     (path) => path.startsWith("/v1/admin/service-credentials"),
+  ),
+  route(
+    "admin.telegram_diplomat",
+    217,
+    "after_auth",
+    "Telegram install diplomat provisioning and diagnostics",
+    (path) => path.startsWith("/v1/admin/telegram-diplomat"),
   ),
   route(
     "admin.profile_registry.write",

@@ -52,6 +52,12 @@ export interface NativeBridgeBinding {
   deleteServiceCredentialJson(deleteJson: string): string
   linkModelProviderCredentialJson(linkJson: string): string
   unlinkModelProviderCredentialJson(unlinkJson: string): string
+  putInstallDiplomatBindingJson(inputJson: string): string
+  rebindInstallDiplomatJson(inputJson: string): string
+  setInstallDiplomatBindingStatusJson(inputJson: string): string
+  getInstallDiplomatBindingJson(bindingId: string): string
+  listInstallDiplomatBindingsJson(inputJson: string): string
+  planTelegramDiplomatIngressJson(inputJson: string): string
   modelProviderRefreshImpactJson(requestJson: string): string
   planModelProviderRefreshJson(requestJson: string): string
   saveMessageSlotJson(inputJson: string): void
@@ -913,7 +919,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 291,
+  "manifestOperationCount": 297,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1322,6 +1328,54 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "unlink_model_provider_credential"
+    },
+    {
+      "name": "putInstallDiplomatBindingJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "put_install_diplomat_binding"
+    },
+    {
+      "name": "rebindInstallDiplomatJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "rebind_install_diplomat"
+    },
+    {
+      "name": "setInstallDiplomatBindingStatusJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "set_install_diplomat_binding_status"
+    },
+    {
+      "name": "getInstallDiplomatBindingJson",
+      "parameterSource": "bindingId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_install_diplomat_binding"
+    },
+    {
+      "name": "listInstallDiplomatBindingsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_install_diplomat_bindings"
+    },
+    {
+      "name": "planTelegramDiplomatIngressJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "plan_telegram_diplomat_ingress"
     },
     {
       "name": "modelProviderRefreshImpactJson",

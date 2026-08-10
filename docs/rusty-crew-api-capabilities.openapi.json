@@ -3113,6 +3113,234 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/telegram-diplomat": {
+      "get": {
+        "operationId": "adminTelegramDiplomatRead",
+        "summary": "Read Telegram diplomat configuration, redacted credential state, bot identity, discovered chat and topic candidates, bindings, and connector diagnostics.",
+        "tags": ["service", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings": {
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsCreate",
+        "summary": "Bind an identified install bot and exact Telegram chat or topic to one full Crew session.",
+        "tags": ["service", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.bindings.create",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}": {
+      "get": {
+        "operationId": "adminTelegramDiplomatBindingsRead",
+        "summary": "Read one exact session-scoped Telegram diplomat binding.",
+        "tags": ["service", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.bindings.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/move": {
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsMove",
+        "summary": "Move only the Telegram surface binding to another exact full session.",
+        "tags": ["service", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.bindings.move",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/pause": {
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsPause",
+        "summary": "Pause one Telegram diplomat binding with revision protection.",
+        "tags": ["service", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.bindings.pause",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/relabel": {
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsRelabel",
+        "summary": "Relabel the installation represented by a diplomat binding without changing its session, profile, or workspace.",
+        "tags": ["service", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.bindings.relabel",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/remove": {
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsRemove",
+        "summary": "Remove one Telegram diplomat binding without archiving its session or changing a profile.",
+        "tags": ["service", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.bindings.remove",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/resume": {
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsResume",
+        "summary": "Resume one Telegram diplomat binding with revision protection.",
+        "tags": ["service", "session"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.bindings.resume",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/credential": {
+      "post": {
+        "operationId": "adminTelegramDiplomatCredentialUpdate",
+        "summary": "Create or rotate the Telegram bot token in the service credential store and reload the connector.",
+        "tags": ["service", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.credential.update",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/telegram-diplomat/reload": {
+      "post": {
+        "operationId": "adminTelegramDiplomatReload",
+        "summary": "Reload the Telegram connector from the current service credential and durable bindings.",
+        "tags": ["service", "config"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "admin.telegram_diplomat.reload",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "control",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/tools/catalog": {
       "get": {
         "operationId": "adminToolsCatalog",
@@ -5793,7 +6021,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 233,
+    "capability_count": 243,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

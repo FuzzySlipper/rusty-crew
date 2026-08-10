@@ -121,6 +121,7 @@ import {
   type ModelProviderWriteRefreshResult,
 } from "./service-model-provider-routes.js";
 import { handleServiceCredentialAdminRequest } from "./service-credential-admin-routes.js";
+import { handleTelegramDiplomatAdminRequest } from "./telegram-diplomat-admin-routes.js";
 import type { OpenAiOauthPendingLogin } from "./service-openai-oauth-routes.js";
 import { DeferredRuntimeActivitySettlementQueue } from "./runtime-activity-settlement.js";
 import {
@@ -1950,6 +1951,27 @@ async function handleHttpRequest(
           state.bridge.exchangeOpenAiOauthCode(input),
         openAiOauth: state.config.openAiOauth,
         pendingLogins: state.openAiOauthPendingLogins,
+        now: state.now,
+      },
+    );
+  }
+
+  if (route?.id === "admin.telegram_diplomat") {
+    const method = (request.method ?? "GET").toUpperCase();
+    const body = method === "POST" ? await readJsonBody(request) : undefined;
+    return handleTelegramDiplomatAdminRequest(
+      {
+        method,
+        url: url.toString(),
+        body,
+        requestId: requestId(request),
+      },
+      {
+        bridge: state.bridge,
+        config: state.config.telegram,
+        connector: () => state.telegramConnector,
+        restartConnector: () =>
+          restartTelegramConnectorFromModule(adapterLifecycleContext(state)),
         now: state.now,
       },
     );

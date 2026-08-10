@@ -634,6 +634,30 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         "list_review_submissions",
         Vec<protocol::ReviewSubmissionRecord>
     );
+    schema!(
+        "put_install_diplomat_binding",
+        protocol::InstallDiplomatBindingRecord
+    );
+    schema!(
+        "rebind_install_diplomat",
+        protocol::InstallDiplomatBindingRecord
+    );
+    schema!(
+        "set_install_diplomat_binding_status",
+        protocol::InstallDiplomatBindingRecord
+    );
+    schema!(
+        "get_install_diplomat_binding",
+        Option<protocol::InstallDiplomatBindingRecord>
+    );
+    schema!(
+        "list_install_diplomat_bindings",
+        Vec<protocol::InstallDiplomatBindingRecord>
+    );
+    schema!(
+        "plan_telegram_diplomat_ingress",
+        protocol::TelegramDiplomatIngressPlan
+    );
     schema!("plan_brain_selection", brain_runtime::BrainSelectionPlan);
     schema!("list_agent_directory", Vec<protocol::AgentDirectoryEntry>);
     schema!(

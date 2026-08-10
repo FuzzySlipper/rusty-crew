@@ -447,15 +447,14 @@ try {
     /MCP_BASE_URL/,
   );
 
-  assert.throws(
-    () =>
-      loadRustyCrewServiceConfig({
-        RUSTY_CREW_DATA_DIR: root,
-        RUSTY_CREW_ADMIN_AUTH_MODE: "none",
-        RUSTY_CREW_TELEGRAM_ENABLED: "true",
-      }),
-    /TELEGRAM_BOT_TOKEN/,
-  );
+  const unconfiguredTelegram = loadRustyCrewServiceConfig({
+    RUSTY_CREW_DATA_DIR: root,
+    RUSTY_CREW_ADMIN_AUTH_MODE: "none",
+    RUSTY_CREW_TELEGRAM_ENABLED: "true",
+  });
+  assert.equal(unconfiguredTelegram.telegram.enabled, true);
+  assert.equal(unconfiguredTelegram.telegram.credentialId, "telegram-main");
+  assert.equal(unconfiguredTelegram.telegram.botToken, undefined);
 
   assert.throws(
     () =>

@@ -2171,6 +2171,64 @@ output = "core_protocol::ModelProviderRecord"
 errors = "core_protocol::CoreError"
 summary = "Unlink a provider alias without deleting or clearing the shared credential."
 
+# Telegram install diplomat administration. These operations mutate only the
+# exact session-scoped external surface binding; profiles and workspaces are not
+# part of this contract.
+
+[[operation]]
+name = "put_install_diplomat_binding"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::InstallDiplomatBindingWrite"
+output = "core_protocol::InstallDiplomatBindingRecord"
+errors = "core_protocol::CoreError"
+summary = "Create or revision-update one exact Telegram chat/topic to session diplomat binding."
+
+[[operation]]
+name = "rebind_install_diplomat"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::InstallDiplomatRebindRequest"
+output = "core_protocol::InstallDiplomatBindingRecord"
+errors = "core_protocol::CoreError"
+summary = "Move one diplomat binding to another exact full session without changing either session or profile."
+
+[[operation]]
+name = "set_install_diplomat_binding_status"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::InstallDiplomatBindingStatusUpdate"
+output = "core_protocol::InstallDiplomatBindingRecord"
+errors = "core_protocol::CoreError"
+summary = "Pause, resume, degrade, or remove one diplomat binding with revision protection."
+
+[[operation]]
+name = "get_install_diplomat_binding"
+surface = "stable"
+direction = "ts_to_rust"
+input = "binding_id: String"
+output = "Option<core_protocol::InstallDiplomatBindingRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one redacted session-scoped diplomat binding."
+
+[[operation]]
+name = "list_install_diplomat_bindings"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::InstallDiplomatBindingQuery"
+output = "Vec<core_protocol::InstallDiplomatBindingRecord>"
+errors = "core_protocol::CoreError"
+summary = "List session-scoped diplomat bindings for provisioning and runtime readback."
+
+[[operation]]
+name = "plan_telegram_diplomat_ingress"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::TelegramDiplomatIngressRequest"
+output = "core_protocol::TelegramDiplomatIngressPlan"
+errors = "core_protocol::CoreError"
+summary = "Apply durable loop budgets and resolve one Telegram update to its exact diplomat session."
+
 [[operation]]
 name = "model_provider_refresh_impact"
 surface = "stable"

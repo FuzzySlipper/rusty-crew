@@ -5087,6 +5087,297 @@
       ],
       "type": "string"
     },
+    "InstallDiplomatBindingQuery": {
+      "properties": {
+        "adapterId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bindingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "externalChatId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "externalThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "installationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallDiplomatBindingStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "InstallDiplomatBindingRecord": {
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "botUserId": {
+          "type": "string"
+        },
+        "botUsername": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "degradedReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "externalChatId": {
+          "type": "string"
+        },
+        "externalThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "installationId": {
+          "type": "string"
+        },
+        "installationLabel": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participationMode": {
+          "$ref": "#/$defs/InstallDiplomatParticipationMode"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/InstallDiplomatBindingStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "bindingId",
+        "revision",
+        "installationId",
+        "installationLabel",
+        "adapterId",
+        "botUserId",
+        "botUsername",
+        "agentId",
+        "sessionId",
+        "externalChatId",
+        "participationMode",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "InstallDiplomatBindingStatus": {
+      "enum": [
+        "active",
+        "paused",
+        "needs_rebind",
+        "removed"
+      ],
+      "type": "string"
+    },
+    "InstallDiplomatBindingStatusUpdate": {
+      "properties": {
+        "bindingId": {
+          "type": "string"
+        },
+        "degradedReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/InstallDiplomatBindingStatus"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bindingId",
+        "expectedRevision",
+        "status",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "InstallDiplomatBindingWrite": {
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "botUserId": {
+          "type": "string"
+        },
+        "botUsername": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "externalChatId": {
+          "type": "string"
+        },
+        "externalThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "installationId": {
+          "type": "string"
+        },
+        "installationLabel": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participationMode": {
+          "$ref": "#/$defs/InstallDiplomatParticipationMode"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bindingId",
+        "installationId",
+        "installationLabel",
+        "adapterId",
+        "botUserId",
+        "botUsername",
+        "agentId",
+        "sessionId",
+        "externalChatId",
+        "participationMode",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "InstallDiplomatParticipationMode": {
+      "enum": [
+        "mention_or_reply",
+        "topic_human_messages"
+      ],
+      "type": "string"
+    },
+    "InstallDiplomatRebindRequest": {
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "instanceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "bindingId",
+        "expectedRevision",
+        "agentId",
+        "sessionId",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
     "LogicalTurnAdmission": {
       "properties": {
         "initialCheckpoint": {
@@ -9171,6 +9462,245 @@
       ],
       "type": "object"
     },
+    "TelegramDiplomatIngressDecision": {
+      "enum": [
+        "routed",
+        "ignored",
+        "binding_unavailable",
+        "loop_terminated",
+        "rate_limited"
+      ],
+      "type": "string"
+    },
+    "TelegramDiplomatIngressPlan": {
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/InstallDiplomatBindingRecord"
+        },
+        "crewCorrelationId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "$ref": "#/$defs/TelegramDiplomatIngressDecision"
+        },
+        "interaction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TelegramDiplomatInteractionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reasonCode": {
+          "type": "string"
+        },
+        "replyToExternalMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sender": {
+          "$ref": "#/$defs/TelegramDiplomatSender"
+        },
+        "targetSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "decision",
+        "reasonCode",
+        "binding",
+        "sender"
+      ],
+      "type": "object"
+    },
+    "TelegramDiplomatIngressRequest": {
+      "properties": {
+        "addressedToBot": {
+          "type": "boolean"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "correlatedInteraction": {
+          "type": "boolean"
+        },
+        "externalMessageId": {
+          "type": "string"
+        },
+        "interactionId": {
+          "type": "string"
+        },
+        "receivedAt": {
+          "type": "string"
+        },
+        "receivingBotUserId": {
+          "type": "string"
+        },
+        "replyToExternalMessageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sender": {
+          "$ref": "#/$defs/TelegramDiplomatSender"
+        }
+      },
+      "required": [
+        "bindingId",
+        "interactionId",
+        "externalMessageId",
+        "sender",
+        "addressedToBot",
+        "correlatedInteraction",
+        "receivingBotUserId",
+        "receivedAt"
+      ],
+      "type": "object"
+    },
+    "TelegramDiplomatInteractionRecord": {
+      "properties": {
+        "bindingId": {
+          "type": "string"
+        },
+        "botDepth": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "botMessageCount": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "botMessageTimestamps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "botPairKey": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "crewCorrelationId": {
+          "type": "string"
+        },
+        "deadlineAt": {
+          "type": "string"
+        },
+        "interactionId": {
+          "type": "string"
+        },
+        "lastExternalMessageId": {
+          "type": "string"
+        },
+        "lastSender": {
+          "$ref": "#/$defs/TelegramDiplomatSender"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rootExternalMessageId": {
+          "type": "string"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "terminalReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TelegramDiplomatInteractionTerminalReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "interactionId",
+        "bindingId",
+        "revision",
+        "rootExternalMessageId",
+        "lastExternalMessageId",
+        "lastSender",
+        "botDepth",
+        "botMessageCount",
+        "botMessageTimestamps",
+        "crewCorrelationId",
+        "deadlineAt",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "TelegramDiplomatInteractionTerminalReason": {
+      "enum": [
+        "depth_exceeded",
+        "message_budget_exceeded",
+        "interaction_expired",
+        "bot_pair_rate_limited",
+        "binding_unavailable"
+      ],
+      "type": "string"
+    },
+    "TelegramDiplomatSender": {
+      "properties": {
+        "displayLabel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "externalUserId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/TelegramDiplomatSenderKind"
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "externalUserId"
+      ],
+      "type": "object"
+    },
+    "TelegramDiplomatSenderKind": {
+      "enum": [
+        "human",
+        "bot",
+        "sender_chat"
+      ],
+      "type": "string"
+    },
     "ToolCallMetadata": {
       "properties": {
         "adapter_id": {
@@ -9595,6 +10125,21 @@
     "external_turn_correlation": {
       "$ref": "#/$defs/ExternalTurnCorrelation"
     },
+    "install_diplomat_binding_query": {
+      "$ref": "#/$defs/InstallDiplomatBindingQuery"
+    },
+    "install_diplomat_binding_record": {
+      "$ref": "#/$defs/InstallDiplomatBindingRecord"
+    },
+    "install_diplomat_binding_status_update": {
+      "$ref": "#/$defs/InstallDiplomatBindingStatusUpdate"
+    },
+    "install_diplomat_binding_write": {
+      "$ref": "#/$defs/InstallDiplomatBindingWrite"
+    },
+    "install_diplomat_rebind_request": {
+      "$ref": "#/$defs/InstallDiplomatRebindRequest"
+    },
     "logical_turn_admission": {
       "$ref": "#/$defs/LogicalTurnAdmission"
     },
@@ -9774,6 +10319,12 @@
     "task_id": {
       "type": "string"
     },
+    "telegram_diplomat_ingress_plan": {
+      "$ref": "#/$defs/TelegramDiplomatIngressPlan"
+    },
+    "telegram_diplomat_ingress_request": {
+      "$ref": "#/$defs/TelegramDiplomatIngressRequest"
+    },
     "turn_projection_id": {
       "type": "string"
     }
@@ -9881,6 +10432,13 @@
     "review_submission_record",
     "review_submission_transition_request",
     "review_submission_query",
+    "install_diplomat_binding_record",
+    "install_diplomat_binding_write",
+    "install_diplomat_rebind_request",
+    "install_diplomat_binding_status_update",
+    "install_diplomat_binding_query",
+    "telegram_diplomat_ingress_request",
+    "telegram_diplomat_ingress_plan",
     "crew_agent_session_creation_request",
     "crew_agent_session_creation_record",
     "external_runtime_registration",

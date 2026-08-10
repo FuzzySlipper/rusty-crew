@@ -200,6 +200,48 @@ impl NativeBridge {
         self.engine()?.unlink_model_provider_credential(unlink)
     }
 
+    pub fn put_install_diplomat_binding(
+        &self,
+        write: InstallDiplomatBindingWrite,
+    ) -> CoreResult<InstallDiplomatBindingRecord> {
+        self.engine()?.put_install_diplomat_binding(write)
+    }
+
+    pub fn rebind_install_diplomat(
+        &self,
+        request: InstallDiplomatRebindRequest,
+    ) -> CoreResult<InstallDiplomatBindingRecord> {
+        self.engine()?.rebind_install_diplomat(request)
+    }
+
+    pub fn set_install_diplomat_binding_status(
+        &self,
+        update: InstallDiplomatBindingStatusUpdate,
+    ) -> CoreResult<InstallDiplomatBindingRecord> {
+        self.engine()?.set_install_diplomat_binding_status(update)
+    }
+
+    pub fn get_install_diplomat_binding(
+        &self,
+        binding_id: &str,
+    ) -> CoreResult<Option<InstallDiplomatBindingRecord>> {
+        self.engine()?.get_install_diplomat_binding(binding_id)
+    }
+
+    pub fn list_install_diplomat_bindings(
+        &self,
+        query: &InstallDiplomatBindingQuery,
+    ) -> CoreResult<Vec<InstallDiplomatBindingRecord>> {
+        self.engine()?.list_install_diplomat_bindings(query)
+    }
+
+    pub fn plan_telegram_diplomat_ingress(
+        &self,
+        request: TelegramDiplomatIngressRequest,
+    ) -> CoreResult<TelegramDiplomatIngressPlan> {
+        self.engine()?.plan_telegram_diplomat_ingress(request)
+    }
+
     pub fn list_model_providers(
         &self,
         query: &ModelProviderQuery,

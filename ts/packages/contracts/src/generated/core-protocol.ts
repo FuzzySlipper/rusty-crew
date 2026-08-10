@@ -1201,6 +1201,75 @@ export type FanOutFailurePolicy = "fail_fast" | "fail_soft";
 
 export type FanOutGroupStatus = "in_progress" | "completed" | "partial_failure" | "failed_fast";
 
+export type InstallDiplomatBindingQuery = {
+  adapterId?: string | null;
+  bindingId?: string | null;
+  externalChatId?: string | null;
+  externalThreadId?: string | null;
+  installationId?: string | null;
+  sessionId?: string | null;
+  status?: InstallDiplomatBindingStatus | null;
+};
+
+export type InstallDiplomatBindingRecord = {
+  adapterId: string;
+  agentId: string;
+  bindingId: string;
+  botUserId: string;
+  botUsername: string;
+  createdAt: string;
+  degradedReason?: string | null;
+  externalChatId: string;
+  externalThreadId?: string | null;
+  installationId: string;
+  installationLabel: string;
+  instanceId?: string | null;
+  participationMode: InstallDiplomatParticipationMode;
+  revision: number;
+  schemaVersion: string;
+  sessionId: string;
+  status: InstallDiplomatBindingStatus;
+  updatedAt: string;
+};
+
+export type InstallDiplomatBindingStatus = "active" | "paused" | "needs_rebind" | "removed";
+
+export type InstallDiplomatBindingStatusUpdate = {
+  bindingId: string;
+  degradedReason?: string | null;
+  expectedRevision: number;
+  status: InstallDiplomatBindingStatus;
+  updatedAt: string;
+};
+
+export type InstallDiplomatBindingWrite = {
+  adapterId: string;
+  agentId: string;
+  bindingId: string;
+  botUserId: string;
+  botUsername: string;
+  expectedRevision?: number | null;
+  externalChatId: string;
+  externalThreadId?: string | null;
+  installationId: string;
+  installationLabel: string;
+  instanceId?: string | null;
+  participationMode: InstallDiplomatParticipationMode;
+  sessionId: string;
+  updatedAt: string;
+};
+
+export type InstallDiplomatParticipationMode = "mention_or_reply" | "topic_human_messages";
+
+export type InstallDiplomatRebindRequest = {
+  agentId: string;
+  bindingId: string;
+  expectedRevision: number;
+  instanceId?: string | null;
+  sessionId: string;
+  updatedAt: string;
+};
+
 export type LogicalTurnAdmission = {
   initialCheckpoint: LogicalTurnCheckpoint;
   lifecycleEvent: LogicalTurnLifecycleEvent;
@@ -2125,6 +2194,61 @@ export type SessionWorkspaceUpdateRecord = {
   previous: SessionWorkspace;
   session: SessionState;
 };
+
+export type TelegramDiplomatIngressDecision = "routed" | "ignored" | "binding_unavailable" | "loop_terminated" | "rate_limited";
+
+export type TelegramDiplomatIngressPlan = {
+  binding: InstallDiplomatBindingRecord;
+  crewCorrelationId?: string | null;
+  decision: TelegramDiplomatIngressDecision;
+  interaction?: TelegramDiplomatInteractionRecord | null;
+  reasonCode: string;
+  replyToExternalMessageId?: string | null;
+  sender: TelegramDiplomatSender;
+  targetSessionId?: string | null;
+};
+
+export type TelegramDiplomatIngressRequest = {
+  addressedToBot: boolean;
+  bindingId: string;
+  correlatedInteraction: boolean;
+  externalMessageId: string;
+  interactionId: string;
+  receivedAt: string;
+  receivingBotUserId: string;
+  replyToExternalMessageId?: string | null;
+  sender: TelegramDiplomatSender;
+};
+
+export type TelegramDiplomatInteractionRecord = {
+  bindingId: string;
+  botDepth: number;
+  botMessageCount: number;
+  botMessageTimestamps: Array<string>;
+  botPairKey?: string | null;
+  createdAt: string;
+  crewCorrelationId: string;
+  deadlineAt: string;
+  interactionId: string;
+  lastExternalMessageId: string;
+  lastSender: TelegramDiplomatSender;
+  revision: number;
+  rootExternalMessageId: string;
+  schemaVersion: string;
+  terminalReason?: TelegramDiplomatInteractionTerminalReason | null;
+  updatedAt: string;
+};
+
+export type TelegramDiplomatInteractionTerminalReason = "depth_exceeded" | "message_budget_exceeded" | "interaction_expired" | "bot_pair_rate_limited" | "binding_unavailable";
+
+export type TelegramDiplomatSender = {
+  displayLabel?: string | null;
+  externalUserId: string;
+  kind: TelegramDiplomatSenderKind;
+  username?: string | null;
+};
+
+export type TelegramDiplomatSenderKind = "human" | "bot" | "sender_chat";
 
 export type ToolCallMetadata = {
   adapterId?: AdapterId;
