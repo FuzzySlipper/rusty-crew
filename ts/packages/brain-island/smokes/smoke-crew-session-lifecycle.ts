@@ -13,6 +13,7 @@ import {
   archiveCrewSession,
   createFreshCrewSession,
   CrewSessionLifecycleError,
+  switchCrewSessionWorkspace,
   type CrewSessionLifecycleContext,
 } from "../src/service-crew-session-lifecycle.js";
 import { handleRustyViewChatRequest } from "../src/rusty-view-chat-api.js";
@@ -20,6 +21,7 @@ import { handleRustyViewChatRequest } from "../src/rusty-view-chat-api.js";
 const session = sessionState("session-alpha", "active");
 const nativeBridge = await loadNativeBridge();
 const order: string[] = [];
+const workspaceUpdates: string[] = [];
 let runtimeValue: Record<string, unknown> = {
   profilesDir: "/tmp/profiles",
   brains: [],
@@ -194,6 +196,71 @@ assert.deepEqual(runtimeValue.mcpBindings, [
   },
 ]);
 
+creationContext.bridge.createCrewAgentSession = async () => ({
+  ...creationRecord(),
+  templateSessionId: "crew-session-created" as SessionId,
+  session: sessionState("crew-session-sibling", "idle"),
+});
+const sibling = await createFreshCrewSession(creationContext, {
+  idempotencyKey: "create-sibling-key",
+  profileId: "prime" as never,
+  expectedProfileRevision: 5,
+  workspaceCwd: "/home/dev/rusty-view",
+  requestedAt: "2026-07-28T00:01:00Z",
+});
+assert.equal(sibling.creation.session.sessionId, "crew-session-sibling");
+assert.deepEqual(
+  (runtimeValue.sessions as Array<Record<string, unknown>>).map(
+    (configuredSession) => configuredSession.sessionId,
+  ),
+  ["crew-session-created", "crew-session-sibling"],
+);
+assert.deepEqual(
+  (runtimeValue.mcpBindings as Array<Record<string, unknown>>).map(
+    (binding) => [binding.bindingId, binding.sessionId],
+  ),
+  [
+    ["prime-mcp-den", "crew-session-created"],
+    ["prime-mcp-den-crew-session-sibling", "crew-session-sibling"],
+  ],
+  "a sibling must receive its own MCP binding without retargeting the first session",
+);
+
+runtimeValue = runtimeConfigWithSession();
+const switched = await switchCrewSessionWorkspace(lifecycleContext(), {
+  sessionId: session.sessionId,
+  cwd: "/home/dev/rusty-crew",
+  expectedRevision: 1,
+});
+assert.equal(switched.update.current.cwd, "/home/dev/rusty-crew");
+assert.equal(switched.update.current.revision, 2);
+assert.equal(
+  (runtimeValue.sessions as Array<Record<string, unknown>>)[0]?.workspaceCwd,
+  "/home/dev/rusty-crew",
+  "the authored runtime projection must advance with canonical workspace state",
+);
+
+runtimeValue = runtimeConfigWithSession();
+workspaceUpdates.length = 0;
+await assert.rejects(
+  switchCrewSessionWorkspace(lifecycleContext(new Set(), false, true), {
+    sessionId: session.sessionId,
+    cwd: "/home/dev/failed-switch",
+    expectedRevision: 1,
+  }),
+  /runtime apply failed/,
+);
+assert.equal(
+  (runtimeValue.sessions as Array<Record<string, unknown>>)[0]?.workspaceCwd,
+  "/home",
+  "failed runtime application must restore the authored workspace",
+);
+assert.deepEqual(
+  workspaceUpdates,
+  ["/home/dev/failed-switch", "/home"],
+  "failed runtime application must compensate the canonical workspace mutation",
+);
+
 const api = await handleRustyViewChatRequest(
   {
     method: "POST",
@@ -235,6 +302,7 @@ console.log(
 function lifecycleContext(
   inFlightWakes: ReadonlySet<SessionId> = new Set(),
   failArchive = false,
+  failApply = false,
 ): CrewSessionLifecycleContext {
   return {
     bridge: {
@@ -245,6 +313,20 @@ function lifecycleContext(
       },
       createCrewAgentSession: async () => creationRecord(),
       getProfileRegistryRecord: async () => undefined,
+      updateSessionWorkspace: async (request) => {
+        workspaceUpdates.push(request.cwd);
+        const previous = session.workspace!;
+        const current = {
+          cwd: request.cwd,
+          revision: previous.revision + 1,
+          updatedAt: request.requestedAt,
+        };
+        return {
+          previous,
+          current,
+          session: { ...session, workspace: current },
+        };
+      },
       updateProfileRegistryRecord: async () => {
         throw new Error("unexpected profile update");
       },
@@ -268,7 +350,10 @@ function lifecycleContext(
       order.push("write");
       runtimeValue = value as Record<string, unknown>;
     },
-    applyRuntimeConfigFromDisk: async () => ({}) as never,
+    applyRuntimeConfigFromDisk: async () => {
+      if (failApply) throw new Error("runtime apply failed");
+      return {} as never;
+    },
     sessionById: async () => session,
     appendChatEvent: async (_sessionId, event) => {
       order.push(event.kind);

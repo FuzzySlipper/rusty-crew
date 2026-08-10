@@ -153,6 +153,7 @@ import {
 import {
   archiveCrewSession,
   createFreshCrewSession,
+  switchCrewSessionWorkspace,
   type CrewSessionLifecycleContext,
 } from "./service-crew-session-lifecycle.js";
 import {
@@ -2234,6 +2235,12 @@ async function buildDiagnosticsContext(
     curatorUrl?: URL;
   } = {},
 ): Promise<AdminDiagnosticsContext> {
+  // Profile registry revisions are optimistic-concurrency authority. Returning
+  // even a one-second-old diagnostics snapshot can make the next valid session
+  // creation impossible after a sibling advances the profile revision.
+  if (options.includeProfileRegistry === true) {
+    return buildDiagnosticsContextUncached(state, options);
+  }
   const key = diagnosticsContextCacheKey(options);
   const cached = state.diagnosticsContextCache.get(key);
   if (cached !== undefined && cached.expiresAt > Date.now()) {
@@ -4086,12 +4093,13 @@ function createServiceControlExecutor(
       ) {
         throw new Error("expectedRevision must be a positive integer");
       }
-      const result = await state.bridge.updateSessionWorkspace({
-        sessionId,
-        cwd,
-        expectedRevision: Number(expectedRevision),
-        requestedAt: state.now(),
-      });
+      const { update: result } = await withRuntimeConfigMutation(() =>
+        switchCrewSessionWorkspace(crewSessionLifecycleContext(state), {
+          sessionId,
+          cwd,
+          expectedRevision: Number(expectedRevision),
+        }),
+      );
       return {
         status: "completed",
         summary: `session ${sessionId} workspace is ${result.current.cwd}`,

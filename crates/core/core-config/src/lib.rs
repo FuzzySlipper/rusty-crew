@@ -2983,7 +2983,7 @@ impl<'a> RuntimeConfigValidator<'a> {
     }
 
     fn validate_sessions(&mut self) {
-        let mut agent_ids = HashSet::new();
+        let mut agent_profiles = HashMap::new();
         for (index, session) in self.draft.sessions.iter().enumerate() {
             validate_id_text(
                 self,
@@ -3014,12 +3014,19 @@ impl<'a> RuntimeConfigValidator<'a> {
                     format!("duplicate session {}", session.session_id),
                 );
             }
-            if !agent_ids.insert(session.agent_id.clone()) {
-                self.error(
-                    "duplicate_agent_id",
-                    format!("sessions[{index}].agentId"),
-                    format!("duplicate configured agent {}", session.agent_id),
-                );
+            if let Some(existing_profile) =
+                agent_profiles.insert(session.agent_id.clone(), session.profile_id.clone())
+            {
+                if existing_profile != session.profile_id {
+                    self.error(
+                        "duplicate_agent_id",
+                        format!("sessions[{index}].agentId"),
+                        format!(
+                            "configured agent {} is shared by profiles {} and {}; only same-profile session siblings may share an agent identity",
+                            session.agent_id, existing_profile, session.profile_id
+                        ),
+                    );
+                }
             }
             self.require_profile(
                 &session.profile_id,
@@ -4163,6 +4170,22 @@ mod tests {
         let result = validate_runtime_config_draft(&valid_draft(), &[profile("runner")]);
         assert!(result.ok(), "{:?}", result.diagnostics);
         assert!(result.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn allows_same_profile_agent_siblings_but_rejects_unscoped_binding_ambiguity() {
+        let mut draft = valid_draft();
+        let mut sibling = draft.sessions[0].clone();
+        sibling.session_id = SessionId::new("runner-session-sibling");
+        sibling.workspace_cwd = Some("/tmp/rusty-crew/sibling".to_string());
+        draft.sessions.push(sibling);
+
+        let valid = validate_runtime_config_draft(&draft, &[profile("runner")]);
+        assert!(valid.ok(), "{:?}", valid.diagnostics);
+
+        draft.channel_bindings[0].session_id = None;
+        let ambiguous = validate_runtime_config_draft(&draft, &[profile("runner")]);
+        assert_codes(&ambiguous, &["binding_target_ambiguous"]);
     }
 
     #[test]

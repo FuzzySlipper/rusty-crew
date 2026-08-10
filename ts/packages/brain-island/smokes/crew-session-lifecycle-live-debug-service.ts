@@ -7,11 +7,12 @@ const baseUrl = (
   process.env.RUSTY_CREW_DEBUG_ADMIN_BASE_URL ?? "http://127.0.0.1:9348"
 ).replace(/\/+$/, "");
 const providerAlias =
-  process.env.RUSTY_CREW_CREW_SESSION_CERT_PROVIDER_ALIAS ?? "tester-chat";
+  process.env.RUSTY_CREW_CREW_SESSION_CERT_PROVIDER_ALIAS ?? "deepseek-flash";
 const suffix = Date.now().toString(36);
 const profileId = `crew-session-cert-${suffix}`;
 const firstMarker = `CREW_ARCHIVE_BEFORE_${suffix.toUpperCase()}`;
 const secondMarker = `CREW_ARCHIVE_AFTER_${suffix.toUpperCase()}`;
+const siblingMarker = `CREW_SIBLING_${suffix.toUpperCase()}`;
 let profileCreated = false;
 
 if (new URL(baseUrl).port !== "9348") {
@@ -27,14 +28,15 @@ try {
     displayName: `Crew session lifecycle certification ${suffix}`,
     providerAlias,
     kind: "full",
-    localToolProfileId: "basic_chat",
+    workspaceCwd: "/home/dev/rusty-crew",
+    localToolProfileId: "full_coding_agent",
     mcpBindings: [
       {
         serverId: "den",
         toolProfileKey: "planner",
       },
     ],
-    reason: "task-6326 live Crew session lifecycle certification",
+    reason: "task-6746 live Crew session lifecycle certification",
   });
   assert.equal(createdProfile.status, 200, createdProfile.text);
   profileCreated = true;
@@ -50,8 +52,8 @@ try {
     "POST",
     `/v1/chat/sessions/${encodeURIComponent(originalSessionId)}/commands`,
     {
-      command: "/archive task-6326 lifecycle certification",
-      actor: { id: "task-6326-cert-operator", kind: "human" },
+      command: "/archive task-6746 lifecycle certification",
+      actor: { id: "task-6746-cert-operator", kind: "human" },
     },
     { "Idempotency-Key": `archive-${suffix}` },
   );
@@ -140,7 +142,79 @@ try {
   );
 
   await assertDirectorySession(profileId, freshSessionId, true);
-  await runProviderTurn(freshSessionId, secondMarker);
+  const siblingCreation = await createSessionAtCurrentProfileRevision(
+    profileId,
+    "/home/dev/rusty-view",
+    `sibling-${suffix}`,
+  );
+  assert.equal(siblingCreation.status, 200, siblingCreation.text);
+  assert.equal(
+    nested(siblingCreation.json, ["data", "creation", "outcome"]),
+    "created",
+  );
+  const siblingSessionId = requiredString(siblingCreation.json, [
+    "data",
+    "creation",
+    "session",
+    "sessionId",
+  ]);
+  assert.notEqual(siblingSessionId, freshSessionId);
+  await assertDirectoryWorkspace(
+    profileId,
+    freshSessionId,
+    "/home/dev/rusty-crew",
+    1,
+  );
+  await assertDirectoryWorkspace(
+    profileId,
+    siblingSessionId,
+    "/home/dev/rusty-view",
+    1,
+  );
+
+  const switchedWorkspace = await request(
+    "POST",
+    `/v1/admin/control/sessions/${encodeURIComponent(freshSessionId)}/workspace`,
+    { cwd: "/home/dev/rusty-engine", expectedRevision: 1 },
+  );
+  assert.equal(switchedWorkspace.status, 200, switchedWorkspace.text);
+  assert.equal(
+    nested(switchedWorkspace.json, [
+      "data",
+      "outcome",
+      "result",
+      "current",
+      "cwd",
+    ]),
+    "/home/dev/rusty-engine",
+  );
+  await assertDirectoryWorkspace(
+    profileId,
+    freshSessionId,
+    "/home/dev/rusty-engine",
+    2,
+  );
+
+  await restartDebugService();
+  await waitForHealth();
+  await assertDirectoryWorkspace(
+    profileId,
+    freshSessionId,
+    "/home/dev/rusty-engine",
+    2,
+  );
+  await assertDirectoryWorkspace(
+    profileId,
+    siblingSessionId,
+    "/home/dev/rusty-view",
+    1,
+  );
+  await runWorkspaceTurn(
+    freshSessionId,
+    "/home/dev/rusty-engine",
+    secondMarker,
+  );
+  await runProviderTurn(siblingSessionId, siblingMarker);
 
   console.log(
     JSON.stringify(
@@ -150,6 +224,7 @@ try {
         profileId,
         originalSessionId,
         freshSessionId,
+        siblingSessionId,
         archiveCommandCursor: nested(archive.json, ["data", "latest_cursor"]),
         profileRevision,
         idempotencyReplay: "replayed",
@@ -161,7 +236,7 @@ try {
           "error",
           "reason_code",
         ]),
-        providerMarkers: [firstMarker, secondMarker],
+        providerMarkers: [firstMarker, secondMarker, siblingMarker],
       },
       null,
       2,
@@ -174,7 +249,7 @@ try {
       `/v1/admin/control/profiles/${encodeURIComponent(profileId)}/delete`,
       {
         confirmProfileId: profileId,
-        reason: "task-6326 live certification cleanup",
+        reason: "task-6746 live certification cleanup",
       },
     ).catch(() => undefined);
     if (cleanup !== undefined && cleanup.status >= 400) {
@@ -205,15 +280,15 @@ async function runProviderTurn(
   );
   assert.equal(before.status, 200, before.text);
   const cursor = nested(before.json, ["data", "latest_cursor"]);
-  const messageKey = `task-6326:${marker}`;
+  const messageKey = `task-6746:${marker}`;
   const sent = await request(
     "POST",
     `/v1/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
     {
-      actor: { id: "task-6326-cert-operator", kind: "human" },
+      actor: { id: "task-6746-cert-operator", kind: "human" },
       body: `Reply with exactly ${marker} and nothing else.`,
       client_message_id: messageKey,
-      reason: "task-6326 provider-backed lifecycle proof",
+      reason: "task-6746 provider-backed lifecycle proof",
     },
     { "Idempotency-Key": messageKey },
   );
@@ -232,6 +307,53 @@ async function runProviderTurn(
     .map((event) => String(event.payload?.text ?? ""))
     .join("");
   assert.match(text, new RegExp(marker));
+}
+
+async function runWorkspaceTurn(
+  sessionId: string,
+  expectedCwd: string,
+  marker: string,
+): Promise<void> {
+  const before = await request(
+    "GET",
+    `/v1/chat/sessions/${encodeURIComponent(sessionId)}`,
+  );
+  assert.equal(before.status, 200, before.text);
+  const cursor = nested(before.json, ["data", "latest_cursor"]);
+  const messageKey = `task-6746:${marker}`;
+  const sent = await request(
+    "POST",
+    `/v1/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      actor: { id: "task-6746-cert-operator", kind: "human" },
+      body: [
+        "Call the terminal tool exactly once with command pwd and do not pass a cwd override.",
+        `Then reply with exactly ${marker}=<the trimmed command output>.`,
+      ].join("\n"),
+      client_message_id: messageKey,
+      reason: "task-6746 switched workspace execution proof",
+    },
+    { "Idempotency-Key": messageKey },
+  );
+  assert.equal(sent.status, 202, sent.text);
+  const events = await waitForTurn(
+    sessionId,
+    typeof cursor === "string" ? cursor : undefined,
+  );
+  assert.ok(
+    events.some(
+      (event) =>
+        event.kind === "tool_call_completed" &&
+        event.payload?.tool_name === "terminal" &&
+        event.payload?.is_error !== true,
+    ),
+    "switched session must complete the terminal tool",
+  );
+  const text = events
+    .filter((event) => event.kind === "assistant_text_delta")
+    .map((event) => String(event.payload?.text ?? ""))
+    .join("");
+  assert.match(text, new RegExp(`${marker}=${escapeRegExp(expectedCwd)}`));
 }
 
 async function assertArchiveReadback(sessionId: string): Promise<void> {
@@ -295,6 +417,63 @@ async function assertDirectorySession(
       agent.routable === true,
   );
   assert.equal(found, present);
+}
+
+async function createSessionAtCurrentProfileRevision(
+  expectedProfileId: string,
+  workspaceCwd: string,
+  idempotencyKeyPrefix: string,
+): Promise<ApiResponse> {
+  let latest: ApiResponse | undefined;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const profile = await request(
+      "GET",
+      `/v1/admin/profiles/registry/${encodeURIComponent(expectedProfileId)}`,
+    );
+    assert.equal(profile.status, 200, profile.text);
+    const revision = requiredNumber(profile.json, ["data", "revision"]);
+    latest = await request(
+      "POST",
+      "/v1/chat/sessions",
+      {
+        profile_id: expectedProfileId,
+        expected_profile_revision: revision,
+        workspace_cwd: workspaceCwd,
+      },
+      { "Idempotency-Key": `${idempotencyKeyPrefix}-${attempt}` },
+    );
+    if (
+      latest.status !== 409 ||
+      nested(latest.json, ["error", "reason_code"]) !==
+        "crew_agent_session_creation_profile_revision_conflict"
+    ) {
+      return latest;
+    }
+    await delay(100);
+  }
+  assert.ok(latest);
+  return latest;
+}
+
+async function assertDirectoryWorkspace(
+  expectedProfileId: string,
+  sessionId: string,
+  cwd: string,
+  revision: number,
+): Promise<void> {
+  const directory = await request("GET", "/v1/debug/coordination/agents");
+  assert.equal(directory.status, 200, directory.text);
+  const agents = nested(directory.json, ["data", "agents"]);
+  assert.ok(Array.isArray(agents));
+  const found = agents.find(
+    (agent) =>
+      isRecord(agent) &&
+      agent.profileId === expectedProfileId &&
+      agent.sessionId === sessionId,
+  );
+  assert.ok(isRecord(found), `session ${sessionId} must be in the directory`);
+  assert.equal(nested(found, ["workspace", "cwd"]), cwd);
+  assert.equal(nested(found, ["workspace", "revision"]), revision);
 }
 
 async function assertNoRuntimeMcpBinding(
@@ -431,4 +610,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

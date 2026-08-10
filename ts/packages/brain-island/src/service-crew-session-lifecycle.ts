@@ -4,6 +4,7 @@ import type {
   ProfileId,
   SessionId,
   SessionState,
+  SessionWorkspaceUpdateRecord,
 } from "@rusty-crew/contracts";
 import type {
   NativeBridgeModule,
@@ -47,6 +48,7 @@ export interface CrewSessionLifecycleContext {
     | "archiveSession"
     | "createCrewAgentSession"
     | "getProfileRegistryRecord"
+    | "updateSessionWorkspace"
     | "updateProfileRegistryRecord"
   >;
   runtimeConfig: RustyCrewRuntimeConfig;
@@ -81,6 +83,11 @@ export interface ArchiveCrewSessionResult {
     mcpBindingsDetached: number;
     scheduledJobsRemoved: number;
   };
+  applyResult: RustyCrewRuntimeConfigApplyResult;
+}
+
+export interface SwitchCrewSessionWorkspaceResult {
+  update: SessionWorkspaceUpdateRecord;
   applyResult: RustyCrewRuntimeConfigApplyResult;
 }
 
@@ -234,29 +241,6 @@ export async function createFreshCrewSession(
   ) {
     sessions.push(runtimeSessionEntry(creation.session));
   }
-  if (creation.templateSessionId != null) {
-    replaceSessionReferences(
-      runtimeConfigFile.array("channelBindings"),
-      creation.templateSessionId,
-      creation.session.sessionId,
-      "sessionId",
-      "session_id",
-    );
-    replaceSessionReferences(
-      runtimeConfigFile.array("mcpBindings"),
-      creation.templateSessionId,
-      creation.session.sessionId,
-      "sessionId",
-      "session_id",
-    );
-    replaceSessionReferences(
-      runtimeConfigFile.array("scheduledJobs"),
-      creation.templateSessionId,
-      creation.session.sessionId,
-      "targetSessionId",
-      "target_session_id",
-    );
-  }
   try {
     await restoreProfileMcpBindingsForSession(
       context,
@@ -298,6 +282,70 @@ export async function createFreshCrewSession(
   }
 }
 
+export async function switchCrewSessionWorkspace(
+  context: CrewSessionLifecycleContext,
+  input: {
+    sessionId: SessionId;
+    cwd: string;
+    expectedRevision: number;
+  },
+): Promise<SwitchCrewSessionWorkspaceResult> {
+  const runtimeConfigFile = await context.readRuntimeConfigFile();
+  const previousRuntimeConfig = structuredClone(runtimeConfigFile.value);
+  const runtimeSession = runtimeConfigFile
+    .array("sessions")
+    .find((entry) => entrySessionId(entry) === input.sessionId);
+  if (!isRecord(runtimeSession)) {
+    throw new CrewSessionLifecycleError(
+      "session_workspace_config_missing",
+      `Session ${input.sessionId} has no authored runtime configuration.`,
+    );
+  }
+
+  runtimeSession.workspaceCwd = input.cwd;
+  delete runtimeSession.workspace_cwd;
+  await assertValidRuntimeConfig(context, runtimeConfigFile.value);
+
+  let update: SessionWorkspaceUpdateRecord | undefined;
+  try {
+    update = await context.bridge.updateSessionWorkspace({
+      sessionId: input.sessionId,
+      cwd: input.cwd,
+      expectedRevision: input.expectedRevision,
+      requestedAt: context.now(),
+    });
+    await context.writeRuntimeConfigFile(runtimeConfigFile.value);
+    const applyResult = await context.applyRuntimeConfigFromDisk({
+      createMissingSessions: false,
+      eventType: "crew_session_workspace_changed",
+      summaryPrefix: `Crew session ${input.sessionId} workspace changed`,
+    });
+    return { update, applyResult };
+  } catch (error) {
+    await context
+      .writeRuntimeConfigFile(previousRuntimeConfig)
+      .catch(() => undefined);
+    if (update !== undefined && update.current.cwd !== update.previous.cwd) {
+      await context.bridge
+        .updateSessionWorkspace({
+          sessionId: input.sessionId,
+          cwd: update.previous.cwd,
+          expectedRevision: update.current.revision,
+          requestedAt: context.now(),
+        })
+        .catch(() => undefined);
+    }
+    await context
+      .applyRuntimeConfigFromDisk({
+        createMissingSessions: false,
+        eventType: "crew_session_workspace_change_rolled_back",
+        summaryPrefix: `Crew session ${input.sessionId} workspace change rolled back`,
+      })
+      .catch(() => undefined);
+    throw error;
+  }
+}
+
 async function restoreProfileMcpBindingsForSession(
   context: CrewSessionLifecycleContext,
   runtimeBindings: unknown[],
@@ -308,17 +356,31 @@ async function restoreProfileMcpBindingsForSession(
   );
   if (profile === undefined) return;
   const configured = profileMcpBindingsFromRegistryRecord(profile);
-  const existingIds = new Set(
+  const existingTargets = new Map(
     runtimeBindings.flatMap((entry) => {
       if (!isRecord(entry)) return [];
       const bindingId = entry.bindingId ?? entry.binding_id;
-      return typeof bindingId === "string" ? [bindingId] : [];
+      const sessionId = entry.sessionId ?? entry.session_id;
+      return typeof bindingId === "string"
+        ? [
+            [
+              bindingId,
+              typeof sessionId === "string" ? sessionId : undefined,
+            ] as const,
+          ]
+        : [];
     }),
   );
   configured.forEach((binding, index) => {
-    const bindingId =
+    const preferredBindingId =
       binding.bindingId ?? `${session.agentId}-mcp-${index + 1}`;
-    if (existingIds.has(bindingId)) return;
+    const preferredTarget = existingTargets.get(preferredBindingId);
+    if (preferredTarget === session.sessionId) return;
+    const bindingId =
+      preferredTarget === undefined && !existingTargets.has(preferredBindingId)
+        ? preferredBindingId
+        : `${preferredBindingId}-${session.sessionId}`;
+    if (existingTargets.get(bindingId) === session.sessionId) return;
     runtimeBindings.push({
       bindingId,
       adapterId: binding.adapterId ?? "mcp-ts-main",
@@ -332,7 +394,7 @@ async function restoreProfileMcpBindingsForSession(
       status: "active",
       diagnostics: {},
     });
-    existingIds.add(bindingId);
+    existingTargets.set(bindingId, session.sessionId);
   });
 }
 
@@ -453,24 +515,6 @@ function removeEntriesBySessionId(
     removed += 1;
   }
   return removed;
-}
-
-function replaceSessionReferences(
-  entries: unknown[],
-  oldSessionId: string,
-  newSessionId: string,
-  camelKey: string,
-  snakeKey: string,
-): void {
-  for (const entry of entries) {
-    if (
-      !isRecord(entry) ||
-      entrySessionRef(entry, camelKey, snakeKey) !== oldSessionId
-    )
-      continue;
-    entry[camelKey] = newSessionId;
-    delete entry[snakeKey];
-  }
 }
 
 function entrySessionId(entry: unknown): string | undefined {
