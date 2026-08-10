@@ -402,6 +402,20 @@ async function runQualitySpike(): Promise<void> {
   await sleep(2000);
 
   if (CONTEXT_STRATEGY_ID !== undefined) {
+    const continuitySetupPrompts = [
+      "Elara quietly admits the locket belonged to her mother, but refuses to explain the Northern Court crest.",
+      "Katheryn asks whether the abandoned orchard path still leads to Elara's father's study.",
+      "A cold wind moves through the orchard while Elara asks Katheryn to keep the locket hidden.",
+      "Katheryn promises to protect the locket and remembers the serpent-and-rose crest.",
+    ];
+    for (const prompt of continuitySetupPrompts) {
+      const setupResult = await sendMessageAndCollect(sessionId, prompt);
+      const setupNarrative = getAssistantText(setupResult.events);
+      assert.ok(
+        setupNarrative.length > 20,
+        "continuity setup turn should produce narrative history",
+      );
+    }
     const registry = await adminGet(
       `/profiles/registry/${encodeURIComponent(TEST_PROFILE)}`,
     );

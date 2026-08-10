@@ -23,6 +23,10 @@ import {
   responsesNoProgressAttentionThreshold,
   responsesWorkQuantumContinuationRounds,
 } from "./responses-continuation-policy.js";
+import {
+  roleplayCompactionDomainContext,
+  roleplayCompactionEvidenceFromMetadata,
+} from "./roleplay-compaction-domain-context.js";
 
 export type OpenAiResponsesClientConfig = NonNullable<
   OpenAiResponsesBrainRunInput["client"]
@@ -253,15 +257,27 @@ export async function createOpenAiResponsesBrainHost(
           }
         ).compactionIntent ??
         (wake as unknown as { compaction_intent?: unknown }).compaction_intent;
+      const roleplayCompactionEnabled =
+        context.profile.profile.contextPolicy?.strategyId ===
+          "roleplay_scene_aware_compaction" &&
+        (context.profile.profile.brain?.strategy === "roleplay_narrator" ||
+          context.profile.profile.roleplayNarrator !== undefined);
+      const roleplayMetadata = roleplayCompactionEnabled
+        ? await context.bridge.getRoleplaySessionMetadata(wake.sessionId)
+        : undefined;
       const input = {
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
         bodyState: wake.state,
-        ...(context.profile.profile.contextPolicy?.strategyId ===
-          "roleplay_scene_aware_compaction" &&
-        (context.profile.profile.brain?.strategy === "roleplay_narrator" ||
-          context.profile.profile.roleplayNarrator !== undefined)
-          ? { compactionDomainContext: emptyRoleplayCompactionDomainContext() }
+        ...(roleplayCompactionEnabled
+          ? {
+              compactionDomainContext: roleplayCompactionDomainContext(
+                roleplayCompactionEvidenceFromMetadata(
+                  roleplayMetadata,
+                  wake.sessionId,
+                ),
+              ),
+            }
           : {}),
         ...(wake.providerState === undefined && wake.durableConversation
           ? { durableConversation: wake.durableConversation }
@@ -364,15 +380,6 @@ export async function createOpenAiResponsesBrainHost(
         );
       return withOpenAiResponsesProviderStateScope(result, context);
     },
-  };
-}
-
-function emptyRoleplayCompactionDomainContext(): unknown {
-  return {
-    schemaVersion: 1,
-    retentionTiers: [],
-    directorsNotes: [],
-    extractionRequests: [],
   };
 }
 

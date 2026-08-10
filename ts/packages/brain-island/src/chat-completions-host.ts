@@ -32,6 +32,7 @@ import {
 } from "./chat-completions-continuation-policy.js";
 import type { RoleplayNarratorProviderPhase } from "./roleplay-narrator-fsm.js";
 import type { NarratorImageContextResolution } from "./narrator-image-context.js";
+import { emptyRoleplayCompactionDomainContext } from "./roleplay-compaction-domain-context.js";
 
 export function createChatCompletionsBrainHost(
   context: BrainHostContext,
@@ -58,6 +59,7 @@ export function createChatCompletionsBrainHost(
           liveEvents: phase.submitEvent !== undefined,
           planActions: phase.planActions,
           narratorPhase: phase.phase,
+          compactionDomainContext: phase.compactionDomainContext,
         }),
       planActions: context.planActions,
       resolveTools: context.toolResolver,
@@ -143,6 +145,7 @@ interface RustChatCompletionsBrainImplementationOptions {
   liveEvents?: boolean;
   planActions?: BrainActionPlanner;
   narratorPhase?: RoleplayNarratorProviderPhase;
+  compactionDomainContext?: unknown;
 }
 
 function createRustChatCompletionsBrainHostExecutor(
@@ -199,7 +202,11 @@ function createRustChatCompletionsBrainHostExecutor(
           "roleplay_scene_aware_compaction" &&
         (context.profile.profile.brain?.strategy === "roleplay_narrator" ||
           context.profile.profile.roleplayNarrator !== undefined)
-          ? { compactionDomainContext: emptyRoleplayCompactionDomainContext() }
+          ? {
+              compactionDomainContext:
+                implementation.compactionDomainContext ??
+                emptyRoleplayCompactionDomainContext(),
+            }
           : {}),
         ...(narratorImageContext?.images.length
           ? { inputImages: narratorImageContext.images }
@@ -327,15 +334,6 @@ function createRustChatCompletionsBrainHostExecutor(
       }
       return withChatCompletionsProviderStateScope(result, context);
     },
-  };
-}
-
-function emptyRoleplayCompactionDomainContext(): unknown {
-  return {
-    schemaVersion: 1,
-    retentionTiers: [],
-    directorsNotes: [],
-    extractionRequests: [],
   };
 }
 

@@ -28,6 +28,7 @@ import {
   resolveToolSession,
   type BrainToolResolver,
 } from "./tool-session-selection.js";
+import { roleplayCompactionDomainContext } from "./roleplay-compaction-domain-context.js";
 
 export interface RoleplayNarratorBrainOptions {
   createPhaseBrain: RoleplayNarratorPhaseBrainFactory;
@@ -58,6 +59,7 @@ export interface RoleplayNarratorPhaseBrainOptions {
   toolProfile?: ToolProfile;
   submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
   planActions?: BrainActionPlanner;
+  compactionDomainContext?: unknown;
 }
 
 export type RoleplayNarratorPhaseBrainFactory = (
@@ -188,6 +190,15 @@ async function runNarratorProviderPhase(
       receipt.directive.outputMode === "final"
         ? options.planActions
         : undefined,
+    compactionDomainContext: roleplayCompactionDomainContext({
+      sceneId: receipt.sessionId,
+      sceneBrief: receipt.state.sceneBrief,
+      relevantLore: receipt.state.relevantLore.map((source) => ({
+        sourceId: source.source_id,
+        title: source.title,
+        body: source.body,
+      })),
+    }),
   });
   return brain.wake(
     withFilteredTools(
@@ -206,6 +217,7 @@ function createNarratorPhaseBrain(
     allowedTools: ReadonlySet<string>;
     submitEvent?: (event: BrainEventEnvelope) => Promise<void>;
     planActions?: BrainActionPlanner;
+    compactionDomainContext?: unknown;
   },
 ): BrainHostExecutor {
   const resolveTools = filteringResolver(
@@ -222,6 +234,7 @@ function createNarratorPhaseBrain(
     toolProfile,
     submitEvent: phase.submitEvent,
     planActions: phase.planActions,
+    compactionDomainContext: phase.compactionDomainContext,
   });
 }
 

@@ -32,6 +32,8 @@ pub struct RoleplayCompactionSceneBoundaryV1 {
     pub scene_id: String,
     pub source_refs: Vec<String>,
     pub reason: RoleplaySceneBoundaryReason,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -82,6 +84,8 @@ pub struct RoleplayCompactionExtractionRequestV1 {
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayCompactionDomainContextV1 {
     pub schema_version: u32,
+    #[serde(default)]
+    pub derive_source_refs: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scene_boundary: Option<RoleplayCompactionSceneBoundaryV1>,
     #[serde(default)]
@@ -96,6 +100,7 @@ impl Default for RoleplayCompactionDomainContextV1 {
     fn default() -> Self {
         Self {
             schema_version: 1,
+            derive_source_refs: false,
             scene_boundary: None,
             retention_tiers: Vec::new(),
             directors_notes: Vec::new(),
@@ -191,7 +196,8 @@ impl BrainContextCompactionStrategy for RoleplaySceneAwareCompactionStrategy {
         &self,
         input: BrainContextCompactionStrategyInput,
     ) -> Result<BrainContextCompactionPreservationDecision, String> {
-        let domain = parse_domain_context(input.domain_context.as_ref())?;
+        let mut domain = parse_domain_context(input.domain_context.as_ref())?;
+        resolve_derived_source_refs(&input, &mut domain)?;
         validate_domain_context(&input, &domain)?;
 
         let boundary = input.safe_boundary.compact_before_item;
@@ -238,7 +244,13 @@ impl BrainContextCompactionStrategy for RoleplaySceneAwareCompactionStrategy {
                 .as_ref()
                 .map(|boundary| RoleplayCompactionScenePayloadV1 {
                     scene_id: boundary.scene_id.clone(),
-                    summary: narrative_excerpt(&boundary.source_refs, &item_by_ref, 900),
+                    summary: boundary
+                        .summary
+                        .clone()
+                        .filter(|summary| !summary.trim().is_empty())
+                        .unwrap_or_else(|| {
+                            narrative_excerpt(&boundary.source_refs, &item_by_ref, 900)
+                        }),
                     source_refs: boundary.source_refs.clone(),
                 });
         let directors_notes = domain
@@ -354,6 +366,49 @@ fn parse_domain_context(
         ));
     }
     Ok(domain)
+}
+
+fn resolve_derived_source_refs(
+    input: &BrainContextCompactionStrategyInput,
+    domain: &mut RoleplayCompactionDomainContextV1,
+) -> Result<(), String> {
+    if !domain.derive_source_refs {
+        return Ok(());
+    }
+    let candidates = input
+        .snapshot
+        .items
+        .iter()
+        .take(input.safe_boundary.compact_before_item)
+        .filter(|item| matches!(item.role.as_str(), "user" | "assistant"))
+        .map(|item| item.source_ref.clone())
+        .rev()
+        .take(6)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Err(
+            "roleplay domain context could not derive provenance before the safe boundary".into(),
+        );
+    }
+    if let Some(scene) = &mut domain.scene_boundary {
+        if scene.source_refs.is_empty() {
+            scene.source_refs = candidates.clone();
+        }
+    }
+    for note in &mut domain.directors_notes {
+        if note.provenance_source_refs.is_empty() {
+            note.provenance_source_refs = candidates.clone();
+        }
+    }
+    for request in &mut domain.extraction_requests {
+        if request.source_refs.is_empty() {
+            request.source_refs = candidates.clone();
+        }
+    }
+    Ok(())
 }
 
 fn validate_domain_context(
@@ -670,6 +725,46 @@ mod tests {
         assert!(decision.retained_source_refs.contains(&"rp-4".to_string()));
         assert!(decision.retained_source_refs.contains(&"rp-5".to_string()));
         assert!(!decision.summary_text.contains("secret arguments"));
+    }
+
+    #[test]
+    fn production_evidence_derives_valid_refs_inside_the_safe_boundary() {
+        let decision = RoleplaySceneAwareCompactionStrategy
+            .preserve(input(json!({
+                "schemaVersion": 1,
+                "deriveSourceRefs": true,
+                "sceneBoundary": {
+                    "sceneId": "session-1",
+                    "sourceRefs": [],
+                    "reason": "director_boundary",
+                    "summary": "The locket promise continues in the orchard."
+                },
+                "directorsNotes": [{
+                    "noteId": "scene:session-1",
+                    "text": "Preserve voice and emotional continuity around the locket.",
+                    "provenanceSourceRefs": []
+                }],
+                "extractionRequests": [{
+                    "requestId": "lore:locket",
+                    "kind": "lore_fact",
+                    "sourceRefs": []
+                }]
+            })))
+            .expect("derived production provenance");
+        let payload = serde_json::from_value::<RoleplayCompactionPreservationPayloadV1>(
+            decision.preservation_payload,
+        )
+        .expect("typed payload");
+        let scene = payload.scene.expect("scene payload");
+        assert_eq!(
+            scene.summary,
+            "The locket promise continues in the orchard."
+        );
+        assert_eq!(scene.source_refs, vec!["rp-0", "rp-1"]);
+        assert_eq!(payload.directors_notes[0].source_refs, vec!["rp-0", "rp-1"]);
+        assert_eq!(payload.retained_facts[0].source_refs, vec!["rp-0", "rp-1"]);
+        assert!(!decision.compacted_source_refs.contains(&"rp-4".to_string()));
+        assert!(!decision.compacted_source_refs.contains(&"rp-5".to_string()));
     }
 
     #[test]

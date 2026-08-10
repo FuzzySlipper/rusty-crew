@@ -165,6 +165,37 @@ async function runSmoke(): Promise<void> {
     phaseFactory.calls[1]?.instructions ?? "",
     /Night-blooming orchids/,
   );
+  assert.deepEqual(phaseFactory.calls[1]?.compactionDomainContext, {
+    schemaVersion: 1,
+    deriveSourceRefs: true,
+    sceneBoundary: {
+      sceneId: sessionId,
+      sourceRefs: [],
+      reason: "director_boundary",
+      summary:
+        '{"sceneBrief":{"location":"Moonlit Garden","capturedFacts":["silver locket missing"]}}',
+    },
+    retentionTiers: [],
+    directorsNotes: [
+      {
+        noteId: `scene:${sessionId}`,
+        text: 'Preserve voice and emotional continuity. Current scene: {"sceneBrief":{"location":"Moonlit Garden","capturedFacts":["silver locket missing"]}}',
+        provenanceSourceRefs: [],
+      },
+      {
+        noteId: "lore:moonlit-garden",
+        text: "Moonlit Garden: Night-blooming orchids mark the path to the missing locket.",
+        provenanceSourceRefs: [],
+      },
+    ],
+    extractionRequests: [
+      {
+        requestId: "lore:moonlit-garden",
+        kind: "lore_fact",
+        sourceRefs: [],
+      },
+    ],
+  });
   assert.equal(
     result.actions.find((action) => action.type === "deliver_completion")
       ?.packet.summary,
@@ -398,6 +429,7 @@ class RecordingPhaseBrainFactory {
     toolNames: string[];
     instructions: string;
     plannedActions: boolean;
+    compactionDomainContext?: unknown;
   }> = [];
 
   constructor(private readonly responses: readonly string[]) {}
@@ -416,6 +448,7 @@ class RecordingPhaseBrainFactory {
           toolNames: resolvedTools.map((tool) => tool.name),
           instructions: input.roleAssembly.instructions ?? "",
           plannedActions: options.planActions !== undefined,
+          compactionDomainContext: options.compactionDomainContext,
         });
         const call = this.calls[index];
         assert.ok(call);
