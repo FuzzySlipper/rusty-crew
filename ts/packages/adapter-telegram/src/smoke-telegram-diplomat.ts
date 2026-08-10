@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import type {
   AdapterId,
   AgentId,
@@ -447,6 +448,263 @@ const rateConnector = new TelegramChannelConnector({
 await rateConnector.pollOnce();
 assert.equal(rateConnector.diagnostics().inbound.rateLimited, 1);
 
+const mediaUpdates: TelegramUpdate[] = [
+  {
+    update_id: 50,
+    message: {
+      message_id: 150,
+      message_thread_id: 42,
+      date: 1_786_000_050,
+      chat: { id: chatId, type: "supergroup" },
+      from: { id: 1001, first_name: "Patch" },
+      caption: "screenshot proof",
+      photo: [
+        {
+          file_id: "photo-small",
+          file_unique_id: "photo-small-unique",
+          file_size: 2,
+          width: 10,
+          height: 10,
+        },
+        {
+          file_id: "photo-large",
+          file_unique_id: "photo-proof-unique",
+          file_size: 4,
+          width: 100,
+          height: 100,
+        },
+      ],
+    },
+  },
+  {
+    update_id: 51,
+    message: {
+      message_id: 151,
+      message_thread_id: 42,
+      date: 1_786_000_051,
+      chat: { id: chatId, type: "supergroup" },
+      from: { id: 1001, first_name: "Patch" },
+      caption: "diagnostic report",
+      document: {
+        file_id: "report-file",
+        file_unique_id: "report-unique",
+        file_name: "report.txt",
+        mime_type: "text/plain",
+        file_size: 6,
+      },
+    },
+  },
+  {
+    update_id: 52,
+    message: {
+      message_id: 152,
+      message_thread_id: 42,
+      date: 1_786_000_052,
+      chat: { id: chatId, type: "supergroup" },
+      from: { id: 1001, first_name: "Patch" },
+      caption: "too large",
+      document: {
+        file_id: "oversized-file",
+        file_unique_id: "oversized-unique",
+        file_name: "large.log",
+        mime_type: "text/plain",
+        file_size: 99,
+      },
+    },
+  },
+  {
+    update_id: 53,
+    message: {
+      message_id: 153,
+      message_thread_id: 42,
+      date: 1_786_000_053,
+      chat: { id: chatId, type: "supergroup" },
+      from: { id: 1001, first_name: "Patch" },
+      caption: "mismatched type",
+      document: {
+        file_id: "mismatch-file",
+        file_unique_id: "mismatch-unique",
+        file_name: "claim.txt",
+        mime_type: "text/plain",
+        file_size: 4,
+      },
+    },
+  },
+  {
+    update_id: 54,
+    message: {
+      message_id: 154,
+      message_thread_id: 42,
+      date: 1_786_000_054,
+      chat: { id: chatId, type: "supergroup" },
+      from: { id: 1001, first_name: "Patch" },
+      caption: "same screenshot forwarded again",
+      photo: [
+        {
+          file_id: "photo-large",
+          file_unique_id: "photo-proof-unique",
+          file_size: 4,
+          width: 100,
+          height: 100,
+        },
+      ],
+    },
+  },
+];
+const mediaBodies: NormalizedChannelInboundMessage[] = [];
+const persistedMedia = new Map<string, string>();
+const mediaConnector = new TelegramChannelConnector({
+  adapterId,
+  bot: {
+    getUpdates(request: TelegramGetUpdatesRequest = {}) {
+      return mediaUpdates.filter(
+        (update) => update.update_id >= (request.offset ?? 0),
+      );
+    },
+    sendMessage() {
+      return { message_id: 1 };
+    },
+    getFile(fileId) {
+      const unique =
+        fileId === "photo-large"
+          ? "photo-proof-unique"
+          : fileId === "report-file"
+            ? "report-unique"
+            : fileId === "mismatch-file"
+              ? "mismatch-unique"
+              : `${fileId}-unique`;
+      return {
+        file_id: fileId,
+        file_unique_id: unique,
+        file_size: fileId === "report-file" ? 6 : 4,
+        file_path: `${fileId}.bin`,
+      };
+    },
+    downloadFile(filePath) {
+      if (filePath.startsWith("report-file")) {
+        return {
+          bytes: new TextEncoder().encode("report"),
+          contentType: "text/plain",
+        };
+      }
+      return {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: filePath.startsWith("mismatch-file")
+          ? "application/pdf"
+          : "image/jpeg",
+      };
+    },
+  },
+  offsetStore: new MemoryTelegramUpdateOffsetStore(),
+  terminalStore: new MemoryTelegramUpdateTerminalStore(),
+  bindings: () => [alphaBinding],
+  ingest(message) {
+    mediaBodies.push(message);
+    return { status: "routed" };
+  },
+  persistMedia(input) {
+    const attachmentId =
+      persistedMedia.get(input.fileUniqueId) ??
+      `attachment:${input.fileUniqueId}`;
+    persistedMedia.set(input.fileUniqueId, attachmentId);
+    return {
+      attachmentId,
+      filename: input.filename,
+      mediaType: input.mediaType,
+      byteSize: input.bytes.byteLength,
+      sha256: createHash("sha256").update(input.bytes).digest("hex"),
+      contentUrl: `http://crew.local/${attachmentId}`,
+    };
+  },
+  maxDocumentBytes: 10,
+  ttlMs: 60_000,
+  pollTimeoutSeconds: 0,
+});
+await mediaConnector.pollOnce();
+assert.equal(mediaBodies[0]?.attachments.length, 1);
+assert.equal(mediaBodies[0]?.attachments[0]?.state, "available");
+assert.equal(mediaBodies[0]?.attachments[0]?.mediaType, "image/jpeg");
+assert.equal(mediaBodies[1]?.attachments[0]?.state, "available");
+assert.equal(mediaBodies[1]?.attachments[0]?.mediaType, "text/plain");
+assert.equal(mediaBodies[2]?.attachments[0]?.state, "oversized");
+assert.equal(
+  mediaBodies[2]?.attachments[0]?.reasonCode,
+  "telegram_media_oversized",
+);
+assert.equal(mediaBodies[3]?.attachments[0]?.state, "unsupported");
+assert.equal(
+  mediaBodies[3]?.attachments[0]?.reasonCode,
+  "telegram_media_mime_mismatch",
+);
+assert.equal(
+  mediaBodies[4]?.attachments[0]?.attachmentId,
+  mediaBodies[0]?.attachments[0]?.attachmentId,
+);
+assert.equal(persistedMedia.size, 2);
+assert.equal(mediaConnector.diagnostics().media.available, 3);
+assert.equal(mediaConnector.diagnostics().media.oversized, 1);
+assert.equal(mediaConnector.diagnostics().media.unsupported, 1);
+
+let interruptedDownloadAttempts = 0;
+const interruptedOffset = new MemoryTelegramUpdateOffsetStore();
+const interruptedConnector = new TelegramChannelConnector({
+  adapterId,
+  bot: {
+    getUpdates(request: TelegramGetUpdatesRequest = {}) {
+      return mediaUpdates[0]!.update_id >= (request.offset ?? 0)
+        ? [mediaUpdates[0]!]
+        : [];
+    },
+    sendMessage() {
+      return { message_id: 1 };
+    },
+    getFile() {
+      return {
+        file_id: "photo-large",
+        file_unique_id: "photo-proof-unique",
+        file_size: 4,
+        file_path: "photo-large.jpg",
+      };
+    },
+    downloadFile() {
+      interruptedDownloadAttempts += 1;
+      if (interruptedDownloadAttempts < 3) {
+        throw new TypeError("interrupted Telegram download");
+      }
+      return {
+        bytes: new Uint8Array([1, 2, 3, 4]),
+        contentType: "image/jpeg",
+      };
+    },
+  },
+  offsetStore: interruptedOffset,
+  terminalStore: new MemoryTelegramUpdateTerminalStore(),
+  bindings: () => [alphaBinding],
+  ingest() {
+    return { status: "routed" };
+  },
+  persistMedia(input) {
+    return {
+      attachmentId: `attachment:${input.fileUniqueId}`,
+      filename: input.filename,
+      mediaType: input.mediaType,
+      byteSize: input.bytes.byteLength,
+      sha256: createHash("sha256").update(input.bytes).digest("hex"),
+      contentUrl: "http://crew.local/photo",
+    };
+  },
+  ttlMs: 60_000,
+  pollTimeoutSeconds: 0,
+  maxInboundAttempts: 3,
+});
+await interruptedConnector.pollOnce();
+assert.equal(await interruptedOffset.read(), undefined);
+await interruptedConnector.pollOnce();
+assert.equal(await interruptedOffset.read(), undefined);
+await interruptedConnector.pollOnce();
+assert.equal(await interruptedOffset.read(), 51);
+assert.equal(interruptedConnector.diagnostics().media.retried, 2);
+
 console.log(
   JSON.stringify(
     {
@@ -459,6 +717,8 @@ console.log(
       deliveryAttempts: receipt.attempts,
       loopTerminated: terminalConnector.diagnostics().inbound.loopTerminated,
       rateLimited: rateConnector.diagnostics().inbound.rateLimited,
+      mediaAvailable: mediaConnector.diagnostics().media.available,
+      mediaRetries: interruptedConnector.diagnostics().media.retried,
     },
     null,
     2,

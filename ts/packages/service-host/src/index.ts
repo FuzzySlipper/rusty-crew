@@ -211,6 +211,7 @@ function defaultServiceAdapterFactories(): ServiceAdapterFactories {
         terminalStore: new FileTelegramUpdateTerminalStore(
           input.terminalStorePath,
         ),
+        persistMedia: input.persistMedia,
         bindings: input.bindings,
         ttlMs: input.ttlMs,
         pollIntervalMs: input.pollIntervalMs,

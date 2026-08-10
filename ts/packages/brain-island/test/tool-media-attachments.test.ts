@@ -160,6 +160,76 @@ test("narrator image provider capability is explicit and bounded", () => {
   );
 });
 
+test("Telegram channel media uses Crew attachment storage across duplicate delivery and restart", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rusty-telegram-media-"));
+  const testHarness = harness(root);
+  const image = png(4, 5);
+  const store = testHarness.createStore();
+  const input = {
+    sessionId: "diplomat-session",
+    provider: "telegram",
+    adapterId: "telegram-main",
+    botUserId: "2001",
+    bindingId: "diplomat-binding",
+    fileId: "bot-local-file-id",
+    fileUniqueId: "portable-unique-file-id",
+    filename: "service-proof.png",
+    mediaType: "image/png",
+    bytes: image,
+    provenance: {
+      externalChannelId: "-1006763",
+      externalThreadId: "42",
+      externalMessageId: "150",
+      externalUserId: "1001",
+      updateId: 50,
+    },
+  };
+  const first = await store.persistExternalChannelAttachment(input);
+  const duplicate = await store.persistExternalChannelAttachment({
+    ...input,
+    fileId: "different-bot-local-file-id",
+    provenance: { ...input.provenance, externalMessageId: "151", updateId: 51 },
+  });
+  assert.equal(duplicate.attachmentId, first.attachmentId);
+  assert.equal(testHarness.attachments.size, 1);
+  assert.equal(first.byteSize, image.length);
+  assert.match(first.sha256, /^[a-f0-9]{64}$/);
+  const record = testHarness.attachments.get(first.attachmentId)!;
+  const metadata = record.metadata_json as Record<string, unknown>;
+  assert.equal(metadata.source, "external_channel_media");
+  assert.equal(metadata.provider_file_unique_id, input.fileUniqueId);
+  assert.deepEqual(metadata.provenance, input.provenance);
+
+  const restarted = testHarness.createStore();
+  const readback = await restarted.readContent(
+    input.sessionId,
+    first.attachmentId,
+  );
+  assert.deepEqual(readback.bytes, image);
+  await restarted.removeContent(readback.attachment);
+  await assert.rejects(
+    restarted.readContent(input.sessionId, first.attachmentId),
+  );
+
+  const document = await store.persistExternalChannelAttachment({
+    ...input,
+    fileId: "report-file",
+    fileUniqueId: "report-unique",
+    filename: "diagnostic.txt",
+    mediaType: "text/plain",
+    bytes: new TextEncoder().encode("diagnostic report"),
+  });
+  assert.equal(document.mediaType, "text/plain");
+  assert.equal(
+    (
+      await testHarness
+        .createStore()
+        .readContent(input.sessionId, document.attachmentId)
+    ).bytes.toString("utf8"),
+    "diagnostic report",
+  );
+});
+
 test("typed tool images persist, replay after restart, link, and remove without base64 events", async () => {
   const root = await mkdtemp(join(tmpdir(), "rusty-tool-media-"));
   const testHarness = harness(root);

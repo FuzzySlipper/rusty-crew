@@ -117,6 +117,25 @@ assert.deepEqual(request, {
   link_preview_options: { is_disabled: true },
 });
 
+const artifactRequest = toTelegramSendMessageRequest({
+  ...outbound,
+  attachments: [
+    {
+      ref: "crew:attachment:proof",
+      attachmentId: "proof",
+      filename: "proof.png",
+      mediaType: "image/png",
+      byteSize: 128,
+      sha256: "a".repeat(64),
+      contentUrl: "https://crew.local/attachments/proof",
+      state: "available",
+    },
+  ],
+});
+assert.match(artifactRequest.text, /proof\.png/);
+assert.match(artifactRequest.text, /https:\/\/crew\.local\/attachments\/proof/);
+assert.equal(artifactRequest.text.includes("telegram:file:"), false);
+
 const sent: TelegramSendMessageRequest[] = [];
 const adapter = createTelegramChannelAdapter({
   adapterId,

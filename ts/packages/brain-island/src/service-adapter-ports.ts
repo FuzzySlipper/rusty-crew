@@ -538,6 +538,25 @@ export interface TelegramConnectorFactoryInput {
   onInbound(
     message: NormalizedChannelInboundMessage,
   ): Promise<ChannelIngressResult>;
+  persistMedia(input: {
+    sessionId: string;
+    adapterId: AdapterId;
+    botUserId?: string;
+    bindingId: string;
+    fileId: string;
+    fileUniqueId: string;
+    filename: string;
+    mediaType: string;
+    bytes: Uint8Array;
+    provenance: Record<string, unknown>;
+  }): Promise<{
+    attachmentId: string;
+    filename: string;
+    mediaType: string;
+    byteSize: number;
+    sha256: string;
+    contentUrl: string;
+  }>;
 }
 
 export type ChannelIngressResult =
@@ -641,6 +660,18 @@ export interface ChannelIngressOptions {
   routePlanner?(
     input: ChannelIngressRoutePlannerInput,
   ): Promise<ChannelRouteResolution> | ChannelRouteResolution;
+  deliverRoutedMessage?(input: {
+    message: NormalizedChannelInboundMessage;
+    binding: ChannelBindingRecord;
+    route: {
+      from: AgentId;
+      to: AgentId;
+      body: string;
+      correlationId: string;
+      bindingId: string;
+      sessionId?: string;
+    };
+  }): Promise<EventReceipt> | EventReceipt;
 }
 
 export interface ChannelProjectionSink {

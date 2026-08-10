@@ -45,6 +45,7 @@ import type {
   DenSuccessorGatewayClient,
   ServiceAdapterFactories,
   TelegramChannelConnectorPort,
+  TelegramConnectorFactoryInput,
 } from "./service-adapter-ports.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
@@ -100,6 +101,7 @@ export interface ServiceAdapterLifecycleContext {
   channelWakePolicyForSession(
     session: RustyCrewRuntimeConfig["sessions"][number],
   ): ChannelWakePolicy;
+  persistTelegramMedia: TelegramConnectorFactoryInput["persistMedia"];
 }
 
 export async function connectDenSuccessorGateway(
@@ -407,9 +409,39 @@ export async function startTelegramConnector(
         ensureSessionForRoute: ({ binding }) =>
           context.ensureSessionForChannelBinding({ binding }),
         routePlanner: (input) => planChannelIngressRoute(context.bridge, input),
+        deliverRoutedMessage: async ({ message, route }) => {
+          const receipt = await context.bridge.deliverAgentMessage({
+            caller: {
+              type: "system",
+              senderAgentId: route.from,
+            },
+            deliveryId: `telegram-delivery:${message.idempotencyKey}`,
+            idempotencyKey: `telegram-delivery:${message.idempotencyKey}`,
+            messageId: `telegram-message:${message.idempotencyKey}`,
+            toAddress: route.to,
+            inputKind: "operator",
+            body: telegramInboundModelBody(message, route.body),
+            imageAttachmentIds: message.attachments.flatMap((attachment) =>
+              attachment.state === "available" &&
+              attachment.mediaType?.startsWith("image/") &&
+              attachment.attachmentId
+                ? [attachment.attachmentId]
+                : [],
+            ),
+            correlationId: route.correlationId,
+            requireWake: true,
+            createdAt: message.receivedAt,
+            expiresAt: message.expiresAt,
+          });
+          return {
+            accepted: receipt.status === "accepted",
+            sequence: receipt.sequence ?? 0,
+          };
+        },
         now: context.now(),
       });
     },
+    persistMedia: context.persistTelegramMedia,
   });
   const outboundSubscription = await context.bridge.subscribeEvents({
     eventKinds: ["agent_message_routed"],
@@ -422,6 +454,40 @@ export async function startTelegramConnector(
     eventType: "telegram_connector_started",
     summary: `Telegram connector started with ${connector.diagnostics().bindingCount} active binding(s).`,
   });
+}
+
+function telegramInboundModelBody(
+  message: NormalizedChannelInboundMessage,
+  body: string,
+): string {
+  const sender =
+    message.author.username === undefined
+      ? message.author.externalUserId
+      : `@${message.author.username} (${message.author.externalUserId})`;
+  const header = `[Telegram ${message.author.kind ?? "human"} ${sender}; chat=${message.providerRefs.externalChannelId}${
+    message.providerRefs.externalThreadId === undefined
+      ? ""
+      : `; topic=${message.providerRefs.externalThreadId}`
+  }; message=${message.providerRefs.externalMessageId ?? "unknown"}]`;
+  const documents = message.attachments
+    .filter(
+      (attachment) =>
+        attachment.state === "available" &&
+        !attachment.mediaType?.startsWith("image/"),
+    )
+    .map(
+      (attachment) =>
+        `[Crew attachment attachment_id=${attachment.attachmentId} filename=${attachment.filename} mime_type=${attachment.mediaType} byte_size=${attachment.byteSize} content_url=${attachment.contentUrl}]`,
+    );
+  const unavailable = message.attachments
+    .filter((attachment) => attachment.state !== "available")
+    .map(
+      (attachment) =>
+        `[Telegram attachment unavailable filename=${attachment.filename ?? attachment.label ?? "unknown"} state=${attachment.state ?? "failed"} reason=${attachment.reasonCode ?? "unknown"}]`,
+    );
+  return [header, body, ...documents, ...unavailable]
+    .filter((line) => line.length > 0)
+    .join("\n");
 }
 
 export async function restartTelegramConnector(

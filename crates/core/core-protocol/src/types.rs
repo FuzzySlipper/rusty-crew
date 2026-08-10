@@ -882,6 +882,8 @@ pub struct ChannelMessageExternalPayload {
     pub external_message_id: Option<String>,
     pub from: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachment_ids: Vec<String>,
     pub received_at: IsoTimestamp,
     pub expires_at: IsoTimestamp,
 }
@@ -2135,6 +2137,7 @@ mod tests {
                 external_message_id: Some("message-1".to_string()),
                 from: "den-user-alpha".to_string(),
                 text: "hello".to_string(),
+                attachment_ids: vec!["attachment-proof".to_string()],
                 received_at: "2026-06-20T05:01:00.000Z".to_string(),
                 expires_at: "2026-06-20T05:01:05.000Z".to_string(),
             }),
@@ -2144,6 +2147,7 @@ mod tests {
         assert_eq!(json["type"], "channel_message");
         assert_eq!(json["binding_id"], "binding-alpha");
         assert_eq!(json["correlation_id"], "channel:binding-alpha:message-1");
+        assert_eq!(json["attachment_ids"][0], "attachment-proof");
 
         let round_trip: ExternalEventPayload =
             serde_json::from_value(json).expect("deserialize payload");

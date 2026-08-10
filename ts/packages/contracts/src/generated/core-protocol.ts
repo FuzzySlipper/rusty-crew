@@ -985,6 +985,7 @@ export type ExternalEventPayload = {
   text: string;
   type: "human_message";
 } | {
+  attachmentIds?: Array<string>;
   bindingId: string;
   correlationId: string;
   expiresAt: string;

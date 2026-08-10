@@ -271,6 +271,19 @@ export interface ChannelAttachmentRef {
   ref: string;
   mediaType?: string;
   label?: string;
+  attachmentId?: string;
+  filename?: string;
+  byteSize?: number;
+  sha256?: string;
+  contentUrl?: string;
+  state?:
+    | "pending"
+    | "available"
+    | "unsupported"
+    | "oversized"
+    | "expired"
+    | "failed";
+  reasonCode?: string;
 }
 
 export interface NormalizedChannelInboundMessage {
@@ -302,6 +315,7 @@ export interface NormalizedChannelOutboundMessage {
   runtime: ChannelRuntimeIdentity;
   providerRefs: ChannelProviderRefs;
   body: string;
+  attachments?: ChannelAttachmentRef[];
   replyToExternalMessageId?: string;
   correlationId?: string;
   idempotencyKey: string;

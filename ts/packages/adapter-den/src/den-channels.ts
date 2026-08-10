@@ -213,6 +213,11 @@ export function denChannelsInboundToChannelExternalEvent(
       externalMessageId: message.providerRefs.externalMessageId,
       from: message.author.externalUserId,
       text: message.body,
+      attachmentIds: message.attachments.flatMap((attachment) =>
+        attachment.state === "available" && attachment.attachmentId
+          ? [attachment.attachmentId]
+          : [],
+      ),
       receivedAt: message.receivedAt,
       expiresAt: message.expiresAt,
     },

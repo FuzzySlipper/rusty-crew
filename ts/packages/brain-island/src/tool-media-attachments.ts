@@ -63,6 +63,29 @@ export interface ToolMediaAttachmentContent {
   bytes: Buffer;
 }
 
+export interface ExternalChannelAttachmentInput {
+  sessionId: string;
+  provider: string;
+  adapterId: string;
+  botUserId?: string;
+  bindingId: string;
+  fileId: string;
+  fileUniqueId: string;
+  filename: string;
+  mediaType: string;
+  bytes: Uint8Array;
+  provenance: Record<string, unknown>;
+}
+
+export interface ExternalChannelAttachmentReference {
+  attachmentId: string;
+  filename: string;
+  mediaType: string;
+  byteSize: number;
+  sha256: string;
+  contentUrl: string;
+}
+
 export class ToolMediaAttachmentStore
   implements
     BrainToolMediaSink,
@@ -389,6 +412,81 @@ export class ToolMediaAttachmentStore
       },
     });
     return this.readContent(input.sessionId, stored.attachmentId);
+  }
+
+  async persistExternalChannelAttachment(
+    input: ExternalChannelAttachmentInput,
+  ): Promise<ExternalChannelAttachmentReference> {
+    const bytes = Buffer.from(input.bytes);
+    if (bytes.length === 0) {
+      throw new ToolMediaAttachmentError(
+        "external_channel_attachment_empty",
+        "external channel attachment was empty",
+      );
+    }
+    const identity = [
+      input.sessionId,
+      input.provider,
+      input.adapterId,
+      input.botUserId ?? "bot-identity-unknown",
+      input.fileUniqueId,
+    ].join(":");
+    const metadata = {
+      source: "external_channel_media",
+      provider: input.provider,
+      adapter_id: input.adapterId,
+      bot_user_id: input.botUserId ?? null,
+      binding_id: input.bindingId,
+      provider_file_id: input.fileId,
+      provider_file_unique_id: input.fileUniqueId,
+      provenance: input.provenance,
+    };
+    let attachmentId: string;
+    let filename: string;
+    let contentUrl: string;
+    if (MIME_EXTENSIONS.has(input.mediaType)) {
+      const stored = await this.persistStoredImage({
+        sessionId: input.sessionId,
+        identity,
+        filename: input.filename,
+        mimeType: input.mediaType,
+        bytes,
+        metadata,
+      });
+      attachmentId = stored.attachmentId;
+      filename = stored.filename;
+      contentUrl = stored.downloadUrl;
+    } else {
+      if (bytes.length > this.maxDocumentBytes) {
+        throw new ToolMediaAttachmentError(
+          "external_channel_document_oversized",
+          `external channel document byte size ${bytes.length} exceeds ${this.maxDocumentBytes}`,
+        );
+      }
+      const stored = await this.persistStoredDocument({
+        sessionId: input.sessionId,
+        identity,
+        filename: input.filename,
+        extension: externalChannelDocumentExtension(
+          input.filename,
+          input.mediaType,
+        ),
+        mimeType: input.mediaType,
+        bytes,
+        metadata,
+      });
+      attachmentId = stored.attachmentId;
+      filename = stored.filename;
+      contentUrl = stored.downloadUrl;
+    }
+    return {
+      attachmentId,
+      filename,
+      mediaType: input.mediaType,
+      byteSize: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      contentUrl,
+    };
   }
 
   async uploadedAttachments(
@@ -1639,8 +1737,31 @@ function isToolMediaSource(value: unknown): boolean {
     value === "brain_tool_media" ||
     value === "external_runtime_media" ||
     value === "external_runtime_document" ||
+    value === "external_channel_media" ||
     value === "chat_upload"
   );
+}
+
+function externalChannelDocumentExtension(
+  filename: string,
+  mediaType: string,
+): string {
+  const extension = extname(filename).slice(1).toLowerCase();
+  if (/^[a-z0-9]{1,12}$/.test(extension)) return extension;
+  switch (mediaType) {
+    case "application/json":
+      return "json";
+    case "application/pdf":
+      return "pdf";
+    case "application/zip":
+      return "zip";
+    case "text/markdown":
+      return "md";
+    case "text/plain":
+      return "txt";
+    default:
+      return "bin";
+  }
 }
 
 function mediaReference(attachment: AttachmentRecord): BrainToolMediaReference {

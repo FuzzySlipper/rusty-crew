@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type {
   AdapterId,
   AgentId,
+  ChannelAttachmentRef,
   ChannelBindingRecord,
   ChannelVisibility,
   NormalizedChannelInboundMessage,
@@ -43,6 +44,7 @@ export interface TelegramChat {
 export interface TelegramPhotoSize {
   file_id: string;
   file_unique_id?: string;
+  file_size?: number;
   width?: number;
   height?: number;
 }
@@ -52,6 +54,19 @@ export interface TelegramDocument {
   file_unique_id?: string;
   file_name?: string;
   mime_type?: string;
+  file_size?: number;
+}
+
+export interface TelegramFile {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  file_path?: string;
+}
+
+export interface TelegramDownloadedFile {
+  bytes: Uint8Array;
+  contentType?: string;
 }
 
 export interface TelegramMessage {
@@ -104,6 +119,11 @@ export interface TelegramBotApiClient {
     request?: TelegramGetUpdatesRequest,
   ): Promise<TelegramUpdate[]> | TelegramUpdate[];
   sendMessage(request: TelegramSendMessageRequest): Promise<unknown> | unknown;
+  getFile?(fileId: string): Promise<TelegramFile> | TelegramFile;
+  downloadFile?(
+    filePath: string,
+    maxBytes: number,
+  ): Promise<TelegramDownloadedFile> | TelegramDownloadedFile;
 }
 
 export interface TelegramBindingInput {
@@ -177,6 +197,8 @@ export function createTelegramBotApiHttpClient(
   const timeoutMs = options.timeoutMs ?? 30_000;
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiUrl = (method: string) => `${baseUrl}/bot${token}/${method}`;
+  const fileUrl = (filePath: string) =>
+    `${baseUrl}/file/bot${token}/${filePath.replace(/^\/+/, "")}`;
 
   return {
     async getUpdates(request = {}) {
@@ -193,6 +215,21 @@ export function createTelegramBotApiHttpClient(
         body: request,
         timeoutMs,
         resultName: "sendMessage",
+      });
+    },
+    async getFile(fileId) {
+      return telegramApiRequest<TelegramFile>(fetchImpl, {
+        url: apiUrl("getFile"),
+        body: { file_id: fileId },
+        timeoutMs,
+        resultName: "getFile",
+      });
+    },
+    async downloadFile(filePath, maxBytes) {
+      return telegramFileRequest(fetchImpl, {
+        url: fileUrl(filePath),
+        timeoutMs,
+        maxBytes,
       });
     },
   };
@@ -293,6 +330,82 @@ async function telegramApiRequest<T>(
       );
     }
     return parsed.result;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function telegramFileRequest(
+  fetchImpl: typeof fetch,
+  input: { url: string; timeoutMs: number; maxBytes: number },
+): Promise<TelegramDownloadedFile> {
+  if (!Number.isSafeInteger(input.maxBytes) || input.maxBytes < 1) {
+    throw new Error("Telegram download byte limit must be positive");
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs);
+  try {
+    const response = await fetchImpl(input.url, {
+      method: "GET",
+      signal: controller.signal,
+      headers: { Accept: "*/*" },
+    });
+    if (!response.ok) {
+      throw new TelegramBotApiError({
+        method: "file download",
+        status: response.status,
+        description: response.statusText || "download failed",
+      });
+    }
+    const contentLength = Number(response.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > input.maxBytes) {
+      throw new TelegramMediaError(
+        "telegram_media_oversized",
+        `Telegram file is ${contentLength} bytes; maximum is ${input.maxBytes}`,
+        false,
+      );
+    }
+    if (response.body === null) {
+      throw new TelegramMediaError(
+        "telegram_media_download_empty",
+        "Telegram file download returned no response body",
+        true,
+      );
+    }
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let length = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      length += value.byteLength;
+      if (length > input.maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new TelegramMediaError(
+          "telegram_media_oversized",
+          `Telegram file exceeds maximum ${input.maxBytes} bytes`,
+          false,
+        );
+      }
+      chunks.push(value);
+    }
+    if (length === 0) {
+      throw new TelegramMediaError(
+        "telegram_media_download_empty",
+        "Telegram file download was empty",
+        true,
+      );
+    }
+    const bytes = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return {
+      bytes,
+      contentType: response.headers.get("content-type") ?? undefined,
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -411,6 +524,45 @@ export interface TelegramDeliveryReceipt {
   externalMessageIds: string[];
 }
 
+export interface TelegramMediaPersistenceInput {
+  sessionId: string;
+  adapterId: AdapterId;
+  botUserId?: string;
+  bindingId: string;
+  fileId: string;
+  fileUniqueId: string;
+  filename: string;
+  mediaType: string;
+  bytes: Uint8Array;
+  provenance: {
+    externalChannelId: string;
+    externalThreadId?: string;
+    externalMessageId: string;
+    externalUserId: string;
+    updateId: number;
+  };
+}
+
+export interface TelegramMediaPersistenceResult {
+  attachmentId: string;
+  filename: string;
+  mediaType: string;
+  byteSize: number;
+  sha256: string;
+  contentUrl: string;
+}
+
+export class TelegramMediaError extends Error {
+  constructor(
+    readonly reasonCode: string,
+    message: string,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "TelegramMediaError";
+  }
+}
+
 export interface TelegramConnectorOptions {
   adapterId: AdapterId;
   bot: TelegramBotApiClient;
@@ -428,6 +580,8 @@ export interface TelegramConnectorOptions {
   maxInboundAttempts?: number;
   maxOutboundAttempts?: number;
   maxMessageChars?: number;
+  maxImageBytes?: number;
+  maxDocumentBytes?: number;
   botUserId?: string;
   botUsername?: string;
   participationMode?:
@@ -437,6 +591,9 @@ export interface TelegramConnectorOptions {
   isCorrelatedBotMessage?: (
     message: NormalizedChannelInboundMessage,
   ) => boolean;
+  persistMedia?: (
+    input: TelegramMediaPersistenceInput,
+  ) => Promise<TelegramMediaPersistenceResult> | TelegramMediaPersistenceResult;
   onNonExecutableUpdate?: (
     update: TelegramNonExecutableUpdate,
   ) => Promise<void> | void;
@@ -483,6 +640,17 @@ export interface TelegramConnectorDiagnostics {
     lastError?: string;
     lastExternalMessageId?: string;
   };
+  media: {
+    available: number;
+    duplicate: number;
+    unsupported: number;
+    oversized: number;
+    expired: number;
+    failed: number;
+    retried: number;
+    bytesStored: number;
+    lastError?: string;
+  };
 }
 
 export class TelegramChannelConnector {
@@ -503,6 +671,8 @@ export class TelegramChannelConnector {
   readonly #maxInboundAttempts: number;
   readonly #maxOutboundAttempts: number;
   readonly #maxMessageChars: number;
+  readonly #maxImageBytes: number;
+  readonly #maxDocumentBytes: number;
   readonly #botUserId: string | undefined;
   readonly #botUsername: string | undefined;
   readonly #participationMode: NonNullable<
@@ -511,6 +681,7 @@ export class TelegramChannelConnector {
   readonly #isCorrelatedBotMessage:
     | TelegramConnectorOptions["isCorrelatedBotMessage"]
     | undefined;
+  readonly #persistMedia: TelegramConnectorOptions["persistMedia"];
   readonly #onNonExecutableUpdate:
     | TelegramConnectorOptions["onNonExecutableUpdate"]
     | undefined;
@@ -555,6 +726,17 @@ export class TelegramChannelConnector {
     lastError: undefined as string | undefined,
     lastExternalMessageId: undefined as string | undefined,
   };
+  #media = {
+    available: 0,
+    duplicate: 0,
+    unsupported: 0,
+    oversized: 0,
+    expired: 0,
+    failed: 0,
+    retried: 0,
+    bytesStored: 0,
+    lastError: undefined as string | undefined,
+  };
 
   constructor(options: TelegramConnectorOptions) {
     this.#adapterId = options.adapterId;
@@ -575,6 +757,8 @@ export class TelegramChannelConnector {
     this.#maxInboundAttempts = options.maxInboundAttempts ?? 3;
     this.#maxOutboundAttempts = options.maxOutboundAttempts ?? 3;
     this.#maxMessageChars = options.maxMessageChars ?? 4_096;
+    this.#maxImageBytes = options.maxImageBytes ?? 20 * 1024 * 1024;
+    this.#maxDocumentBytes = options.maxDocumentBytes ?? 1024 * 1024;
     if (
       !Number.isSafeInteger(this.#maxInboundAttempts) ||
       this.#maxInboundAttempts < 1
@@ -593,10 +777,20 @@ export class TelegramChannelConnector {
     ) {
       throw new Error("Telegram message character limit must be positive");
     }
+    if (!Number.isSafeInteger(this.#maxImageBytes) || this.#maxImageBytes < 1) {
+      throw new Error("Telegram image byte limit must be positive");
+    }
+    if (
+      !Number.isSafeInteger(this.#maxDocumentBytes) ||
+      this.#maxDocumentBytes < 1
+    ) {
+      throw new Error("Telegram document byte limit must be positive");
+    }
     this.#botUserId = options.botUserId;
     this.#botUsername = normalizeTelegramUsername(options.botUsername);
     this.#participationMode = options.participationMode ?? "all_delivered";
     this.#isCorrelatedBotMessage = options.isCorrelatedBotMessage;
+    this.#persistMedia = options.persistMedia;
     this.#onNonExecutableUpdate = options.onNonExecutableUpdate;
     this.#onQuarantine = options.onQuarantine;
     this.#now = options.now ?? (() => new Date().toISOString());
@@ -665,7 +859,10 @@ export class TelegramChannelConnector {
   async sendOutbound(
     message: NormalizedChannelOutboundMessage,
   ): Promise<TelegramDeliveryReceipt> {
-    const chunks = splitTelegramText(message.body, this.#maxMessageChars);
+    const chunks = splitTelegramText(
+      telegramOutboundBody(message),
+      this.#maxMessageChars,
+    );
     const externalMessageIds: string[] = [];
     let attempts = 0;
     try {
@@ -715,6 +912,7 @@ export class TelegramChannelConnector {
       lastError: this.#lastError,
       inbound: { ...this.#inbound },
       outbound: { ...this.#outbound },
+      media: { ...this.#media },
     };
   }
 
@@ -757,7 +955,7 @@ export class TelegramChannelConnector {
     try {
       const updateShape = telegramUpdateShape(update);
       const binding = this.#normalizationBinding(update);
-      const message = this.#adapter.normalizeUpdate(update, {
+      let message = this.#adapter.normalizeUpdate(update, {
         binding,
         ttlMs: this.#ttlMs,
         visibility: this.#visibility,
@@ -809,6 +1007,7 @@ export class TelegramChannelConnector {
         await this.#advanceOffset(updateOffset);
         return "advanced";
       }
+      message = await this.#materializeMedia(update, message);
       const result = await this.#ingest(message);
       if (
         result.retryable === true ||
@@ -839,6 +1038,163 @@ export class TelegramChannelConnector {
       return addressed || (this.#isCorrelatedBotMessage?.(message) ?? false);
     }
     return this.#participationMode === "topic_human_messages" || addressed;
+  }
+
+  async #materializeMedia(
+    update: TelegramUpdate,
+    message: NormalizedChannelInboundMessage,
+  ): Promise<NormalizedChannelInboundMessage> {
+    const candidates = telegramMediaCandidates(update);
+    if (candidates.length === 0) return message;
+    const resolved: ChannelAttachmentRef[] = [];
+    const seenUniqueIds = new Set<string>();
+    for (const candidate of candidates) {
+      const uniqueId = candidate.fileUniqueId ?? candidate.fileId;
+      if (seenUniqueIds.has(uniqueId)) {
+        this.#media.duplicate += 1;
+        continue;
+      }
+      seenUniqueIds.add(uniqueId);
+      try {
+        resolved.push(
+          await this.#materializeMediaCandidate(candidate, message, update),
+        );
+      } catch (error) {
+        const terminalError = terminalTelegramMediaError(error);
+        if (terminalError !== undefined) {
+          this.#countTerminalMediaFailure(
+            terminalError.reasonCode,
+            terminalError.message,
+          );
+          resolved.push({
+            ref: `telegram:file:${candidate.fileId}`,
+            mediaType: candidate.mediaType,
+            label: candidate.filename,
+            filename: candidate.filename,
+            byteSize: candidate.fileSize,
+            state: telegramMediaFailureState(terminalError.reasonCode),
+            reasonCode: terminalError.reasonCode,
+          });
+          continue;
+        }
+        this.#media.retried += 1;
+        this.#media.lastError = telegramErrorMessage(error);
+        throw error;
+      }
+    }
+    return { ...message, attachments: resolved };
+  }
+
+  async #materializeMediaCandidate(
+    candidate: TelegramMediaCandidate,
+    message: NormalizedChannelInboundMessage,
+    update: TelegramUpdate,
+  ): Promise<ChannelAttachmentRef> {
+    if (message.runtime.sessionId === undefined) {
+      throw new TelegramMediaError(
+        "telegram_media_session_unbound",
+        "Telegram media cannot be stored until the channel is bound to a session",
+        false,
+      );
+    }
+    if (
+      this.#bot.getFile === undefined ||
+      this.#bot.downloadFile === undefined ||
+      this.#persistMedia === undefined
+    ) {
+      throw new TelegramMediaError(
+        "telegram_media_pipeline_unconfigured",
+        "Telegram media retrieval is not configured",
+        false,
+      );
+    }
+    const maxBytes =
+      candidate.kind === "image" ? this.#maxImageBytes : this.#maxDocumentBytes;
+    if (candidate.fileSize !== undefined && candidate.fileSize > maxBytes) {
+      throw new TelegramMediaError(
+        "telegram_media_oversized",
+        `Telegram ${candidate.kind} is ${candidate.fileSize} bytes; maximum is ${maxBytes}`,
+        false,
+      );
+    }
+    const file = await this.#bot.getFile(candidate.fileId);
+    if (
+      candidate.fileUniqueId !== undefined &&
+      file.file_unique_id !== candidate.fileUniqueId
+    ) {
+      throw new TelegramMediaError(
+        "telegram_media_identity_mismatch",
+        "Telegram getFile returned a different unique file identity",
+        false,
+      );
+    }
+    if (file.file_size !== undefined && file.file_size > maxBytes) {
+      throw new TelegramMediaError(
+        "telegram_media_oversized",
+        `Telegram ${candidate.kind} is ${file.file_size} bytes; maximum is ${maxBytes}`,
+        false,
+      );
+    }
+    if (!file.file_path) {
+      throw new TelegramMediaError(
+        "telegram_media_expired",
+        "Telegram no longer provides a downloadable path for this file",
+        false,
+      );
+    }
+    const downloaded = await this.#bot.downloadFile(file.file_path, maxBytes);
+    if (
+      file.file_size !== undefined &&
+      downloaded.bytes.byteLength !== file.file_size
+    ) {
+      throw new TelegramMediaError(
+        "telegram_media_download_incomplete",
+        `Telegram file download returned ${downloaded.bytes.byteLength} of ${file.file_size} bytes`,
+        true,
+      );
+    }
+    const mediaType = validatedTelegramMediaType(
+      candidate,
+      downloaded.contentType,
+    );
+    const persisted = await this.#persistMedia({
+      sessionId: message.runtime.sessionId,
+      adapterId: this.#adapterId,
+      botUserId: this.#botUserId,
+      bindingId: message.bindingId,
+      fileId: file.file_id,
+      fileUniqueId: file.file_unique_id,
+      filename: candidate.filename,
+      mediaType,
+      bytes: downloaded.bytes,
+      provenance: {
+        externalChannelId: message.providerRefs.externalChannelId,
+        externalThreadId: message.providerRefs.externalThreadId,
+        externalMessageId: message.providerRefs.externalMessageId ?? "unknown",
+        externalUserId: message.author.externalUserId,
+        updateId: update.update_id,
+      },
+    });
+    this.#media.available += 1;
+    this.#media.bytesStored += persisted.byteSize;
+    this.#media.lastError = undefined;
+    return {
+      ref: `crew:attachment:${persisted.attachmentId}`,
+      mediaType: persisted.mediaType,
+      label: persisted.filename,
+      attachmentId: persisted.attachmentId,
+      filename: persisted.filename,
+      byteSize: persisted.byteSize,
+      sha256: persisted.sha256,
+      contentUrl: persisted.contentUrl,
+      state: "available" as const,
+    };
+  }
+
+  #countTerminalMediaFailure(reasonCode: string, message: string): void {
+    const state = telegramMediaFailureState(reasonCode);
+    this.#media[state] += 1;
+    this.#media.lastError = message;
   }
 
   async #retryOrQuarantine(
@@ -1120,9 +1476,28 @@ export function toTelegramSendMessageRequest(
       message.providerRefs.externalThreadId,
     ),
     reply_parameters: telegramReplyParameters(message.replyToExternalMessageId),
-    text: message.body,
+    text: telegramOutboundBody(message),
     link_preview_options: { is_disabled: true },
   };
+}
+
+function telegramOutboundBody(
+  message: NormalizedChannelOutboundMessage,
+): string {
+  const artifacts = (message.attachments ?? [])
+    .filter(
+      (attachment) =>
+        attachment.state === "available" &&
+        typeof attachment.contentUrl === "string" &&
+        attachment.contentUrl.trim().length > 0,
+    )
+    .map(
+      (attachment) =>
+        `${attachment.filename ?? attachment.label ?? "artifact"}: ${attachment.contentUrl}`,
+    );
+  return artifacts.length === 0
+    ? message.body
+    : `${message.body}\n\nArtifacts:\n${artifacts.join("\n")}`;
 }
 
 function telegramChatId(chat: TelegramChat): string {
@@ -1204,21 +1579,198 @@ function telegramAuthor(message: TelegramMessage): {
 }
 
 function telegramAttachments(message: TelegramMessage) {
-  const photo = (message.photo ?? []).map((item) => ({
-    ref: `telegram:file:${item.file_id}`,
-    mediaType: "image/*",
-    label: item.file_unique_id,
+  return telegramMediaCandidatesForMessage(message).map((candidate) => ({
+    ref: `telegram:file:${candidate.fileId}`,
+    mediaType: candidate.mediaType,
+    label: candidate.filename,
+    filename: candidate.filename,
+    byteSize: candidate.fileSize,
+    state: "pending" as const,
   }));
-  const document = message.document
-    ? [
-        {
-          ref: `telegram:file:${message.document.file_id}`,
-          mediaType: message.document.mime_type,
-          label: message.document.file_name,
-        },
-      ]
-    : [];
-  return [...photo, ...document];
+}
+
+interface TelegramMediaCandidate {
+  kind: "image" | "document";
+  fileId: string;
+  fileUniqueId?: string;
+  filename: string;
+  mediaType: string;
+  fileSize?: number;
+}
+
+function telegramMediaCandidates(
+  update: TelegramUpdate,
+): TelegramMediaCandidate[] {
+  const message =
+    update.message ??
+    update.edited_message ??
+    update.channel_post ??
+    update.edited_channel_post;
+  return message === undefined
+    ? []
+    : telegramMediaCandidatesForMessage(message);
+}
+
+function telegramMediaCandidatesForMessage(
+  message: TelegramMessage,
+): TelegramMediaCandidate[] {
+  const photos = [...(message.photo ?? [])].sort(
+    (left, right) =>
+      (right.width ?? 0) * (right.height ?? 0) -
+        (left.width ?? 0) * (left.height ?? 0) ||
+      (right.file_size ?? 0) - (left.file_size ?? 0),
+  );
+  const photo = photos[0];
+  const candidates: TelegramMediaCandidate[] = [];
+  if (photo !== undefined) {
+    candidates.push({
+      kind: "image",
+      fileId: photo.file_id,
+      fileUniqueId: photo.file_unique_id,
+      filename: `telegram-photo-${message.message_id}.jpg`,
+      mediaType: "image/jpeg",
+      fileSize: photo.file_size,
+    });
+  }
+  if (message.document !== undefined) {
+    const mediaType = normalizeTelegramMediaType(
+      message.document.mime_type ??
+        mimeTypeFromFilename(message.document.file_name),
+    );
+    candidates.push({
+      kind: mediaType.startsWith("image/") ? "image" : "document",
+      fileId: message.document.file_id,
+      fileUniqueId: message.document.file_unique_id,
+      filename:
+        message.document.file_name ??
+        `telegram-document-${message.message_id}${extensionForMediaType(mediaType)}`,
+      mediaType,
+      fileSize: message.document.file_size,
+    });
+  }
+  return candidates;
+}
+
+function validatedTelegramMediaType(
+  candidate: TelegramMediaCandidate,
+  responseContentType: string | undefined,
+): string {
+  const expected = normalizeTelegramMediaType(candidate.mediaType);
+  const actual = normalizeTelegramMediaType(responseContentType);
+  const selected =
+    actual === "application/octet-stream" || actual === "" ? expected : actual;
+  if (
+    expected !== "application/octet-stream" &&
+    actual !== "application/octet-stream" &&
+    actual !== "" &&
+    expected !== actual
+  ) {
+    throw new TelegramMediaError(
+      "telegram_media_mime_mismatch",
+      `Telegram declared ${expected} but downloaded ${actual}`,
+      false,
+    );
+  }
+  if (!isSupportedTelegramMediaType(selected, candidate.kind)) {
+    throw new TelegramMediaError(
+      "telegram_media_unsupported",
+      `Telegram media type ${selected || "unknown"} is not supported`,
+      false,
+    );
+  }
+  return selected;
+}
+
+function normalizeTelegramMediaType(value: string | undefined): string {
+  return (value ?? "application/octet-stream")
+    .split(";", 1)[0]!
+    .trim()
+    .toLowerCase();
+}
+
+function isSupportedTelegramMediaType(
+  value: string,
+  kind: TelegramMediaCandidate["kind"],
+): boolean {
+  if (kind === "image") {
+    return ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+      value,
+    );
+  }
+  return (
+    value.startsWith("text/") ||
+    [
+      "application/json",
+      "application/pdf",
+      "application/sql",
+      "application/xml",
+      "application/yaml",
+      "application/x-yaml",
+      "application/zip",
+      "application/octet-stream",
+    ].includes(value)
+  );
+}
+
+function mimeTypeFromFilename(filename: string | undefined): string {
+  const extension = filename?.split(".").pop()?.toLowerCase();
+  switch (extension) {
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "json":
+      return "application/json";
+    case "pdf":
+      return "application/pdf";
+    case "md":
+      return "text/markdown";
+    case "txt":
+    case "log":
+      return "text/plain";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function extensionForMediaType(mediaType: string): string {
+  switch (mediaType) {
+    case "image/png":
+      return ".png";
+    case "image/jpeg":
+      return ".jpg";
+    case "image/gif":
+      return ".gif";
+    case "image/webp":
+      return ".webp";
+    case "application/json":
+      return ".json";
+    case "application/pdf":
+      return ".pdf";
+    case "text/plain":
+      return ".txt";
+    default:
+      return ".bin";
+  }
+}
+
+function telegramMediaFailureState(
+  reasonCode: string,
+): "unsupported" | "oversized" | "expired" | "failed" {
+  if (
+    reasonCode === "telegram_media_unsupported" ||
+    reasonCode.endsWith("mime_mismatch")
+  ) {
+    return "unsupported";
+  }
+  if (reasonCode === "telegram_media_oversized") return "oversized";
+  if (reasonCode === "telegram_media_expired") return "expired";
+  return "failed";
 }
 
 function telegramMentions(
@@ -1352,8 +1904,27 @@ function isTerminalTelegramIngestStatus(status: string): boolean {
 
 function isRetryableTelegramError(error: unknown): boolean {
   if (error instanceof TelegramBotApiError) return error.retryable;
+  if (error instanceof TelegramMediaError) return error.retryable;
   if (error instanceof Error && error.name === "AbortError") return true;
   return error instanceof TypeError;
+}
+
+function terminalTelegramMediaError(
+  error: unknown,
+): TelegramMediaError | undefined {
+  if (error instanceof TelegramMediaError) {
+    return error.retryable ? undefined : error;
+  }
+  if (error instanceof TelegramBotApiError && !error.retryable) {
+    return new TelegramMediaError(
+      error.status === 400 || error.status === 404
+        ? "telegram_media_expired"
+        : "telegram_media_download_rejected",
+      error.message,
+      false,
+    );
+  }
+  return undefined;
 }
 
 function telegramRetryDelayMs(error: unknown, attempt: number): number {

@@ -3936,6 +3936,10 @@
           },
           {
             "properties": {
+              "attachment_ids": {
+                "items": { "type": "string" },
+                "type": "array"
+              },
               "binding_id": { "type": "string" },
               "correlation_id": { "type": "string" },
               "expires_at": { "type": "string" },

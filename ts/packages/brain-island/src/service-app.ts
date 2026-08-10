@@ -777,6 +777,11 @@ function adapterLifecycleContext(
       }),
     channelWakePolicyForSession: (session) =>
       channelWakePolicyForSession(state, session),
+    persistTelegramMedia: (input) =>
+      state.toolMediaAttachments.persistExternalChannelAttachment({
+        ...input,
+        provider: "telegram",
+      }),
   };
 }
 

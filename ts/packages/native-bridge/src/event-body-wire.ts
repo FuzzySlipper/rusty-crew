@@ -331,6 +331,7 @@ export function toNativeExternalEventPayload(
         external_message_id: payload.externalMessageId,
         from: payload.from,
         text: payload.text,
+        attachment_ids: payload.attachmentIds,
         received_at: payload.receivedAt,
         expires_at: payload.expiresAt,
       };
@@ -363,6 +364,9 @@ export function toExternalEventPayload(
         externalMessageId: raw["external_message_id"] as string | undefined,
         from: raw["from"] as string,
         text: raw["text"] as string,
+        attachmentIds: Array.isArray(raw["attachment_ids"])
+          ? (raw["attachment_ids"] as string[])
+          : [],
         receivedAt: raw["received_at"] as string,
         expiresAt: raw["expires_at"] as string,
       };

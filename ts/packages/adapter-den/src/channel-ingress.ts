@@ -84,6 +84,13 @@ export interface ChannelIngressOptions {
         input: ChannelIngressRoutePlannerInput,
       ) => Promise<ChannelRouteResolution> | ChannelRouteResolution)
     | undefined;
+  deliverRoutedMessage?:
+    | ((input: {
+        message: NormalizedChannelInboundMessage;
+        binding: ChannelBindingRecord;
+        route: ChannelRouteRequest;
+      }) => Promise<EventReceipt> | EventReceipt)
+    | undefined;
 }
 
 export interface ChannelIngressRoutePlannerInput {
@@ -161,7 +168,14 @@ export async function ingestChannelInboundMessage(
     body: resolution.route.body,
     correlationId: resolution.route.correlationId,
   };
-  const routeReceipt = await options.bridge.routeAgentMessage(routedMessage);
+  const routeReceipt =
+    options.deliverRoutedMessage === undefined
+      ? await options.bridge.routeAgentMessage(routedMessage)
+      : await options.deliverRoutedMessage({
+          message,
+          binding: resolution.binding,
+          route: resolution.route,
+        });
 
   return {
     status: "routed",
