@@ -14,6 +14,10 @@ import type {
 import type { BrainHostContext } from "../src/brain-host-context.js";
 import { createOpenAiResponsesBrainHost } from "../src/openai-responses-host.js";
 import {
+  roleplayCompactionDomainContext,
+  roleplayCompactionEvidenceFromMetadata,
+} from "../src/roleplay-compaction-domain-context.js";
+import {
   DEFAULT_RESPONSES_NO_PROGRESS_ATTENTION_THRESHOLD,
   DEFAULT_RESPONSES_WORK_QUANTUM_CONTINUATION_ROUNDS,
   responsesContinuationDiagnostics,
@@ -174,6 +178,12 @@ test("Responses narrator host forwards the versioned Roleplay adapter context", 
       toolRequests: [],
       terminal: true,
     }),
+    getRoleplaySessionMetadata: async () => ({
+      narratorDiagnostic: {
+        sceneBrief: "Moonlit orchard after the locket promise.",
+        relevantLoreRecordIds: ["lore-locket", "lore-northern-court"],
+      },
+    }),
   } as unknown as NativeBridgeModule;
   const context = {
     bridge,
@@ -210,14 +220,62 @@ test("Responses narrator host forwards the versioned Roleplay adapter context", 
 
   assert.deepEqual(captured?.compactionDomainContext, {
     schemaVersion: 1,
-    deriveSourceRefs: false,
+    deriveSourceRefs: true,
+    sceneBoundary: {
+      sceneId: "responses-continuation-session",
+      sourceRefs: [],
+      reason: "director_boundary",
+      summary: "Moonlit orchard after the locket promise.",
+    },
     retentionTiers: [],
-    directorsNotes: [],
-    extractionRequests: [],
+    directorsNotes: [
+      {
+        noteId: "scene:responses-continuation-session",
+        text: "Preserve voice and emotional continuity. Current scene: Moonlit orchard after the locket promise.",
+        provenanceSourceRefs: [],
+      },
+      {
+        noteId: "lore:lore-locket",
+        text: "Recalled lore record identity: lore-locket",
+        provenanceSourceRefs: [],
+      },
+      {
+        noteId: "lore:lore-northern-court",
+        text: "Recalled lore record identity: lore-northern-court",
+        provenanceSourceRefs: [],
+      },
+    ],
+    extractionRequests: [
+      {
+        requestId: "lore:lore-locket",
+        kind: "lore_fact",
+        sourceRefs: [],
+      },
+      {
+        requestId: "lore:lore-northern-court",
+        kind: "lore_fact",
+        sourceRefs: [],
+      },
+    ],
   });
   assert.equal(
     captured?.config.contextCompaction?.strategyId,
     "roleplay_scene_aware_compaction",
+  );
+});
+
+test("missing Responses narrator metadata remains explicitly degraded", () => {
+  assert.deepEqual(
+    roleplayCompactionDomainContext(
+      roleplayCompactionEvidenceFromMetadata(undefined, "session-missing"),
+    ),
+    {
+      schemaVersion: 1,
+      deriveSourceRefs: false,
+      retentionTiers: [],
+      directorsNotes: [],
+      extractionRequests: [],
+    },
   );
 });
 

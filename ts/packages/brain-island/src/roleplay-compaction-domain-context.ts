@@ -16,7 +16,7 @@ export function roleplayCompactionDomainContext(
   }
   const sceneBrief = evidence.sceneBrief?.trim();
   const lore = evidence.relevantLore
-    .filter((source) => source.body.trim().length > 0)
+    .filter((source) => source.sourceId.trim().length > 0)
     .slice(0, 8);
   const directorsNotes = [
     ...(sceneBrief
@@ -30,7 +30,9 @@ export function roleplayCompactionDomainContext(
       : []),
     ...lore.map((source) => ({
       noteId: `lore:${source.sourceId}`,
-      text: `${source.title}: ${source.body}`.slice(0, 2_000),
+      text: source.body.trim()
+        ? `${source.title}: ${source.body}`.slice(0, 2_000)
+        : `Recalled lore record identity: ${source.sourceId}`,
       provenanceSourceRefs: [],
     })),
   ];
