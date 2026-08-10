@@ -4,6 +4,11 @@ The Telegram install diplomat is an external adapter backed by one bot token
 per Crew installation. Its routing authority is an exact, revisioned
 `bot + chat + optional topic -> full session` binding stored by Rust.
 
+The operation-specific generated-client contract for every route and readback
+shape is `docs/telegram-diplomat-admin-api-v0.openapi.json`. The broader API
+capability artifact remains discovery metadata and does not replace this wire
+contract.
+
 It is deliberately not profile configuration. Creating, moving, pausing, or
 removing a diplomat binding does not mutate a profile, a session workspace, or
 either the old or new session. There is no project allowlist, Telegram-user

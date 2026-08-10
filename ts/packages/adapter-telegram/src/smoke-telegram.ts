@@ -256,6 +256,7 @@ assert.equal(await offsetStore.read(), 13);
 assert.equal(connector.diagnostics().inbound.routed, 2);
 assert.equal(connector.diagnostics().inbound.unbound, 1);
 assert.equal(connector.diagnostics().lastUpdateId, 12);
+assert.ok(connector.diagnostics().lastInboundAt);
 
 connectorUpdates.push({
   update_id: 13,
@@ -301,6 +302,7 @@ assert.equal(await offsetStore.read(), 14);
 await restartedConnector.sendOutbound(outbound);
 assert.deepEqual(connectorSent, [request]);
 assert.equal(restartedConnector.diagnostics().outbound.sent, 1);
+assert.ok(restartedConnector.diagnostics().lastOutboundAt);
 
 console.log(
   JSON.stringify(

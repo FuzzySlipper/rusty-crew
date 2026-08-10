@@ -620,6 +620,8 @@ export interface TelegramConnectorDiagnostics {
   bindingCount: number;
   pollCount: number;
   lastPollAt?: string;
+  lastInboundAt?: string;
+  lastOutboundAt?: string;
   lastUpdateId?: number;
   nextOffset?: number;
   lastError?: string;
@@ -720,6 +722,8 @@ export class TelegramChannelConnector {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #polling = false;
   #lastPollAt: string | undefined;
+  #lastInboundAt: string | undefined;
+  #lastOutboundAt: string | undefined;
   #lastUpdateId: number | undefined;
   #nextOffset: number | undefined;
   #lastError: string | undefined;
@@ -929,6 +933,7 @@ export class TelegramChannelConnector {
         this.#outbound.chunksSent += 1;
       }
       this.#outbound.sent += 1;
+      this.#lastOutboundAt = this.#now();
       this.#outbound.lastError = undefined;
       return {
         idempotencyKey: message.idempotencyKey,
@@ -951,6 +956,8 @@ export class TelegramChannelConnector {
       bindingCount: this.#activeTelegramBindings().length,
       pollCount: this.#pollCount,
       lastPollAt: this.#lastPollAt,
+      lastInboundAt: this.#lastInboundAt,
+      lastOutboundAt: this.#lastOutboundAt,
       lastUpdateId: this.#lastUpdateId,
       nextOffset: this.#nextOffset,
       lastError: this.#lastError,
@@ -1000,6 +1007,7 @@ export class TelegramChannelConnector {
     update: TelegramUpdate,
   ): Promise<"advanced" | "retry_pending"> {
     const updateOffset = update.update_id + 1;
+    this.#lastInboundAt = this.#now();
     try {
       this.#observeCandidate(update);
       const updateShape = telegramUpdateShape(update);

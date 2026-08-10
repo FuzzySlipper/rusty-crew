@@ -268,11 +268,8 @@ export function telegramDiplomatState(
   ) {
     return "disconnected";
   }
-  const full = diagnostics as unknown as {
-    inbound?: { ambiguous?: number; rateLimited?: number };
-  };
-  if ((full.inbound?.rateLimited ?? 0) > 0) return "rate_limited";
-  if ((full.inbound?.ambiguous ?? 0) > 0) return "ambiguous";
+  if (diagnostics.inbound?.rateLimited > 0) return "rate_limited";
+  if (diagnostics.inbound?.ambiguous > 0) return "ambiguous";
   if (!bindings.some((binding) => binding.status === "active"))
     return "unbound";
   return "healthy";

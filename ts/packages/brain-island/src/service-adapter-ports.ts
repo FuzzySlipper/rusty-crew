@@ -518,11 +518,19 @@ export interface TelegramChannelConnectorPort {
   pollOnce(): Promise<unknown>;
   sendOutbound(message: NormalizedChannelOutboundMessage): Promise<unknown>;
   diagnostics(): {
+    enabled: boolean;
+    running: boolean;
+    adapterId: AdapterId;
     bindingCount: number;
+    pollCount: number;
     lastPollAt?: string;
+    lastInboundAt?: string;
+    lastOutboundAt?: string;
+    lastUpdateId?: number;
+    nextOffset?: number;
     lastError?: string;
     botIdentity?: { userId: string; username?: string; displayLabel?: string };
-    candidates?: Array<{
+    candidates: Array<{
       externalChatId: string;
       externalThreadId?: string;
       chatType: string;
@@ -531,6 +539,43 @@ export interface TelegramChannelConnectorPort {
       lastObservedAt: string;
       lastUpdateId: number;
     }>;
+    inbound: {
+      routed: number;
+      unbound: number;
+      ambiguous: number;
+      expired: number;
+      duplicate: number;
+      staleCursor: number;
+      failed: number;
+      humanMessages: number;
+      botMessages: number;
+      ignored: number;
+      edited: number;
+      unsupported: number;
+      retryPending: number;
+      quarantined: number;
+      loopTerminated: number;
+      rateLimited: number;
+    };
+    outbound: {
+      sent: number;
+      chunksSent: number;
+      retried: number;
+      failed: number;
+      lastError?: string;
+      lastExternalMessageId?: string;
+    };
+    media: {
+      available: number;
+      duplicate: number;
+      unsupported: number;
+      oversized: number;
+      expired: number;
+      failed: number;
+      retried: number;
+      bytesStored: number;
+      lastError?: string;
+    };
   };
 }
 

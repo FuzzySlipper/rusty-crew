@@ -1,0 +1,215 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Rusty Crew Telegram Install Diplomat Admin API",
+    "version": "0.1.0",
+    "description": "Operation-specific generated-client contract for one installation-scoped Telegram diplomat. Bindings target exact Crew sessions and never mutate profile or workspace state."
+  },
+  "servers": [{ "url": "/" }],
+  "paths": {
+    "/v1/admin/telegram-diplomat": {
+      "get": {
+        "operationId": "adminTelegramDiplomatRead",
+        "responses": {
+          "200": {
+            "description": "Current Telegram diplomat state",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatReadbackEnvelope" } } }
+          },
+          "default": { "$ref": "#/components/responses/AdminError" }
+        }
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings": {
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsCreate",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingCreateRequest" } } } },
+        "responses": {
+          "200": { "description": "Created binding", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingEnvelope" } } } },
+          "default": { "$ref": "#/components/responses/AdminError" }
+        }
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}": {
+      "parameters": [{ "$ref": "#/components/parameters/BindingId" }],
+      "get": {
+        "operationId": "adminTelegramDiplomatBindingsRead",
+        "responses": {
+          "200": { "description": "Exact binding", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingEnvelope" } } } },
+          "default": { "$ref": "#/components/responses/AdminError" }
+        }
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/move": {
+      "parameters": [{ "$ref": "#/components/parameters/BindingId" }],
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsMove",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingMoveRequest" } } } },
+        "responses": {
+          "200": { "description": "Moved binding", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingEnvelope" } } } },
+          "default": { "$ref": "#/components/responses/AdminError" }
+        }
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/relabel": {
+      "parameters": [{ "$ref": "#/components/parameters/BindingId" }],
+      "post": {
+        "operationId": "adminTelegramDiplomatBindingsRelabel",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingRelabelRequest" } } } },
+        "responses": {
+          "200": { "description": "Relabelled binding", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingEnvelope" } } } },
+          "default": { "$ref": "#/components/responses/AdminError" }
+        }
+      }
+    },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/pause": { "$ref": "#/components/pathItems/BindingStatusMutation" },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/resume": { "$ref": "#/components/pathItems/BindingStatusMutation" },
+    "/v1/admin/telegram-diplomat/bindings/{binding_id}/remove": { "$ref": "#/components/pathItems/BindingStatusMutation" },
+    "/v1/admin/telegram-diplomat/credential": {
+      "post": {
+        "operationId": "adminTelegramDiplomatCredentialUpdate",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatCredentialUpdateRequest" } } } },
+        "responses": {
+          "200": { "description": "Token updated and connector reloaded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatCredentialUpdateEnvelope" } } } },
+          "default": { "$ref": "#/components/responses/AdminError" }
+        }
+      }
+    },
+    "/v1/admin/telegram-diplomat/reload": {
+      "post": {
+        "operationId": "adminTelegramDiplomatReload",
+        "responses": {
+          "200": { "description": "Connector reloaded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatReadbackEnvelope" } } } },
+          "default": { "$ref": "#/components/responses/AdminError" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": { "AdminBearer": { "type": "http", "scheme": "bearer" } },
+    "parameters": {
+      "BindingId": { "name": "binding_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1 } }
+    },
+    "pathItems": {
+      "BindingStatusMutation": {
+        "parameters": [{ "$ref": "#/components/parameters/BindingId" }],
+        "post": {
+          "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingRevisionRequest" } } } },
+          "responses": {
+            "200": { "description": "Updated binding", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TelegramDiplomatBindingEnvelope" } } } },
+            "default": { "$ref": "#/components/responses/AdminError" }
+          }
+        }
+      }
+    },
+    "responses": {
+      "AdminError": {
+        "description": "Admin operation failed",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AdminErrorEnvelope" } } }
+      }
+    },
+    "schemas": {
+      "AdminMeta": {
+        "type": "object",
+        "required": ["request_id", "schema_version"],
+        "properties": { "request_id": { "type": "string" }, "schema_version": { "type": "integer", "const": 1 } }
+      },
+      "AdminError": {
+        "type": "object",
+        "required": ["code", "reason_code", "message", "retryable"],
+        "properties": {
+          "code": { "type": "string" }, "reason_code": { "type": "string" }, "message": { "type": "string" }, "retryable": { "type": "boolean" }
+        }
+      },
+      "AdminErrorEnvelope": {
+        "type": "object", "required": ["ok", "error", "meta"],
+        "properties": { "ok": { "type": "boolean", "const": false }, "error": { "$ref": "#/components/schemas/AdminError" }, "meta": { "$ref": "#/components/schemas/AdminMeta" } }
+      },
+      "TelegramDiplomatState": { "type": "string", "enum": ["disabled", "unconfigured", "disconnected", "unbound", "ambiguous", "rate_limited", "healthy"] },
+      "TelegramBotIdentity": {
+        "type": "object", "required": ["userId"],
+        "properties": { "userId": { "type": "string" }, "username": { "type": "string" }, "displayLabel": { "type": "string" } }
+      },
+      "TelegramDiplomatSurfaceCandidate": {
+        "type": "object", "required": ["externalChatId", "chatType", "lastObservedAt", "lastUpdateId"],
+        "properties": {
+          "externalChatId": { "type": "string" }, "externalThreadId": { "type": "string" }, "chatType": { "type": "string" }, "title": { "type": "string" }, "username": { "type": "string" }, "lastObservedAt": { "type": "string", "format": "date-time" }, "lastUpdateId": { "type": "integer" }
+        }
+      },
+      "TelegramInboundDiagnostics": {
+        "type": "object",
+        "required": ["routed", "unbound", "ambiguous", "expired", "duplicate", "staleCursor", "failed", "humanMessages", "botMessages", "ignored", "edited", "unsupported", "retryPending", "quarantined", "loopTerminated", "rateLimited"],
+        "additionalProperties": false,
+        "properties": {
+          "routed": { "type": "integer" }, "unbound": { "type": "integer" }, "ambiguous": { "type": "integer" }, "expired": { "type": "integer" }, "duplicate": { "type": "integer" }, "staleCursor": { "type": "integer" }, "failed": { "type": "integer" }, "humanMessages": { "type": "integer" }, "botMessages": { "type": "integer" }, "ignored": { "type": "integer" }, "edited": { "type": "integer" }, "unsupported": { "type": "integer" }, "retryPending": { "type": "integer" }, "quarantined": { "type": "integer" }, "loopTerminated": { "type": "integer" }, "rateLimited": { "type": "integer" }
+        }
+      },
+      "TelegramOutboundDiagnostics": {
+        "type": "object", "required": ["sent", "chunksSent", "retried", "failed"],
+        "properties": { "sent": { "type": "integer" }, "chunksSent": { "type": "integer" }, "retried": { "type": "integer" }, "failed": { "type": "integer" }, "lastError": { "type": "string" }, "lastExternalMessageId": { "type": "string" } }
+      },
+      "TelegramMediaDiagnostics": {
+        "type": "object", "required": ["available", "duplicate", "unsupported", "oversized", "expired", "failed", "retried", "bytesStored"],
+        "properties": { "available": { "type": "integer" }, "duplicate": { "type": "integer" }, "unsupported": { "type": "integer" }, "oversized": { "type": "integer" }, "expired": { "type": "integer" }, "failed": { "type": "integer" }, "retried": { "type": "integer" }, "bytesStored": { "type": "integer" }, "lastError": { "type": "string" } }
+      },
+      "TelegramConnectorDiagnostics": {
+        "type": "object",
+        "required": ["enabled", "running", "adapterId", "bindingCount", "pollCount", "candidates", "inbound", "outbound", "media"],
+        "properties": {
+          "enabled": { "type": "boolean" }, "running": { "type": "boolean" }, "adapterId": { "type": "string" }, "bindingCount": { "type": "integer" }, "pollCount": { "type": "integer" }, "lastPollAt": { "type": "string", "format": "date-time" }, "lastInboundAt": { "type": "string", "format": "date-time" }, "lastOutboundAt": { "type": "string", "format": "date-time" }, "lastUpdateId": { "type": "integer" }, "nextOffset": { "type": "integer" }, "lastError": { "type": "string" }, "botIdentity": { "$ref": "#/components/schemas/TelegramBotIdentity" }, "candidates": { "type": "array", "items": { "$ref": "#/components/schemas/TelegramDiplomatSurfaceCandidate" } }, "inbound": { "$ref": "#/components/schemas/TelegramInboundDiagnostics" }, "outbound": { "$ref": "#/components/schemas/TelegramOutboundDiagnostics" }, "media": { "$ref": "#/components/schemas/TelegramMediaDiagnostics" }
+        }
+      },
+      "TelegramCredentialReadback": {
+        "type": "object", "required": ["credentialId", "displayName", "providerKind", "credentialKind", "credential", "linkedProviderAliases", "revision", "createdAt", "updatedAt"],
+        "properties": {
+          "credentialId": { "type": "string" }, "displayName": { "type": "string" }, "providerKind": { "type": "string" }, "credentialKind": { "type": "string" }, "credential": { "type": "object", "required": ["hasSecret"], "properties": { "hasSecret": { "type": "boolean" } }, "additionalProperties": true }, "linkedProviderAliases": { "type": "array", "items": { "type": "string" } }, "revision": { "type": "integer" }, "createdAt": { "type": "string" }, "updatedAt": { "type": "string" }
+        }
+      },
+      "TelegramDiplomatReadback": {
+        "type": "object",
+        "required": ["state", "enabled", "adapterId", "credentialId", "candidates", "bindings"],
+        "properties": {
+          "state": { "$ref": "#/components/schemas/TelegramDiplomatState" }, "enabled": { "type": "boolean" }, "adapterId": { "type": "string" }, "credentialId": { "type": "string" }, "credential": { "$ref": "#/components/schemas/TelegramCredentialReadback" }, "botIdentity": { "$ref": "#/components/schemas/TelegramBotIdentity" }, "candidates": { "type": "array", "items": { "$ref": "#/components/schemas/TelegramDiplomatSurfaceCandidate" } }, "bindings": { "type": "array", "items": { "$ref": "./external-runtime-api-v0.openapi.json#/components/schemas/InstallDiplomatBindingRecord" } }, "connector": { "$ref": "#/components/schemas/TelegramConnectorDiagnostics" }
+        }
+      },
+      "TelegramDiplomatReadbackEnvelope": {
+        "type": "object", "required": ["ok", "data", "meta"],
+        "properties": { "ok": { "type": "boolean", "const": true }, "data": { "$ref": "#/components/schemas/TelegramDiplomatReadback" }, "meta": { "$ref": "#/components/schemas/AdminMeta" } }
+      },
+      "TelegramDiplomatBindingCreateRequest": {
+        "type": "object", "required": ["bindingId", "installationId", "installationLabel", "agentId", "sessionId", "externalChatId"],
+        "properties": { "bindingId": { "type": "string" }, "expectedRevision": { "type": "integer" }, "installationId": { "type": "string" }, "installationLabel": { "type": "string" }, "agentId": { "type": "string" }, "instanceId": { "type": "string" }, "sessionId": { "type": "string" }, "externalChatId": { "type": "string" }, "externalThreadId": { "type": "string" }, "participationMode": { "type": "string", "enum": ["mention_or_reply", "topic_human_messages"] } }
+      },
+      "TelegramDiplomatBindingMoveRequest": {
+        "type": "object", "required": ["expectedRevision", "agentId", "sessionId"],
+        "properties": { "expectedRevision": { "type": "integer" }, "agentId": { "type": "string" }, "instanceId": { "type": "string" }, "sessionId": { "type": "string" } }
+      },
+      "TelegramDiplomatBindingRelabelRequest": {
+        "type": "object", "required": ["expectedRevision", "installationLabel"],
+        "properties": { "expectedRevision": { "type": "integer" }, "installationLabel": { "type": "string" } }
+      },
+      "TelegramDiplomatBindingRevisionRequest": {
+        "type": "object", "required": ["expectedRevision"], "properties": { "expectedRevision": { "type": "integer" } }
+      },
+      "TelegramDiplomatCredentialUpdateRequest": {
+        "type": "object", "required": ["token"],
+        "properties": { "token": { "type": "string", "minLength": 1, "writeOnly": true }, "displayName": { "type": "string" }, "expectedRevision": { "type": "integer" } }
+      },
+      "TelegramDiplomatBindingData": {
+        "type": "object", "required": ["binding"],
+        "properties": { "binding": { "$ref": "./external-runtime-api-v0.openapi.json#/components/schemas/InstallDiplomatBindingRecord" } }
+      },
+      "TelegramDiplomatBindingEnvelope": {
+        "type": "object", "required": ["ok", "data", "meta"],
+        "properties": { "ok": { "type": "boolean", "const": true }, "data": { "$ref": "#/components/schemas/TelegramDiplomatBindingData" }, "meta": { "$ref": "#/components/schemas/AdminMeta" } }
+      },
+      "TelegramDiplomatCredentialUpdateData": {
+        "allOf": [{ "$ref": "#/components/schemas/TelegramDiplomatReadback" }, { "type": "object", "required": ["tokenUpdated"], "properties": { "tokenUpdated": { "type": "boolean", "const": true } } }]
+      },
+      "TelegramDiplomatCredentialUpdateEnvelope": {
+        "type": "object", "required": ["ok", "data", "meta"],
+        "properties": { "ok": { "type": "boolean", "const": true }, "data": { "$ref": "#/components/schemas/TelegramDiplomatCredentialUpdateData" }, "meta": { "$ref": "#/components/schemas/AdminMeta" } }
+      }
+    }
+  },
+  "security": [{ "AdminBearer": [] }]
+}
