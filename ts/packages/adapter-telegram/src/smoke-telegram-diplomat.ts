@@ -214,6 +214,93 @@ const betaAddressing = await addressedBodiesFor({
 assert.deepEqual(betaAddressing.bodies, []);
 assert.equal(betaAddressing.ignored, 3);
 
+const topicHumanBinding: ChannelBindingRecord = {
+  ...betaBinding,
+  externalThreadId: "43",
+};
+const mixedParticipationUpdates: TelegramUpdate[] = [
+  {
+    update_id: 10,
+    message: {
+      message_id: 110,
+      message_thread_id: 42,
+      date: 1_786_000_010,
+      chat: { id: chatId, type: "supergroup" },
+      from: { id: 1001, first_name: "Patch" },
+      text: "unaddressed mention-only topic message",
+    },
+  },
+  {
+    update_id: 11,
+    message: {
+      message_id: 111,
+      message_thread_id: 43,
+      date: 1_786_000_011,
+      chat: { id: chatId, type: "supergroup" },
+      from: { id: 1001, first_name: "Patch" },
+      text: "unaddressed topic-human message",
+    },
+  },
+];
+
+async function mixedParticipationBodies(
+  bindings: readonly ChannelBindingRecord[],
+): Promise<string[]> {
+  const bodies: string[] = [];
+  const connector = new TelegramChannelConnector({
+    adapterId,
+    bot: {
+      getUpdates(request: TelegramGetUpdatesRequest = {}) {
+        return mixedParticipationUpdates.filter(
+          (update) => update.update_id >= (request.offset ?? 0),
+        );
+      },
+      sendMessage() {
+        return { message_id: 1 };
+      },
+    },
+    offsetStore: new MemoryTelegramUpdateOffsetStore(),
+    terminalStore: new MemoryTelegramUpdateTerminalStore(),
+    bindings: () => bindings,
+    participationForBinding(bindingId) {
+      if (bindingId === alphaBinding.bindingId) {
+        return {
+          participationMode: "mention_or_reply",
+          botUserId: "2001",
+          botUsername: "InstallAlphaBot",
+        };
+      }
+      if (bindingId === topicHumanBinding.bindingId) {
+        return {
+          participationMode: "topic_human_messages",
+          botUserId: "2002",
+          botUsername: "InstallBetaBot",
+        };
+      }
+      return undefined;
+    },
+    ingest(message) {
+      bodies.push(`${message.bindingId}:${message.body}`);
+      return { status: "routed" };
+    },
+    ttlMs: 60_000,
+    pollTimeoutSeconds: 0,
+  });
+  await connector.pollOnce();
+  assert.equal(connector.diagnostics().inbound.ignored, 1);
+  return bodies;
+}
+
+const mixedExpected = ["telegram-beta:unaddressed topic-human message"];
+assert.deepEqual(
+  await mixedParticipationBodies([alphaBinding, topicHumanBinding]),
+  mixedExpected,
+);
+assert.deepEqual(
+  await mixedParticipationBodies([topicHumanBinding, alphaBinding]),
+  mixedExpected,
+);
+
 const transientUpdate: TelegramUpdate = {
   update_id: 20,
   message: {

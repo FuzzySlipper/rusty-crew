@@ -399,9 +399,6 @@ export async function startTelegramConnector(
       ];
     },
   );
-  const primaryDiplomatBinding = diplomatBindings.find(
-    (binding) => binding.status === "active",
-  );
   try {
     await context.bridge.registerPlatformAdapter(
       context.adapterFactories.createTelegramAdapterRegistration(adapterId),
@@ -432,9 +429,18 @@ export async function startTelegramConnector(
       `${context.config.telegram.adapterId}-terminal-updates.jsonl`,
     ),
     bindings: () => telegramBindings,
-    botUserId: primaryDiplomatBinding?.botUserId,
-    botUsername: primaryDiplomatBinding?.botUsername,
-    participationMode: primaryDiplomatBinding?.participationMode,
+    participationForBinding: (bindingId) => {
+      const binding = diplomatBindings.find(
+        (candidate) =>
+          candidate.bindingId === bindingId && candidate.status === "active",
+      );
+      if (binding === undefined) return undefined;
+      return {
+        participationMode: binding.participationMode,
+        botUserId: binding.botUserId,
+        botUsername: binding.botUsername,
+      };
+    },
     ttlMs: context.config.telegram.messageTtlMs,
     pollIntervalMs: context.config.telegram.pollIntervalMs,
     pollTimeoutSeconds: context.config.telegram.pollTimeoutSeconds,

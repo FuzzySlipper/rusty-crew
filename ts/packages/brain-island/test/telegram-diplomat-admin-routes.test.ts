@@ -50,6 +50,64 @@ function credential(hasSecret = true): NativeServiceCredentialRecord {
   };
 }
 
+function connectorDiagnostics(
+  overrides: {
+    bindingCount?: number;
+    lastError?: string;
+    botIdentity?: { userId: string; username: string };
+    inbound?: { ambiguous?: number };
+  } = {},
+) {
+  return {
+    enabled: true,
+    running: true,
+    adapterId: "telegram-main" as never,
+    bindingCount: overrides.bindingCount ?? 0,
+    pollCount: 1,
+    candidates: [],
+    inbound: {
+      routed: 0,
+      unbound: 0,
+      ambiguous: overrides.inbound?.ambiguous ?? 0,
+      expired: 0,
+      duplicate: 0,
+      staleCursor: 0,
+      failed: 0,
+      humanMessages: 0,
+      botMessages: 0,
+      ignored: 0,
+      edited: 0,
+      unsupported: 0,
+      retryPending: 0,
+      quarantined: 0,
+      loopTerminated: 0,
+      rateLimited: 0,
+    },
+    outbound: {
+      sent: 0,
+      chunksSent: 0,
+      retried: 0,
+      failed: 0,
+    },
+    media: {
+      available: 0,
+      duplicate: 0,
+      unsupported: 0,
+      oversized: 0,
+      expired: 0,
+      failed: 0,
+      retried: 0,
+      bytesStored: 0,
+    },
+    ...(overrides.lastError === undefined
+      ? {}
+      : { lastError: overrides.lastError }),
+    ...(overrides.botIdentity === undefined
+      ? {}
+      : { botIdentity: overrides.botIdentity }),
+  };
+}
+
 function context(
   input: {
     identified?: boolean;
@@ -106,13 +164,13 @@ function context(
       stop: () => undefined,
       pollOnce: async () => undefined,
       sendOutbound: async () => undefined,
-      diagnostics: () => ({
-        bindingCount: records.length,
-        ...(input.identified === false
-          ? {}
-          : { botIdentity: { userId: "42", username: "diplomat_bot" } }),
-        candidates: [],
-      }),
+      diagnostics: () =>
+        connectorDiagnostics({
+          bindingCount: records.length,
+          ...(input.identified === false
+            ? {}
+            : { botIdentity: { userId: "42", username: "diplomat_bot" } }),
+        }),
     }),
     restartConnector: async () => {
       if (input.restartError !== undefined) throw input.restartError;
@@ -141,27 +199,47 @@ test("diagnostics distinguish all required operator states", () => {
     "disconnected",
   );
   assert.equal(
-    telegramDiplomatState(config, credential(), [], { bindingCount: 0 }),
+    telegramDiplomatState(
+      config,
+      credential(),
+      [],
+      connectorDiagnostics({ bindingCount: 0 }),
+    ),
     "unbound",
   );
   assert.equal(
-    telegramDiplomatState(config, credential(), [binding()], {
-      bindingCount: 1,
-      inbound: { ambiguous: 1 },
-    } as never),
+    telegramDiplomatState(
+      config,
+      credential(),
+      [binding()],
+      connectorDiagnostics({
+        bindingCount: 1,
+        inbound: { ambiguous: 1 },
+      }),
+    ),
     "ambiguous",
   );
   assert.equal(
-    telegramDiplomatState(config, credential(), [binding()], {
-      bindingCount: 1,
-      lastError: "Telegram 429",
-    }),
+    telegramDiplomatState(
+      config,
+      credential(),
+      [binding()],
+      connectorDiagnostics({
+        bindingCount: 1,
+        lastError: "Telegram 429",
+      }),
+    ),
     "rate_limited",
   );
   assert.equal(
-    telegramDiplomatState(config, credential(), [binding()], {
-      bindingCount: 1,
-    }),
+    telegramDiplomatState(
+      config,
+      credential(),
+      [binding()],
+      connectorDiagnostics({
+        bindingCount: 1,
+      }),
+    ),
     "healthy",
   );
 });

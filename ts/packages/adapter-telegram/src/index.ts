@@ -597,6 +597,13 @@ export interface TelegramConnectorOptions {
     | "all_delivered"
     | "mention_or_reply"
     | "topic_human_messages";
+  participationForBinding?: (bindingId: string) =>
+    | {
+        participationMode: "mention_or_reply" | "topic_human_messages";
+        botUserId: string;
+        botUsername: string;
+      }
+    | undefined;
   isCorrelatedBotMessage?: (
     message: NormalizedChannelInboundMessage,
   ) => boolean;
@@ -705,6 +712,9 @@ export class TelegramChannelConnector {
   readonly #participationMode: NonNullable<
     TelegramConnectorOptions["participationMode"]
   >;
+  readonly #participationForBinding:
+    | TelegramConnectorOptions["participationForBinding"]
+    | undefined;
   readonly #isCorrelatedBotMessage:
     | TelegramConnectorOptions["isCorrelatedBotMessage"]
     | undefined;
@@ -820,6 +830,7 @@ export class TelegramChannelConnector {
     this.#botUserId = options.botUserId;
     this.#botUsername = normalizeTelegramUsername(options.botUsername);
     this.#participationMode = options.participationMode ?? "all_delivered";
+    this.#participationForBinding = options.participationForBinding;
     this.#isCorrelatedBotMessage = options.isCorrelatedBotMessage;
     this.#persistMedia = options.persistMedia;
     this.#onNonExecutableUpdate = options.onNonExecutableUpdate;
@@ -1109,15 +1120,24 @@ export class TelegramChannelConnector {
   }
 
   #shouldParticipate(message: NormalizedChannelInboundMessage): boolean {
-    if (this.#participationMode === "all_delivered") return true;
+    const bindingPolicy = this.#participationForBinding?.(message.bindingId);
+    const participationMode =
+      bindingPolicy?.participationMode ?? this.#participationMode;
+    if (participationMode === "all_delivered") return true;
     const addressed = telegramMessageAddressesBot(message, {
-      botUserId: this.#botIdentity?.userId ?? this.#botUserId,
-      botUsername: this.#botIdentity?.username ?? this.#botUsername,
+      botUserId:
+        bindingPolicy?.botUserId ??
+        this.#botIdentity?.userId ??
+        this.#botUserId,
+      botUsername:
+        bindingPolicy?.botUsername ??
+        this.#botIdentity?.username ??
+        this.#botUsername,
     });
     if (message.author.isBot) {
       return addressed || (this.#isCorrelatedBotMessage?.(message) ?? false);
     }
-    return this.#participationMode === "topic_human_messages" || addressed;
+    return participationMode === "topic_human_messages" || addressed;
   }
 
   async #materializeMedia(

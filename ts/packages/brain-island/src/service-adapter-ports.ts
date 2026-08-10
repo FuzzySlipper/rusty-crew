@@ -590,6 +590,13 @@ export interface TelegramConnectorFactoryInput {
   botUserId?: string;
   botUsername?: string;
   participationMode?: "mention_or_reply" | "topic_human_messages";
+  participationForBinding?(bindingId: string):
+    | {
+        participationMode: "mention_or_reply" | "topic_human_messages";
+        botUserId: string;
+        botUsername: string;
+      }
+    | undefined;
   offsetStorePath: string;
   terminalStorePath: string;
   bindings(): readonly ChannelBindingRecord[];

@@ -220,6 +220,7 @@ function defaultServiceAdapterFactories(): ServiceAdapterFactories {
         botUserId: input.botUserId,
         botUsername: input.botUsername,
         participationMode: input.participationMode,
+        participationForBinding: input.participationForBinding,
         now: input.now,
         ingest: async (message) => {
           return input.onInbound(message);
