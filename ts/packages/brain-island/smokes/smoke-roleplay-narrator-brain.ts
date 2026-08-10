@@ -202,6 +202,14 @@ async function runSmoke(): Promise<void> {
     "Moonlight gathered around Katheryn as her hand closed on empty ribbon.",
   );
   assert.equal(
+    (
+      (result.providerState?.type === "replace"
+        ? result.providerState.state.payload
+        : undefined) as { phase?: unknown } | undefined
+    )?.phase,
+    "compose",
+  );
+  assert.equal(
     submittedEvents.some(
       (event) =>
         event.event.type === "text_delta" &&
@@ -473,6 +481,18 @@ class RecordingPhaseBrainFactory {
         return {
           events: options.submitEvent ? [] : events,
           actions: plannedActions,
+          providerState: {
+            type: "replace",
+            state: {
+              moduleId: "chat-completions",
+              strategyId: "roleplay_narrator",
+              profileFingerprint: "profile-fingerprint",
+              providerFingerprint: "provider-fingerprint",
+              payloadVersion: "provider-owned-v1",
+              payload: { phase: options.phase },
+              ttlMs: 60_000,
+            },
+          },
         };
       },
     };

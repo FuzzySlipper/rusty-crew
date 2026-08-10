@@ -160,8 +160,8 @@ export function createRoleplayNarratorBrain(
 
       const visibleEvents = options.submitEvent ? [] : phaseEvents;
       return {
+        ...composeResult,
         events: visibleEvents,
-        actions: composeResult.actions,
       };
     },
   };
