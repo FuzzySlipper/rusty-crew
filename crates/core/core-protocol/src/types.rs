@@ -688,6 +688,9 @@ pub enum ReviewSubmissionTransition {
         dispatch_message_id: String,
         dispatch_delivery_id: String,
     },
+    ReviewerRedispatchPending {
+        reason_code: String,
+    },
     DenFinalizationPending {
         result_digest: String,
         result_json: String,

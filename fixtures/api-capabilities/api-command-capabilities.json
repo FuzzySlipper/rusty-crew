@@ -797,6 +797,17 @@
         "public": true
       },
       {
+        "id": "review.submissions.external.recover",
+        "method": "POST",
+        "path_template": "/v1/admin/review-submissions/{submission_id}/recover",
+        "description": "Reconcile one exact durable reviewer dispatch and redispatch only when its Rust-owned inbox state is no longer active.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "governance", "diagnostics"],
+        "public": true
+      },
+      {
         "id": "coordination.debug.agents.list",
         "method": "GET",
         "path_template": "/v1/debug/coordination/agents",
@@ -3293,6 +3304,13 @@
         "capability_id": "review.submissions.external.read",
         "method": "GET",
         "path_template": "/v1/admin/review-submissions/{submission_id}",
+        "route_id": "admin.review_submissions.external",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.submissions.external.recover",
+        "method": "POST",
+        "path_template": "/v1/admin/review-submissions/{submission_id}/recover",
         "route_id": "admin.review_submissions.external",
         "auth_phase": "after_auth"
       },

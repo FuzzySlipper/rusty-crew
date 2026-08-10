@@ -27,8 +27,11 @@ const main = async () => {
     return;
   }
   const command = options.positionals[0];
-  if (command !== "submit" && command !== "status") {
-    throw new CliError("command must be submit or status", EXIT.USAGE);
+  if (command !== "submit" && command !== "status" && command !== "recover") {
+    throw new CliError(
+      "command must be submit, status, or recover",
+      EXIT.USAGE,
+    );
   }
   const serviceUrl = requiredOption(options, "service-url");
   const deploymentRole = requiredOption(options, "deployment-role");
@@ -42,7 +45,9 @@ const main = async () => {
   const data =
     command === "submit"
       ? await submit(client, options, deploymentRole)
-      : await readStatus(client, options, deploymentRole);
+      : command === "recover"
+        ? await recover(client, options, deploymentRole)
+        : await readStatus(client, options, deploymentRole);
   printData(data, options.json);
   if (options.wait) {
     const final = await waitForTerminal(
@@ -91,6 +96,24 @@ async function readStatus(client, options, deploymentRole) {
   return client.request(
     "GET",
     `/v1/admin/review-submissions/${encodeURIComponent(submissionId)}?${query}`,
+  );
+}
+
+async function recover(client, options, deploymentRole) {
+  const submissionId = requiredOption(options, "submission-id");
+  const expectedRevision = integerOption(
+    options,
+    "expected-revision",
+    undefined,
+    0,
+  );
+  if (expectedRevision === undefined) {
+    throw new CliError("recover requires --expected-revision", EXIT.USAGE);
+  }
+  return client.request(
+    "POST",
+    `/v1/admin/review-submissions/${encodeURIComponent(submissionId)}/recover`,
+    { expectedRevision, expectedDeploymentRole: deploymentRole },
   );
 }
 
@@ -227,6 +250,7 @@ function parseArgs(argv) {
     "client-id",
     "idempotency-key",
     "submission-id",
+    "expected-revision",
     "poll-ms",
     "timeout-ms",
   ]);
@@ -349,7 +373,7 @@ function printData(data, json) {
 
 function printUsage() {
   process.stdout.write(
-    `Usage:\n  rusty-crew-review submit --service-url URL --deployment-role production|debug \\\n    --project-id PROJECT --task ID --repository OWNER/REPO --sha SHA --ref REF \\\n    --check NAME --base-sha SHA --summary TEXT|--summary-file PATH \\\n    --client-id ID --idempotency-key KEY [--wait] [--json]\n\n  rusty-crew-review status --service-url URL --deployment-role production|debug \\\n    --submission-id ID [--wait] [--json]\n\nEnvironment:\n  RUSTY_CREW_ADMIN_TOKEN  Bearer token for the selected service (when enabled).\n\nExit codes:\n  0 success/accepted, 2 pending, 3 GitHub gate failed, 4 changes requested,\n  5 superseded, 64 usage error, 70 service error.\n`,
+    `Usage:\n  rusty-crew-review submit --service-url URL --deployment-role production|debug \\\n    --project-id PROJECT --task ID --repository OWNER/REPO --sha SHA --ref REF \\\n    --check NAME --base-sha SHA --summary TEXT|--summary-file PATH \\\n    --client-id ID --idempotency-key KEY [--wait] [--json]\n\n  rusty-crew-review status --service-url URL --deployment-role production|debug \\\n    --submission-id ID [--wait] [--json]\n\n  rusty-crew-review recover --service-url URL --deployment-role production|debug \\\n    --submission-id ID --expected-revision REVISION [--wait] [--json]\n\nEnvironment:\n  RUSTY_CREW_ADMIN_TOKEN  Bearer token for the selected service (when enabled).\n\nExit codes:\n  0 success/accepted, 2 pending, 3 GitHub gate failed, 4 changes requested,\n  5 superseded, 64 usage error, 70 service error.\n`,
   );
 }
 

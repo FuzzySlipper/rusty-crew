@@ -418,7 +418,9 @@ import {
   createServiceReviewSubmissionRuntime,
   assertExpectedDeploymentRole,
   getExternalReviewStatus,
+  parseExternalReviewRecoveryRequest,
   parseExternalReviewSubmissionRequest,
+  recoverExternalReviewDispatch,
   reconcileReviewSubmissions,
   ReviewSubmissionAdapterError,
   submitExternalReview,
@@ -1471,6 +1473,36 @@ async function handleHttpRequest(
         return successRoute(requestId(request), receipt);
       }
       if (
+        method === "POST" &&
+        url.pathname.endsWith("/recover") &&
+        url.pathname.startsWith("/v1/admin/review-submissions/")
+      ) {
+        const encodedSubmissionId = url.pathname.slice(
+          "/v1/admin/review-submissions/".length,
+          -"/recover".length,
+        );
+        const submissionId = decodeURIComponent(encodedSubmissionId);
+        if (!submissionId) {
+          return failure(404, requestId(request), {
+            code: "not_found",
+            reason_code: "external_review_submission_not_found",
+            message: "A review submission id is required.",
+            retryable: false,
+          });
+        }
+        const input = parseExternalReviewRecoveryRequest(
+          await readJsonBody(request),
+        );
+        return successRoute(
+          requestId(request),
+          await recoverExternalReviewDispatch(
+            reviewSubmissionContext(state),
+            submissionId,
+            input,
+          ),
+        );
+      }
+      if (
         method === "GET" &&
         url.pathname.startsWith("/v1/admin/review-submissions/")
       ) {
@@ -1501,7 +1533,7 @@ async function handleHttpRequest(
         code: "method_not_allowed",
         reason_code: "external_review_submission_method_not_allowed",
         message:
-          "External review submissions support POST collection and GET by submission id.",
+          "External review submissions support POST collection, GET by submission id, and POST /{submissionId}/recover.",
         retryable: false,
       });
     } catch (error) {
@@ -6061,7 +6093,9 @@ function externalReviewApiFailure(
     reasonCode === "external_review_submission_not_found"
       ? 404
       : reasonCode === "deployment_role_mismatch" ||
-          reasonCode === "review_submission_duplicate_payload_mismatch"
+          reasonCode === "review_submission_duplicate_payload_mismatch" ||
+          reasonCode === "external_review_recovery_revision_conflict" ||
+          reasonCode === "external_review_recovery_not_applicable"
         ? 409
         : reasonCode.startsWith("invalid_")
           ? 400

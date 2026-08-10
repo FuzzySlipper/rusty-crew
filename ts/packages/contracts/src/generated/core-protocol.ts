@@ -1903,6 +1903,9 @@ export type ReviewSubmissionTransition = {
   reviewerSessionId: string;
   type: "reviewer_dispatched";
 } | {
+  reasonCode: string;
+  type: "reviewer_redispatch_pending";
+} | {
   resultDigest: string;
   resultJson: string;
   type: "den_finalization_pending";

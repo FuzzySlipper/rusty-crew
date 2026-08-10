@@ -280,6 +280,20 @@ impl CoreEngine {
                 record.phase = ReviewSubmissionPhase::ReviewerDispatched;
                 record.last_adapter_error = None;
             }
+            ReviewSubmissionTransition::ReviewerRedispatchPending { reason_code } => {
+                require_review_phase(&record, ReviewSubmissionPhase::ReviewerDispatched)?;
+                if reason_code.trim().is_empty() {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "reviewer redispatch reason code is required",
+                    ));
+                }
+                // Retain the prior dispatch coordinates as durable recovery evidence.
+                // A subsequent dispatch replaces them only after its delivery is accepted.
+                record.phase = ReviewSubmissionPhase::ReviewerDispatchPending;
+                record.last_adapter_error =
+                    Some(format!("reviewer_redispatch_pending: {reason_code}"));
+            }
             ReviewSubmissionTransition::DenFinalizationPending {
                 result_digest,
                 result_json,

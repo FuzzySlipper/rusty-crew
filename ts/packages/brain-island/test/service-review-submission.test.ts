@@ -8,6 +8,7 @@ import type {
 import {
   createServiceReviewSubmissionRuntime,
   denReviewRequestByteLength,
+  parseExternalReviewRecoveryRequest,
   parseExternalReviewSubmissionRequest,
   reconcileReviewSubmissions,
   reviewerDispatchIdentity,
@@ -147,6 +148,168 @@ test("review dispatch identity changes only with resolved route authority", () =
       route: { ...resolution.route!, revision: 4 },
     }),
     "review-1:route-4:binding-14",
+  );
+  assert.equal(
+    reviewerDispatchIdentity("review-1", resolution, 9),
+    "review-1:route-3:binding-14:recovery-9",
+  );
+});
+
+test("completed reviewer turn is redispatched once with a new durable identity", async () => {
+  let durable = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "external-review",
+      idempotencyKey: "recover-review",
+    }),
+    submissionId: `review-submission:${"a".repeat(64)}`,
+    phase: "reviewer_dispatched" as const,
+    reviewerSessionId: "reviewer-session",
+    dispatchMessageId: "review-message:original",
+    dispatchDeliveryId: "review-delivery:original",
+    revision: 5,
+  } as ReviewSubmissionRecord;
+  const deliveredIds: string[] = [];
+  const transitionTypes: string[] = [];
+  const resolution = {
+    address: "@reviewer",
+    routable: true,
+    route: { revision: 4 },
+    resolvedTarget: {
+      bindingRevision: 5,
+      sessionId: "reviewer-session",
+    },
+  } as AgentRouteResolution;
+  const context = {
+    bridge: {
+      listReviewSubmissions: async () => [durable],
+      listAgentMessageInbox: async () => [
+        {
+          status:
+            durable.dispatchDeliveryId === "review-delivery:original"
+              ? "awaiting_reply"
+              : "in_progress",
+          delivery: {
+            request: { deliveryId: durable.dispatchDeliveryId },
+          },
+        },
+      ],
+      transitionReviewSubmission: async (request: {
+        transition: {
+          type: string;
+          reviewerSessionId?: string;
+          dispatchMessageId?: string;
+          dispatchDeliveryId?: string;
+        };
+      }) => {
+        transitionTypes.push(request.transition.type);
+        durable = {
+          ...durable,
+          phase:
+            request.transition.type === "reviewer_redispatch_pending"
+              ? "reviewer_dispatch_pending"
+              : "reviewer_dispatched",
+          reviewerSessionId:
+            request.transition.reviewerSessionId ?? durable.reviewerSessionId,
+          dispatchMessageId:
+            request.transition.dispatchMessageId ?? durable.dispatchMessageId,
+          dispatchDeliveryId:
+            request.transition.dispatchDeliveryId ?? durable.dispatchDeliveryId,
+          revision: durable.revision + 1,
+        } as ReviewSubmissionRecord;
+        return durable;
+      },
+      resolveAgentAddress: async () => resolution,
+      getAgentMessageDelivery: async () => undefined,
+      deliverAgentMessage: async (request: {
+        deliveryId: string;
+        messageId: string;
+      }) => {
+        deliveredIds.push(request.deliveryId);
+        return {
+          status: "accepted",
+          revision: 1,
+          request: {
+            ...request,
+            toSessionId: "reviewer-session",
+          },
+        };
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-10T12:00:00.000Z",
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  };
+
+  await reconcileReviewSubmissions(context);
+  await reconcileReviewSubmissions(context);
+  await reconcileReviewSubmissions(context);
+
+  assert.deepEqual(transitionTypes, [
+    "reviewer_redispatch_pending",
+    "reviewer_dispatched",
+  ]);
+  assert.equal(deliveredIds.length, 1);
+  assert.match(deliveredIds[0]!, /:recovery-6$/);
+  assert.notEqual(deliveredIds[0], "review-delivery:original");
+});
+
+test("stale accepted reviewer turn with no native claim returns to dispatch pending", async () => {
+  const pending = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "external-review",
+      idempotencyKey: "accepted-unclaimed",
+    }),
+    phase: "reviewer_dispatched" as const,
+    reviewerSessionId: "reviewer-session",
+    dispatchMessageId: "review-message:unclaimed",
+    dispatchDeliveryId: "review-delivery:unclaimed",
+    revision: 8,
+  } as ReviewSubmissionRecord;
+  const transitions: unknown[] = [];
+  await reconcileReviewSubmissions({
+    bridge: {
+      listReviewSubmissions: async () => [pending],
+      listAgentMessageInbox: async () => [
+        {
+          status: "in_progress",
+          externalTurnRequestId: "turn-unclaimed",
+          delivery: {
+            request: { deliveryId: "review-delivery:unclaimed" },
+          },
+        },
+      ],
+      getExternalTurn: async () => ({
+        phase: "accepted",
+        nativeTurnId: undefined,
+        updatedAt: "2026-08-10T11:58:00.000Z",
+      }),
+      transitionReviewSubmission: async (request: unknown) => {
+        transitions.push(request);
+        return {
+          ...pending,
+          phase: "reviewer_dispatch_pending",
+          revision: pending.revision + 1,
+        };
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-10T12:00:00.000Z",
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  });
+
+  assert.equal(transitions.length, 1);
+  assert.equal(
+    (transitions[0] as { transition: { type: string } }).transition.type,
+    "reviewer_redispatch_pending",
+  );
+  assert.equal(
+    (transitions[0] as { transition: { reasonCode: string } }).transition
+      .reasonCode,
+    "reviewer_turn_accepted_unclaimed",
   );
 });
 
@@ -1141,4 +1304,18 @@ test("external review submission parser does not expose a reviewer override", ()
   assert.equal(request.taskId, 6644);
   assert.equal(request.clientId, "external-agent");
   assert.equal("reviewer" in request, false);
+});
+
+test("external recovery parser requires optimistic concurrency", () => {
+  assert.deepEqual(
+    parseExternalReviewRecoveryRequest({
+      expectedRevision: 7,
+      expectedDeploymentRole: "production",
+    }),
+    { expectedRevision: 7, expectedDeploymentRole: "production" },
+  );
+  assert.throws(() => parseExternalReviewRecoveryRequest({}));
+  assert.throws(() =>
+    parseExternalReviewRecoveryRequest({ expectedRevision: -1 }),
+  );
 });

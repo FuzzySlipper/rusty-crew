@@ -8141,6 +8141,22 @@
         },
         {
           "properties": {
+            "reasonCode": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reviewer_redispatch_pending",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reasonCode"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "resultDigest": {
               "type": "string"
             },

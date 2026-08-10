@@ -40,6 +40,91 @@ fn repeated_adapter_failure_records_retry_time_and_revision() {
 }
 
 #[test]
+fn terminal_reviewer_dispatch_can_return_to_dispatch_pending_without_losing_evidence() {
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "review-recovery-session",
+            "review-recovery-agent",
+            "review-recovery-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let mut record = begin(&engine, &session.session_id, 6779, 'd');
+    for transition in [
+        ReviewSubmissionTransition::DenHandoffRecorded {
+            review_round_id: 4386,
+        },
+        ReviewSubmissionTransition::GateRegistered { gate_id: 3156 },
+        ReviewSubmissionTransition::GateTerminal {
+            gate_status: "passed".to_string(),
+            terminal_reason: "checks_passed".to_string(),
+        },
+    ] {
+        record = engine
+            .transition_review_submission(ReviewSubmissionTransitionRequest {
+                submission_id: record.submission_id.clone(),
+                expected_revision: record.revision,
+                transition,
+                now: "2026-08-10T12:00:00Z".to_string(),
+            })
+            .unwrap();
+    }
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::ReviewerDispatched {
+                reviewer_session_id: session.session_id,
+                dispatch_message_id: "review-message:original".to_string(),
+                dispatch_delivery_id: "review-delivery:original".to_string(),
+            },
+            now: "2026-08-10T12:01:00Z".to_string(),
+        })
+        .unwrap();
+    let recovered = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::ReviewerRedispatchPending {
+                reason_code: "reviewer_inbox_awaiting_reply".to_string(),
+            },
+            now: "2026-08-10T12:02:00Z".to_string(),
+        })
+        .unwrap();
+    let late_original = engine.transition_review_submission(ReviewSubmissionTransitionRequest {
+        submission_id: recovered.submission_id.clone(),
+        expected_revision: recovered.revision,
+        transition: ReviewSubmissionTransition::DenFinalizationPending {
+            result_digest: "late-original".to_string(),
+            result_json: r#"{"verdict":"looks_good"}"#.to_string(),
+        },
+        now: "2026-08-10T12:02:30Z".to_string(),
+    });
+    assert_eq!(
+        late_original.unwrap_err().kind,
+        CoreErrorKind::ActionRejected
+    );
+
+    assert_eq!(
+        recovered.phase,
+        ReviewSubmissionPhase::ReviewerDispatchPending
+    );
+    assert_eq!(
+        recovered.dispatch_message_id.as_deref(),
+        Some("review-message:original")
+    );
+    assert_eq!(
+        recovered.dispatch_delivery_id.as_deref(),
+        Some("review-delivery:original")
+    );
+    assert_eq!(
+        recovered.last_adapter_error.as_deref(),
+        Some("reviewer_redispatch_pending: reviewer_inbox_awaiting_reply")
+    );
+}
+
+#[test]
 fn already_finalized_den_round_settles_pending_submission_with_verdict() {
     let engine = test_engine();
     let session = engine

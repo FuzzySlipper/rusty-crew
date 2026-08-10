@@ -87,6 +87,41 @@ export interface ExternalReviewSubmissionReceipt {
   readonly lastAdapterError?: string;
 }
 
+export interface ExternalReviewRecoveryRequest {
+  readonly expectedRevision: number;
+  readonly expectedDeploymentRole?: "production" | "debug";
+}
+
+export function parseExternalReviewRecoveryRequest(
+  body: unknown,
+): ExternalReviewRecoveryRequest {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new ReviewSubmissionAdapterError(
+      "invalid_external_review_recovery",
+      "External review recovery body must be a JSON object.",
+    );
+  }
+  const value = body as Record<string, unknown>;
+  const expectedRevision = value.expectedRevision;
+  const expectedDeploymentRole = value.expectedDeploymentRole;
+  if (
+    !Number.isSafeInteger(expectedRevision) ||
+    (expectedRevision as number) < 0 ||
+    (expectedDeploymentRole !== undefined &&
+      expectedDeploymentRole !== "production" &&
+      expectedDeploymentRole !== "debug")
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "invalid_external_review_recovery",
+      "expectedRevision must be a non-negative safe integer and expectedDeploymentRole, when provided, must be production or debug.",
+    );
+  }
+  return {
+    expectedRevision: expectedRevision as number,
+    ...(expectedDeploymentRole === undefined ? {} : { expectedDeploymentRole }),
+  };
+}
+
 export async function submitExternalReview(
   context: ServiceReviewSubmissionContext,
   input: ExternalReviewSubmissionRequest,
@@ -142,6 +177,48 @@ export async function getExternalReviewStatus(
       "external_review_submission_not_found",
       "The requested submission is not owned by the external review CLI.",
     );
+  }
+  return externalReviewReceipt(context, record);
+}
+
+export async function recoverExternalReviewDispatch(
+  context: ServiceReviewSubmissionContext,
+  submissionId: string,
+  input: ExternalReviewRecoveryRequest,
+): Promise<ExternalReviewSubmissionReceipt> {
+  assertExpectedDeploymentRole(context, input.expectedDeploymentRole);
+  let record = await getReviewSubmissionRecord(context, submissionId);
+  if (record.caller.type !== "external_cli") {
+    throw new ReviewSubmissionAdapterError(
+      "external_review_submission_not_found",
+      "The requested submission is not owned by the external review CLI.",
+    );
+  }
+  if (
+    !Number.isSafeInteger(input.expectedRevision) ||
+    input.expectedRevision < 0
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "invalid_external_review_recovery",
+      "expectedRevision must be a non-negative safe integer.",
+    );
+  }
+  if (record.revision !== input.expectedRevision) {
+    throw new ReviewSubmissionAdapterError(
+      "external_review_recovery_revision_conflict",
+      `Expected revision ${input.expectedRevision}, found ${record.revision}.`,
+    );
+  }
+  if (record.phase !== "reviewer_dispatched") {
+    throw new ReviewSubmissionAdapterError(
+      "external_review_recovery_not_applicable",
+      `Review submission phase ${record.phase} does not have an outstanding reviewer dispatch.`,
+    );
+  }
+  record = await reconcileDispatchedReviewer(context, record);
+  if (record.phase === "reviewer_dispatch_pending") {
+    await dispatchReviewer(context, record);
+    record = await getReviewSubmissionRecord(context, submissionId);
   }
   return externalReviewReceipt(context, record);
 }
@@ -388,6 +465,8 @@ export async function reconcileReviewSubmissions(
       await reconcilePendingGate(context, record);
     } else if (record.phase === "reviewer_dispatch_pending") {
       await dispatchReviewer(context, record);
+    } else if (record.phase === "reviewer_dispatched" && retryDue(record)) {
+      await reconcileDispatchedReviewer(context, record);
     } else if (
       record.phase === "den_finalized" ||
       ((record.phase === "den_finalization_pending" ||
@@ -1360,7 +1439,14 @@ async function dispatchReviewer(
         `Reviewer route ${record.reviewer} is not currently routable.`,
       );
     }
-    const attemptIdentity = reviewerDispatchIdentity(identity, resolution);
+    const attemptIdentity = reviewerDispatchIdentity(
+      identity,
+      resolution,
+      record.dispatchDeliveryId === undefined ||
+        record.dispatchDeliveryId === null
+        ? undefined
+        : record.revision,
+    );
     const deliveryId = `review-delivery:${attemptIdentity}`;
     const existing = await context.bridge.getAgentMessageDelivery(deliveryId);
     const initial =
@@ -1414,10 +1500,119 @@ async function dispatchReviewer(
 export function reviewerDispatchIdentity(
   submissionIdentity: string,
   resolution: AgentRouteResolution,
+  recoveryRevision?: number,
 ): string {
   const routeRevision = resolution.route?.revision ?? 0;
   const bindingRevision = resolution.resolvedTarget?.bindingRevision ?? 0;
-  return `${submissionIdentity}:route-${routeRevision}:binding-${bindingRevision}`;
+  const base = `${submissionIdentity}:route-${routeRevision}:binding-${bindingRevision}`;
+  return recoveryRevision === undefined
+    ? base
+    : `${base}:recovery-${recoveryRevision}`;
+}
+
+async function reconcileDispatchedReviewer(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+): Promise<ReviewSubmissionRecord> {
+  const reviewerSessionId = record.reviewerSessionId;
+  const dispatchMessageId = record.dispatchMessageId;
+  const dispatchDeliveryId = record.dispatchDeliveryId;
+  if (
+    reviewerSessionId === undefined ||
+    reviewerSessionId === null ||
+    dispatchMessageId === undefined ||
+    dispatchMessageId === null ||
+    dispatchDeliveryId === undefined ||
+    dispatchDeliveryId === null
+  ) {
+    return recordAdapterFailure(
+      context,
+      record,
+      "reviewer_dispatch_coordinates_missing",
+      "Reviewer-dispatched submission is missing its exact session, message, or delivery id.",
+    );
+  }
+  let inbox;
+  try {
+    inbox = await context.bridge.listAgentMessageInbox({
+      toSessionId: reviewerSessionId,
+      messageId: dispatchMessageId,
+      limit: 2,
+    });
+  } catch (error) {
+    return recordAdapterFailure(
+      context,
+      record,
+      "reviewer_dispatch_inbox_read_failed",
+      errorMessage(error),
+    );
+  }
+  const exact = inbox.filter(
+    (item) => item.delivery.request.deliveryId === dispatchDeliveryId,
+  );
+  if (exact.length !== 1) {
+    return recordAdapterFailure(
+      context,
+      record,
+      exact.length === 0
+        ? "reviewer_dispatch_inbox_missing"
+        : "reviewer_dispatch_inbox_ambiguous",
+      `Expected one exact reviewer inbox item, found ${exact.length}; no redispatch occurred.`,
+    );
+  }
+  const status = exact[0]!.status;
+  if (status === "queued") return record;
+  if (status === "in_progress") {
+    const requestId = exact[0]!.externalTurnRequestId;
+    if (requestId === undefined || requestId === null) return record;
+    let turn;
+    try {
+      turn = await context.bridge.getExternalTurn(requestId);
+    } catch (error) {
+      return recordAdapterFailure(
+        context,
+        record,
+        "reviewer_external_turn_read_failed",
+        errorMessage(error),
+      );
+    }
+    if (
+      turn === undefined ||
+      turn.phase !== "accepted" ||
+      (turn.nativeTurnId !== undefined && turn.nativeTurnId !== null)
+    ) {
+      return record;
+    }
+    const acceptedAt = Date.parse(turn.updatedAt);
+    const observedAt = Date.parse(context.now());
+    if (!Number.isFinite(acceptedAt) || !Number.isFinite(observedAt)) {
+      return recordAdapterFailure(
+        context,
+        record,
+        "reviewer_external_turn_time_invalid",
+        "Accepted reviewer turn has invalid durable timing evidence.",
+      );
+    }
+    if (observedAt - acceptedAt < 30_000) return record;
+    return context.bridge.transitionReviewSubmission({
+      submissionId: record.submissionId,
+      expectedRevision: record.revision,
+      transition: {
+        type: "reviewer_redispatch_pending",
+        reasonCode: "reviewer_turn_accepted_unclaimed",
+      },
+      now: context.now(),
+    });
+  }
+  return context.bridge.transitionReviewSubmission({
+    submissionId: record.submissionId,
+    expectedRevision: record.revision,
+    transition: {
+      type: "reviewer_redispatch_pending",
+      reasonCode: `reviewer_inbox_${status}`,
+    },
+    now: context.now(),
+  });
 }
 
 export function selectReviewDenBinding(

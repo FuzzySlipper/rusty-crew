@@ -2627,6 +2627,32 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/review-submissions/{submission_id}/recover": {
+      "post": {
+        "operationId": "reviewSubmissionsExternalRecover",
+        "summary": "Reconcile one exact durable reviewer dispatch and redispatch only when its Rust-owned inbox state is no longer active.",
+        "tags": ["service", "governance", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "submission_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.submissions.external.recover",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/roleplay/mechanic-diagnostics": {
       "get": {
         "operationId": "adminRoleplayMechanicDiagnosticsList",
@@ -6021,7 +6047,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 243,
+    "capability_count": 244,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

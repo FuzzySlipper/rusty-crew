@@ -148,6 +148,25 @@ Human output includes the
 submission id, selected deployment, exact SHA, phase, gate state, verdict, and
 durable adapter/terminal reasons when present.
 
+If a managed submission remains in `reviewer_dispatched` after its attached
+reviewer turn has ended, first read its current revision and then use the
+revision-fenced recovery command:
+
+```bash
+rusty-crew-review recover \
+  --service-url http://127.0.0.1:9347 \
+  --deployment-role production \
+  --submission-id review-submission:<sha256-id> \
+  --expected-revision 5 \
+  --wait
+```
+
+Recovery inspects the exact stored reviewer session, message, and delivery in
+Rust's durable inbox. It does not redispatch while that turn is queued or in
+progress, does not create another Den round or GitHub gate, and rejects stale
+operator revisions. A missing or ambiguous inbox record remains on the same
+submission as an explicit diagnostic instead of being guessed around.
+
 The normal durable phase vocabulary is `gate_pending`,
 `reviewer_dispatched`, `den_finalization_pending`, `reply_pending`, and
 `review_terminal`. Accepted or pending state is never review completion.

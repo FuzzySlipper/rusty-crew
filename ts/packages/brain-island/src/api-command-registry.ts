@@ -1029,6 +1029,14 @@ export const API_CAPABILITIES = [
     "admin",
     ["service", "governance"],
   ),
+  writeCapability(
+    "review.submissions.external.recover",
+    "POST",
+    "/v1/admin/review-submissions/{submission_id}/recover",
+    "Reconcile one exact durable reviewer dispatch and redispatch only when its Rust-owned inbox state is no longer active.",
+    "admin",
+    ["service", "governance", "diagnostics"],
+  ),
   readCapability(
     "coordination.debug.agents.list",
     "GET",
