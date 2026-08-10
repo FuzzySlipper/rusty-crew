@@ -1,7 +1,7 @@
 # Telegram Install Diplomat Contract
 
-Status: accepted implementation contract for campaign 6763  
-Version: `telegram_install_diplomat.v1`  
+Status: accepted implementation contract for campaign 6763
+Version: `telegram_install_diplomat.v1`
 Date: 2026-08-10
 
 This document defines how one Rusty Crew installation participates in a
@@ -22,6 +22,17 @@ Telegram is a conversation adapter. It is not a remote shell, an internal
 agent bus, a profile owner, or an alternate operator authority. A diplomat can
 inspect or adjust its machine only through the same tools, MCP bindings, and
 harness permissions that its session has when used from Rusty View.
+
+The bound Telegram chat/topic is an operator-selected conversation input, not
+an identity-authentication boundary. Campaign 6763 deliberately does not add a
+per-sender Telegram allowlist, map Telegram users to Crew operators, or make
+Telegram identity an approval credential. A human message delivered from the
+exact bound surface is treated like user input submitted to that diplomat
+session; mention/reply policy controls participation, not authorization.
+Actions still pass through the session's existing harness/tool approval and
+permission behavior. Deployments that require authenticated or multi-user
+remote operation need a separate, service-wide operator identity design; it
+must not be introduced here as Telegram-specific precautionary policy.
 
 The supported default transport is Bot API long polling. A remote installation
 therefore needs outbound internet access but no inbound webhook, Cloudflare
@@ -122,6 +133,12 @@ Telegram currently represents them as integers.
 - `topic_human_messages`: human messages in the exact bound topic may wake the
   diplomat, while bot messages still require an addressed reply/mention or an
   active correlated exchange.
+
+Neither mode classifies Telegram humans as authorized or unauthorized. The
+operator establishes the intended audience when binding the exact private
+chat/topic. Rust wake policy may reject unaddressed, unbound, duplicate,
+expired, or loop-budgeted input, but it does not maintain a Telegram-human
+permission list.
 
 There is no implicit all-groups or all-topics fallback. Unbound updates are
 visible terminal classifications, not guessed routes.
@@ -336,7 +353,8 @@ Deterministic and live evidence together must show:
 2. mention/reply routing to the intended installation;
 3. correlated bot-to-bot exchange that terminates within its budget;
 4. a diplomat consulting a non-Telegram local agent and replying as itself;
-5. ordinary authorized local diagnostics/tools from the diplomat session;
+5. ordinary local diagnostics/tools subject to the diplomat session's existing
+   harness permissions and approvals;
 6. exact session rebind without profile/workdir mutation;
 7. restart cursor/binding/outbox hydration without replay;
 8. offline recovery within and beyond the replay/TTL window;
@@ -353,6 +371,8 @@ Deterministic and live evidence together must show:
 - Making a bot token or channel binding profile-owned.
 - Adding profile working-directory confinement, project allowlists, or a
   Telegram-only privilege model.
+- Adding a Telegram-user allowlist or treating Telegram sender identity as a
+  Crew operator credential; service-wide multi-user authentication is separate
+  future work.
 - Requiring inbound webhooks, public local services, or network tunnels.
 - Treating Telegram file handles or chat history as Crew-owned durable state.
-
