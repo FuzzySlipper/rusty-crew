@@ -157,6 +157,69 @@ test("Responses host forwards strategy quantum and continuation to Rust", async 
   assert.deepEqual(result.continuationState, continuationState);
 });
 
+test("Responses narrator host forwards the versioned Roleplay adapter context", async () => {
+  let captured: OpenAiResponsesBrainRunInput | undefined;
+  const bridge = {
+    startBrainRun: async (
+      input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
+    ) => {
+      if (input.moduleId !== "openai-responses") {
+        throw new Error(`unexpected module ${input.moduleId}`);
+      }
+      captured = input.providerInput;
+      return { moduleId: input.moduleId, wakeId: input.providerInput.wakeId };
+    },
+    drainBrainRun: async () => ({
+      items: [],
+      toolRequests: [],
+      terminal: true,
+    }),
+  } as unknown as NativeBridgeModule;
+  const context = {
+    bridge,
+    profile: {
+      profile: {
+        profileId: "roleplay-responses-profile" as ProfileId,
+        brain: { strategy: "roleplay_narrator" },
+        modelConfig: {
+          provider: "test",
+          modelName: "test-model",
+          api: "responses",
+          responsesDialect: "openai_stateless",
+          contextWindowTokens: 32_000,
+        },
+        contextPolicy: {
+          enabled: true,
+          strategyId: "roleplay_scene_aware_compaction",
+          autoCompactionEnabled: true,
+          compactAtPercent: 70,
+          targetPercentAfterCompaction: 45,
+          maxContextPercentForWake: 95,
+          debugVisibility: "status",
+          includeDebugEventsInModelContext: false,
+          strategyConfig: {},
+        },
+      },
+      skills: [],
+      toolSelection: { toolProfile: { tools: [] } },
+    },
+  } as unknown as BrainHostContext;
+  const brain = await createOpenAiResponsesBrainHost(context, { mode: "fake" });
+
+  await brain.wake({ ...responsesWake(), continuationState: undefined });
+
+  assert.deepEqual(captured?.compactionDomainContext, {
+    schemaVersion: 1,
+    retentionTiers: [],
+    directorsNotes: [],
+    extractionRequests: [],
+  });
+  assert.equal(
+    captured?.config.contextCompaction?.strategyId,
+    "roleplay_scene_aware_compaction",
+  );
+});
+
 const continuationState = {
   moduleId: "openai-responses",
   payloadVersion: "openai-responses-continuation-v1",

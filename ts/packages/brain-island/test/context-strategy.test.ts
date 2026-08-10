@@ -64,4 +64,34 @@ describe("context strategy policy", () => {
     assert.match(preparation.additionalInstructions[0] ?? "", /enabled at 72%/);
     assert.match(preparation.additionalInstructions[0] ?? "", /target 45%/);
   });
+
+  it("exposes the Roleplay strategy as an active Crew lifecycle consumer", () => {
+    const descriptor = contextStrategyCatalog().strategies.find(
+      (strategy) => strategy.id === "roleplay_scene_aware_compaction",
+    );
+    assert.deepEqual(descriptor, {
+      id: "roleplay_scene_aware_compaction",
+      label: "Roleplay Scene-Aware Compaction",
+      description:
+        "Uses Crew's generic lifecycle with Roleplay-owned scene, voice, emotional-continuity, and lore-provenance preservation.",
+      status: "active",
+      supportsAutoCompaction: true,
+      modelFacingDebugDefault: false,
+    });
+    const preparation = prepareContextStrategyRoleAssembly({
+      ...defaultContextStrategyPolicy(),
+      strategyId: "roleplay_scene_aware_compaction",
+      autoCompactionEnabled: true,
+      compactAtPercent: 70,
+      targetPercentAfterCompaction: 45,
+    });
+    assert.match(
+      preparation.additionalInstructions[0] ?? "",
+      /director context as derived narrative continuity/,
+    );
+    assert.match(
+      preparation.additionalInstructions[0] ?? "",
+      /rather than inventing missing facts/,
+    );
+  });
 });

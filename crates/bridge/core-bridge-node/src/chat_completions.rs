@@ -1,4 +1,7 @@
 use super::*;
+use crate::roleplay_context_compaction::{
+    RoleplaySceneAwareCompactionStrategy, ROLEPLAY_SCENE_AWARE_COMPACTION_STRATEGY_ID,
+};
 use rusty_crew_brain_runtime::{
     BrainContextCompactionPolicy, BrainRuntimeError, BufferedBrainHostToolResult,
     BufferedBrainHostToolStatus, BufferedBrainHostTurnDisposition, BufferedBrainTurnCoordinator,
@@ -42,6 +45,8 @@ struct JsChatCompletionsBrainRunInput {
     client: JsChatCompletionsClientConfig,
     #[serde(default, alias = "compaction_intent")]
     compaction_intent: Option<rusty_crew_core_protocol::BrainWakeCompactionIntent>,
+    #[serde(default, alias = "compaction_domain_context")]
+    compaction_domain_context: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -519,6 +524,11 @@ fn run_chat_completions_brain_with_buffered_tools(
         final_message_fallback,
         compaction_intent: input.compaction_intent,
     };
+    let compaction_domain_context = input.compaction_domain_context;
+    let use_roleplay_compaction = loop_config
+        .context_compaction
+        .as_ref()
+        .is_some_and(|policy| policy.strategy_id == ROLEPLAY_SCENE_AWARE_COMPACTION_STRATEGY_ID);
     match input.client {
         JsChatCompletionsClientConfig::Fake => {
             let client = fake_chat_completions_client(
@@ -536,6 +546,11 @@ fn run_chat_completions_brain_with_buffered_tools(
                 descriptors,
             )
             .with_loop_config(loop_config);
+            if use_roleplay_compaction {
+                brain =
+                    brain.with_compaction_strategy(Arc::new(RoleplaySceneAwareCompactionStrategy));
+            }
+            brain.set_compaction_domain_context(compaction_domain_context);
             Ok(brain.wake_with_stream_sink(loop_input, sink))
         }
         JsChatCompletionsClientConfig::Live { base_url, api_key } => {
@@ -556,6 +571,11 @@ fn run_chat_completions_brain_with_buffered_tools(
                 descriptors,
             )
             .with_loop_config(loop_config);
+            if use_roleplay_compaction {
+                brain =
+                    brain.with_compaction_strategy(Arc::new(RoleplaySceneAwareCompactionStrategy));
+            }
+            brain.set_compaction_domain_context(compaction_domain_context);
             Ok(brain.wake_with_stream_sink(loop_input, sink))
         }
     }

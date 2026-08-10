@@ -257,6 +257,12 @@ export async function createOpenAiResponsesBrainHost(
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
         bodyState: wake.state,
+        ...(context.profile.profile.contextPolicy?.strategyId ===
+          "roleplay_scene_aware_compaction" &&
+        (context.profile.profile.brain?.strategy === "roleplay_narrator" ||
+          context.profile.profile.roleplayNarrator !== undefined)
+          ? { compactionDomainContext: emptyRoleplayCompactionDomainContext() }
+          : {}),
         ...(wake.providerState === undefined && wake.durableConversation
           ? { durableConversation: wake.durableConversation }
           : {}),
@@ -358,6 +364,15 @@ export async function createOpenAiResponsesBrainHost(
         );
       return withOpenAiResponsesProviderStateScope(result, context);
     },
+  };
+}
+
+function emptyRoleplayCompactionDomainContext(): unknown {
+  return {
+    schemaVersion: 1,
+    retentionTiers: [],
+    directorsNotes: [],
+    extractionRequests: [],
   };
 }
 

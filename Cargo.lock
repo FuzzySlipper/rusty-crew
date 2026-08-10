@@ -1341,6 +1341,7 @@ dependencies = [
  "rusty-crew-core-tool-registry",
  "rusty-crew-openai-responses-brain",
  "rusty-crew-roleplay-core",
+ "schemars",
  "serde",
  "serde_json",
  "sha2 0.10.9",

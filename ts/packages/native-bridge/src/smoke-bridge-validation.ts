@@ -36,9 +36,12 @@ import {
   nativeManifestVersion,
   nativeWireShapeFingerprint,
   roundTripNativeBridgeFixture,
+  type ChatCompletionsBrainRunInput,
   type NativeBridgeRoundTripFixtureName,
   type OpenAiResponsesBrainRunInput,
 } from "./index.js";
+import { toNativeOpenAiResponsesBrainRunInput } from "./brain-provider-input-wire.js";
+import { toNativeChatCompletionsBrainRunInput } from "./brain-run-wire.js";
 import {
   toCoreEvent,
   toNativeCoreEvent,
@@ -367,6 +370,35 @@ const input: OpenAiResponsesBrainRunInput = {
   },
   client: { mode: "fake" },
 };
+
+const compactionDomainContext = {
+  schemaVersion: 1,
+  retentionTiers: [],
+  directorsNotes: [],
+  extractionRequests: [],
+};
+const nativeResponsesInput = toNativeOpenAiResponsesBrainRunInput({
+  ...input,
+  compactionDomainContext,
+}) as { compactionDomainContext?: unknown };
+if (nativeResponsesInput.compactionDomainContext !== compactionDomainContext) {
+  throw new Error(
+    "OpenAI Responses wire mapping dropped compactionDomainContext",
+  );
+}
+const nativeChatInput = toNativeChatCompletionsBrainRunInput({
+  wakeId: "validation-chat-wake",
+  sessionId: "validation-session" as ChatCompletionsBrainRunInput["sessionId"],
+  messages: [{ role: "user", content: "Continue the scene." }],
+  compaction_domain_context: compactionDomainContext,
+  config: { model: "fake-model" },
+  client: { mode: "fake" },
+}) as { compactionDomainContext?: unknown };
+if (nativeChatInput.compactionDomainContext !== compactionDomainContext) {
+  throw new Error(
+    "Chat Completions wire mapping dropped compaction_domain_context alias",
+  );
+}
 
 validateBridgeValue<OpenAiResponsesBrainRunInput>({
   operation: "run_openai_responses_brain",

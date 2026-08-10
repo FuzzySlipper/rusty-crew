@@ -1,4 +1,7 @@
 use super::*;
+use crate::roleplay_context_compaction::{
+    RoleplaySceneAwareCompactionStrategy, ROLEPLAY_SCENE_AWARE_COMPACTION_STRATEGY_ID,
+};
 use rusty_crew_brain_runtime::{
     BrainContextCompactionPolicy, BrainRuntimeError, BufferedBrainHostToolResult,
     BufferedBrainHostToolStatus, BufferedBrainHostTurnDisposition, BufferedBrainTurnCoordinator,
@@ -30,6 +33,8 @@ struct JsOpenAiResponsesBrainRunInput {
     client: JsOpenAiResponsesClientConfig,
     #[serde(default, alias = "compaction_intent")]
     compaction_intent: Option<rusty_crew_core_protocol::BrainWakeCompactionIntent>,
+    #[serde(default, alias = "compaction_domain_context")]
+    compaction_domain_context: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -878,11 +883,21 @@ where
             .map_err(to_napi_error)?,
         compaction_intent: input.compaction_intent,
     };
+    let compaction_domain_context = input.compaction_domain_context;
+    let use_roleplay_compaction = config
+        .context_compaction
+        .as_ref()
+        .is_some_and(|policy| policy.strategy_id == ROLEPLAY_SCENE_AWARE_COMPACTION_STRATEGY_ID);
     let mut credential_secret_update = None;
     let result = match input.client {
         JsOpenAiResponsesClientConfig::Fake => {
             let client = fake_responses_client_for_body(&input.body_state, continuation_epoch);
             let mut brain = ResponsesReplayBrain::new(client, tool_executor, config, descriptors);
+            if use_roleplay_compaction {
+                brain =
+                    brain.with_compaction_strategy(Arc::new(RoleplaySceneAwareCompactionStrategy));
+            }
+            brain.set_compaction_domain_context(compaction_domain_context);
             if let Some(sink) = &mut sink {
                 brain.wake_with_history_and_stream_sink(request, history, *sink)
             } else {
@@ -945,6 +960,11 @@ where
             )
             .map_err(|error| napi::Error::new(napi::Status::GenericFailure, error.to_string()))?;
             let mut brain = ResponsesReplayBrain::new(client, tool_executor, config, descriptors);
+            if use_roleplay_compaction {
+                brain =
+                    brain.with_compaction_strategy(Arc::new(RoleplaySceneAwareCompactionStrategy));
+            }
+            brain.set_compaction_domain_context(compaction_domain_context);
             if let Some(sink) = &mut sink {
                 brain.wake_with_history_and_stream_sink(request, history, *sink)
             } else {

@@ -6,12 +6,20 @@ import type {
 } from "./public-api.js";
 import { toNativeBodyState } from "./event-body-wire.js";
 
+export function compactionDomainContextFromInput(input: {
+  compactionDomainContext?: unknown;
+  compaction_domain_context?: unknown;
+}): unknown {
+  return input.compactionDomainContext ?? input.compaction_domain_context;
+}
+
 export function toNativeOpenAiResponsesBrainRunInput(
   input: OpenAiResponsesBrainRunInput,
 ): unknown {
   const compactionIntent =
     (input as unknown as { compactionIntent?: unknown }).compactionIntent ??
     (input as unknown as { compaction_intent?: unknown }).compaction_intent;
+  const compactionDomainContext = compactionDomainContextFromInput(input);
   return {
     wakeId: input.wakeId,
     sessionId: input.sessionId,
@@ -33,6 +41,11 @@ export function toNativeOpenAiResponsesBrainRunInput(
     ...(compactionIntent !== undefined
       ? {
           compactionIntent,
+        }
+      : {}),
+    ...(compactionDomainContext !== undefined
+      ? {
+          compactionDomainContext,
         }
       : {}),
     config: input.config,

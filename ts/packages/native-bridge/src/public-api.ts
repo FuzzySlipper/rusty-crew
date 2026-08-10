@@ -96,6 +96,7 @@ import type { NativeAgentCoordinationBridgeMethods } from "./agent-coordination-
 import type { NativeRuntimeActivityBridgeMethods } from "./runtime-activity-public-api.js";
 import type { NativeReviewSubmissionBridgeMethods } from "./review-submission-public-api.js";
 import type {
+  BrainRunCompactionDomainContext,
   ChatCompletionsChatCompletionMessage,
   ChatCompletionsInputImage,
 } from "./chat-completions-public-api.js";
@@ -176,7 +177,6 @@ export type {
   NativeRuntimeMaintenancePolicy,
 } from "./external-event-retention-public-api.js";
 export type { NativeBrainContextCompactionPolicy } from "./context-compaction-public-api.js";
-
 export interface NativeSessionConfigInput {
   sessionId: string;
   agentId: string;
@@ -316,7 +316,7 @@ export type NativeOpenAiOauthCodeExchangeResult =
       error: NativeOpenAiOauthExchangeError;
     };
 
-export interface OpenAiResponsesBrainRunInput {
+export interface OpenAiResponsesBrainRunInput extends BrainRunCompactionDomainContext {
   wakeId: string;
   sessionId: SessionId;
   bodyState: BodyState;
@@ -366,7 +366,7 @@ export interface OpenAiResponsesToolRequest {
   argumentsJson: string;
 }
 
-export interface ChatCompletionsBrainRunInput {
+export interface ChatCompletionsBrainRunInput extends BrainRunCompactionDomainContext {
   wakeId: string;
   sessionId: SessionId;
   messages: ChatCompletionsChatCompletionMessage[];

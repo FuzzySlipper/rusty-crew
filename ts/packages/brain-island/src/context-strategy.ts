@@ -1,7 +1,8 @@
 export type ContextStrategyId =
   | "recent_window"
   | "session_memory_augmented"
-  | "rolling_summary_compaction";
+  | "rolling_summary_compaction"
+  | "roleplay_scene_aware_compaction";
 
 export type ContextDebugVisibility = "off" | "status" | "verbose";
 
@@ -74,6 +75,15 @@ const CONTEXT_STRATEGY_DESCRIPTORS: ContextStrategyDescriptor[] = [
     label: "Rolling Summary Compaction",
     description:
       "Compacts long mid-turn model projections in Rust while preserving the durable transcript and continuation provenance.",
+    status: "active",
+    supportsAutoCompaction: true,
+    modelFacingDebugDefault: false,
+  },
+  {
+    id: "roleplay_scene_aware_compaction",
+    label: "Roleplay Scene-Aware Compaction",
+    description:
+      "Uses Crew's generic lifecycle with Roleplay-owned scene, voice, emotional-continuity, and lore-provenance preservation.",
     status: "active",
     supportsAutoCompaction: true,
     modelFacingDebugDefault: false,
@@ -158,6 +168,14 @@ export function prepareContextStrategyRoleAssembly(
         strategyId: policy.strategyId,
         additionalInstructions: [
           `Context strategy: rolling_summary_compaction. Prefer recent conversation evidence and durable summary artifacts when present. Auto-compaction is ${policy.autoCompactionEnabled ? "enabled" : "disabled"} at ${policy.compactAtPercent}% with target ${policy.targetPercentAfterCompaction}%.`,
+        ],
+        diagnostics: [],
+      };
+    case "roleplay_scene_aware_compaction":
+      return {
+        strategyId: policy.strategyId,
+        additionalInstructions: [
+          `Context strategy: roleplay_scene_aware_compaction. Treat director context as derived narrative continuity, preserve recent scene evidence verbatim, and use lore provenance rather than inventing missing facts. Auto-compaction is ${policy.autoCompactionEnabled ? "enabled" : "disabled"} at ${policy.compactAtPercent}% with target ${policy.targetPercentAfterCompaction}%.`,
         ],
         diagnostics: [],
       };

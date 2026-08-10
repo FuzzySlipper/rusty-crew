@@ -18,6 +18,13 @@ const evidenceRoot =
 const expectedSourceRevision =
   process.env.RUSTY_CREW_CONTEXT_CERT_SOURCE_SHA ??
   execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const contextStrategyId =
+  process.env.RUSTY_CREW_CONTEXT_CERT_STRATEGY_ID ?? "recent_window";
+const certificationLabel =
+  process.env.RUSTY_CREW_CONTEXT_CERT_LABEL ?? "task-6617";
+const continuityFact =
+  process.env.RUSTY_CREW_CONTEXT_CERT_CONTINUITY_FACT ??
+  `CONTEXT_FACT_${Date.now().toString(36)}`;
 const suffix = Date.now().toString(36);
 const successfulCompactAtPercent = 60;
 const successfulTargetPercentAfterCompaction = 30;
@@ -40,7 +47,7 @@ assert.equal(serviceUnit, "rusty-crew-debug.service");
 try {
   await assertServiceSourceRevision();
   await createProvider(providerAlias, 16_384, 512, {
-    certification: "task-6617",
+    certification: certificationLabel,
     scenario: "successful-compaction",
   });
   providerCreated = true;
@@ -48,14 +55,14 @@ try {
   profileCreated = true;
   await applyContextPolicy(profileId, successful.profileRevision, {
     enabled: true,
-    strategyId: "recent_window",
+    strategyId: contextStrategyId,
     autoCompactionEnabled: true,
     compactAtPercent: successfulCompactAtPercent,
     targetPercentAfterCompaction: successfulTargetPercentAfterCompaction,
     maxContextPercentForWake: 95,
     debugVisibility: "status",
     includeDebugEventsInModelContext: false,
-    strategyConfig: { certification: "task-6617" },
+    strategyConfig: { certification: certificationLabel },
   });
 
   const snapshots: Record<string, unknown>[] = [];
@@ -65,7 +72,7 @@ try {
     const marker = `CONTEXT_CERT_TOOL_${turn}_${suffix}`;
     const body = [
       turn === 1
-        ? `Remember this exact continuity fact: CONTEXT_FACT_${suffix}.`
+        ? `Remember this exact continuity fact: ${continuityFact}.`
         : "Preserve the exact continuity fact from the earlier turns.",
       `Use terminal exactly once to run printf '${marker}'.`,
       `After the tool result, reply with ${marker} and one short sentence.`,
@@ -216,11 +223,11 @@ try {
   await assertServiceSourceRevision();
   const restarted = await sendAndWait(
     successful.sessionId,
-    `After the debug service restart, recall CONTEXT_FACT_${suffix}, then use terminal exactly once to run printf 'CONTEXT_RESTART_CONTINUITY_${suffix}'. Reply with both the remembered fact and the exact terminal marker.`,
+    `After the debug service restart, recall ${continuityFact}, then use terminal exactly once to run printf 'CONTEXT_RESTART_CONTINUITY_${suffix}'. Reply with both the remembered fact and the exact terminal marker.`,
     await latestCursor(successful.sessionId),
   );
   assert.equal(
-    assistantSummary(restarted.events).includes(`CONTEXT_FACT_${suffix}`),
+    assistantSummary(restarted.events).includes(continuityFact),
     true,
     "restart must retain a pre-compaction continuity fact",
   );
@@ -264,7 +271,7 @@ try {
   );
 
   await createProvider(failureProviderAlias, 12_288, 512, {
-    certification: "task-6617",
+    certification: certificationLabel,
     scenario: "failed-compaction-preserves-state",
   });
   failureProviderCreated = true;
@@ -272,14 +279,17 @@ try {
   failureProfileCreated = true;
   await applyContextPolicy(failureProfileId, failure.profileRevision, {
     enabled: true,
-    strategyId: "recent_window",
+    strategyId: contextStrategyId,
     autoCompactionEnabled: true,
     compactAtPercent: 25,
     targetPercentAfterCompaction: 12,
     maxContextPercentForWake: 95,
     debugVisibility: "status",
     includeDebugEventsInModelContext: false,
-    strategyConfig: { certification: "task-6617", expectedFailure: true },
+    strategyConfig: {
+      certification: certificationLabel,
+      expectedFailure: true,
+    },
   });
   const failedTurn = await sendAndWait(
     failure.sessionId,
@@ -472,12 +482,12 @@ async function createProfile(
     "/v1/admin/control/profiles",
     {
       profileId: currentProfileId,
-      displayName: `Task 6617 context certification ${suffix}`,
+      displayName: `${certificationLabel} context certification ${suffix}`,
       providerAlias: alias,
       kind: "full",
       workspaceCwd: "/home/dev/rusty-crew",
       localToolProfileId: "full_coding_agent",
-      reason: "task 6617 live context compaction certification",
+      reason: `${certificationLabel} live context compaction certification`,
     },
   );
   const sessionId = nestedString(created, "outcome", "result", "sessionId");
@@ -520,7 +530,7 @@ async function deleteProfile(currentProfileId: string): Promise<void> {
     `/v1/admin/control/profiles/${encodeURIComponent(currentProfileId)}/delete`,
     {
       confirmProfileId: currentProfileId,
-      reason: "task 6617 live certification cleanup",
+      reason: `${certificationLabel} live certification cleanup`,
     },
   );
   assert.ok(result.status < 400, result.text);

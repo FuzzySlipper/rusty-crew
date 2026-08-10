@@ -1232,6 +1232,7 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
       ),
     ),
     providerState: Type.Optional(providerStateInputSchema),
+    compactionDomainContext: Type.Optional(Type.Unknown()),
     providerStateAbsence: Type.Optional(
       Type.Union([
         Type.Literal("not_configured"),
@@ -1330,6 +1331,7 @@ export const chatCompletionsBrainRunInputSchema = Type.Object(
     sessionId: Type.String(),
     messages: Type.Array(chatCompletionMessageSchema),
     providerState: Type.Optional(providerStateInputSchema),
+    compactionDomainContext: Type.Optional(Type.Unknown()),
     continuationState: Type.Optional(
       Type.Object(
         {

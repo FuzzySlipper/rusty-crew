@@ -195,6 +195,12 @@ function createRustChatCompletionsBrainHostExecutor(
         wakeId: wake.wakeId,
         sessionId: wake.sessionId,
         messages: rustChatCompletionsMessages(wake),
+        ...(context.profile.profile.contextPolicy?.strategyId ===
+          "roleplay_scene_aware_compaction" &&
+        (context.profile.profile.brain?.strategy === "roleplay_narrator" ||
+          context.profile.profile.roleplayNarrator !== undefined)
+          ? { compactionDomainContext: emptyRoleplayCompactionDomainContext() }
+          : {}),
         ...(narratorImageContext?.images.length
           ? { inputImages: narratorImageContext.images }
           : {}),
@@ -321,6 +327,15 @@ function createRustChatCompletionsBrainHostExecutor(
       }
       return withChatCompletionsProviderStateScope(result, context);
     },
+  };
+}
+
+function emptyRoleplayCompactionDomainContext(): unknown {
+  return {
+    schemaVersion: 1,
+    retentionTiers: [],
+    directorsNotes: [],
+    extractionRequests: [],
   };
 }
 

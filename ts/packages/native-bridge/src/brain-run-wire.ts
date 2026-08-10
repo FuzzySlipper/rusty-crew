@@ -39,7 +39,7 @@ import {
   chatCompletionsTransportMetricsFromRaw,
   type RawChatCompletionsTransportMetrics,
 } from "./chat-completions-metrics-wire.js";
-import { toNativeProviderStateInput } from "./brain-provider-input-wire.js";
+import * as providerInput from "./brain-provider-input-wire.js";
 export { chatCompletionsTransportMetricsFromRaw };
 export {
   toNativeOpenAiResponsesBrainRunInput,
@@ -111,6 +111,8 @@ export function toNativeChatCompletionsBrainRunInput(
   const compactionIntent =
     (input as unknown as { compactionIntent?: unknown }).compactionIntent ??
     (input as unknown as { compaction_intent?: unknown }).compaction_intent;
+  const compactionDomainContext =
+    providerInput.compactionDomainContextFromInput(input);
   return {
     wakeId: input.wakeId,
     sessionId: input.sessionId,
@@ -124,12 +126,17 @@ export function toNativeChatCompletionsBrainRunInput(
     })),
     inputImages: input.inputImages,
     providerState: input.providerState
-      ? toNativeProviderStateInput(input.providerState)
+      ? providerInput.toNativeProviderStateInput(input.providerState)
       : undefined,
     continuationState: input.continuationState,
     ...(compactionIntent !== undefined
       ? {
           compactionIntent,
+        }
+      : {}),
+    ...(compactionDomainContext !== undefined
+      ? {
+          compactionDomainContext,
         }
       : {}),
     tools: input.tools?.map((tool) => ({

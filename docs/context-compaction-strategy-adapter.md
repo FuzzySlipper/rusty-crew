@@ -128,3 +128,41 @@ compaction endpoint, or generic rolling-summary implementation. Any need to
 change Crew's generic accounting, admission, persistence, or provider contracts
 must be demonstrated as a concrete incompatibility rather than assumed by the
 downstream adapter.
+
+## Roleplay version 1 implementation status
+
+The native brain integration boundary implements the version 1 Roleplay
+adapter as `RoleplaySceneAwareCompactionStrategy` with strategy id
+`roleplay_scene_aware_compaction`. This placement keeps the Roleplay domain
+crate independent from the brain runtime while allowing the native Chat
+Completions and Responses hosts to select the adapter through the ordinary
+profile context policy. It does not add a Roleplay-owned compaction lifecycle.
+
+The deterministic strategy:
+
+- honors explicit critical, recent, scene, and discardable retention tiers;
+- excludes historic tool calls, tool results, and reasoning projections from
+  its narrative continuity text while leaving Crew's canonical telemetry
+  untouched;
+- validates every scene, director-note, retention, and extraction provenance
+  reference against Crew's frozen projection;
+- emits a typed version 1 preservation payload with scene context, director
+  notes, derived fact candidates, extraction status, lineage, quality, and
+  stable warnings; and
+- fails without changing the prior provider projection when provenance is
+  invalid or no safe historical item can be compacted.
+
+When a live narrator wake does not yet have source-ref-bound scene evidence,
+the host supplies an empty version 1 domain context. The strategy then produces
+a visibly `degraded` narrative-continuity payload from the frozen projection,
+preserves Crew's recent safe-boundary tail, and reports that scene, director
+note, and lore-extraction evidence were unavailable. It does not invent a
+scene boundary or silently claim lore capture.
+
+Version 1 derived fact candidates are preservation output, not direct writes
+to the lore store. Applying them to an auto-capture layer requires the normal
+Roleplay lore validation/provenance path. Model-assisted director-note quality,
+fact-extraction recall, and voice/emotional selection remain empirical quality
+concerns and must be evaluated with live narrator conversations; deterministic
+fixtures establish lifecycle safety but do not by themselves certify prose
+quality.

@@ -4,6 +4,8 @@
 //! the current manifest surface and own runtime buffers without leaking native
 //! transport dependencies into core crates.
 
+mod roleplay_context_compaction;
+
 use rusty_crew_brain_runtime::{
     brain_catalog, plan_brain_selection, BrainRuntimeError, BrainSelectionRequest,
     BufferedBrainTurnCleanupReport, BufferedBrainTurnDiagnostic,

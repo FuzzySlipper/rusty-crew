@@ -21,3 +21,7 @@ export interface ChatCompletionsToolRequest {
   name: string;
   argumentsJson: string;
 }
+export interface BrainRunCompactionDomainContext {
+  compactionDomainContext?: unknown;
+  compaction_domain_context?: unknown;
+}
