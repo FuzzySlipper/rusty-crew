@@ -30,6 +30,7 @@ const CONTEXT_STRATEGY_IDS: &[&str] = &[
     "recent_window",
     "session_memory_augmented",
     "rolling_summary_compaction",
+    "roleplay_scene_aware_compaction",
 ];
 const CONTEXT_DEBUG_VISIBILITY_VALUES: &[&str] = &["off", "status", "verbose"];
 
@@ -4447,6 +4448,24 @@ mod tests {
                 "context_policy_trigger_above_wake_guard",
                 "context_policy_debug_visibility_invalid",
             ],
+        );
+    }
+
+    #[test]
+    fn accepts_roleplay_scene_aware_context_policy() {
+        let mut runner = profile("runner");
+        runner.context_policy.as_mut().unwrap().strategy_id =
+            "roleplay_scene_aware_compaction".to_string();
+
+        let result = validate_runtime_config_input(&RuntimeConfigValidationInput {
+            runtime_config: valid_draft(),
+            profiles: vec![runner],
+        });
+
+        assert!(
+            result.ok(),
+            "unexpected diagnostics: {:?}",
+            result.diagnostics
         );
     }
 
