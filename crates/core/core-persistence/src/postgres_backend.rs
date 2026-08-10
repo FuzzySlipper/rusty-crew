@@ -10,6 +10,7 @@ mod chat_events;
 mod conversation_attachment;
 mod curator;
 mod external_runtime;
+mod install_diplomat;
 mod logical_turns;
 mod memory_lore;
 mod pool;
@@ -72,19 +73,20 @@ use crate::{
     DurableAgentKind, DurableAgentRecord, DurableIdentityStatus, DurableMessageRecord,
     DurableMessageStatus, DurableMessageWrite, EnsureActiveChatConversationBranchRequest,
     EnsureActiveChatConversationBranchResult, ExactPage, ExternalBindingStatus,
-    ExternalRuntimeEventRetentionReport, IsoTimestamp, LoreRecallEntry, LoreRecallQuery,
-    LoreRecallResult, LoreRecallTraceQuery, LoreRecallTraceRecord, McpBindingQuery,
-    McpBindingRecord, MessageBlockId, MessageBlockRecord, MessageId, MessageSlotId,
-    MessageSlotQuery, MessageSlotRecord, MessageSlotWrite, MessageVariantId, MessageVariantQuery,
-    MessageVariantRecord, MessageVariantSource, MessageVariantStatus, MessageVariantWrite,
-    ModelProviderCredential, ModelProviderCredentialKind, ModelProviderCredentialLink,
-    ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink, ModelProviderProtocol,
-    ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope, ModelProviderStatus,
-    ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps, ProfileMemoryDelete,
-    ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace, ProfileMemoryTarget,
-    ProfileMemoryWrite, ProfilePurgeReport, ProfilePurgeTableCount, ProfileRegistryLifecycleStatus,
-    ProfileRegistryQuery, ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite,
-    ProviderStateAbsenceReason, ProviderStateCompatibilityAction, ProviderStateCompatibilityPlan,
+    ExternalRuntimeEventRetentionReport, InstallDiplomatBindingQuery, InstallDiplomatBindingRecord,
+    IsoTimestamp, LoreRecallEntry, LoreRecallQuery, LoreRecallResult, LoreRecallTraceQuery,
+    LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord, MessageBlockId, MessageBlockRecord,
+    MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
+    MessageVariantId, MessageVariantQuery, MessageVariantRecord, MessageVariantSource,
+    MessageVariantStatus, MessageVariantWrite, ModelProviderCredential,
+    ModelProviderCredentialKind, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
+    ModelProviderCredentialUnlink, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
+    ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite, PersistedEvent,
+    ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
+    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport,
+    ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
+    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
+    ProviderStateCompatibilityAction, ProviderStateCompatibilityPlan,
     ProviderStateCompatibilitySnapshot, ProviderWireStateDiagnostic,
     ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateRecord,
     ProviderWireStateWakeLookup, ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage,
@@ -114,12 +116,12 @@ use crate::{
     SessionMemoryRecordStatus, SessionMemoryRecordWrite, SessionMemoryReplace,
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionMessageVariantPageQuery,
     SessionState, SessionStatus, SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery,
-    SimpleKvRecord, SimpleKvScope, SimpleKvWrite, TaskId, ToolCallPhase, ToolCallRecord,
-    UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerPoolClaimRecord, WorkerPoolClaimRequest,
-    WorkerPoolCompletionRequest, WorkerPoolLeaseRecord, WorkerPoolLeaseStatus,
-    WorkerPoolMemberRecord, WorkerPoolMemberStatus, WorkerPoolNoCapacityReason,
-    WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunQuery, WorkerRunRecord,
-    WorkerRunStatus,
+    SimpleKvRecord, SimpleKvScope, SimpleKvWrite, TaskId, TelegramDiplomatInteractionRecord,
+    ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest, UpdateBranchHeadResult,
+    WorkerPoolClaimRecord, WorkerPoolClaimRequest, WorkerPoolCompletionRequest,
+    WorkerPoolLeaseRecord, WorkerPoolLeaseStatus, WorkerPoolMemberRecord, WorkerPoolMemberStatus,
+    WorkerPoolNoCapacityReason, WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunQuery,
+    WorkerRunRecord, WorkerRunStatus,
 };
 use postgres::{types::ToSql, Client, GenericClient, Row, Transaction};
 use rusty_crew_core_protocol::{

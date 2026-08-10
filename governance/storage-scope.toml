@@ -150,6 +150,15 @@ owns = [
 notes = "MCP, channel, adapter, and external binding records scoped by profile/session/agent."
 
 [[scope]]
+id = "install_diplomat"
+label = "Install Diplomat"
+owns = [
+  "telegram_install_diplomat_bindings",
+  "telegram_diplomat_interactions",
+]
+notes = "Session-scoped installation diplomat bindings and durable Telegram interaction/loop coordination. These records are not profile-owned and Telegram remains an external adapter."
+
+[[scope]]
 id = "conversations_attachments"
 label = "Conversations And Attachments"
 owns = [

@@ -83,8 +83,9 @@ use rusty_crew_core_protocol::{
     ExternalRuntimeCertificationInvalidation, ExternalRuntimeCertificationRecord,
     ExternalRuntimeEventInput, ExternalRuntimeId, ExternalRuntimeKind,
     ExternalRuntimeProbeEvidenceRecord, ExternalRuntimeRegistration, ExternalTurnCorrelation,
-    ExternalTurnRequestId, FanOutFailurePolicy, FanOutGroupStatus, IsoTimestamp,
-    LogicalTurnAdmission, LogicalTurnAttentionReceipt, LogicalTurnAttentionRequest,
+    ExternalTurnRequestId, FanOutFailurePolicy, FanOutGroupStatus, InstallDiplomatBindingQuery,
+    InstallDiplomatBindingRecord, InstallDiplomatBindingStatus, IsoTimestamp, LogicalTurnAdmission,
+    LogicalTurnAttentionReceipt, LogicalTurnAttentionRequest,
     LogicalTurnAttentionResolutionReceipt, LogicalTurnAttentionResolutionRequest,
     LogicalTurnCancelRequest, LogicalTurnCancellationReceipt, LogicalTurnCheckpoint,
     LogicalTurnClaimRequest, LogicalTurnContinuationClaim, LogicalTurnDiagnosticQuery,
@@ -114,7 +115,8 @@ use rusty_crew_core_protocol::{
     ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
     ServiceCredentialWrite, SessionActivityDigest, SessionActivityDigestQuery, SessionConfig,
     SessionHandle, SessionHistoryWindow, SessionId, SessionIdentityRecord, SessionKind,
-    SessionState, SessionStatus, SessionWorkspace, SourceSystemReference, TaskId, ToolCallMetadata,
+    SessionState, SessionStatus, SessionWorkspace, SourceSystemReference, TaskId,
+    TelegramDiplomatInteractionRecord, TelegramDiplomatInteractionTerminalReason, ToolCallMetadata,
     ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

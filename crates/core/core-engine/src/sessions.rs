@@ -165,6 +165,7 @@ impl CoreEngine {
     pub fn archive_session(&self, session_id: &SessionId) -> CoreResult<SessionState> {
         let now = self.now();
         self.archive_active_external_bindings_for_session(session_id, &now)?;
+        self.degrade_install_diplomat_bindings_for_session(session_id, &now)?;
         let state = self.sessions.archive_session(session_id, now)?;
         save_engine_session(&self.store, &state)?;
         self.bus.publish(CoreEvent::SessionArchived {

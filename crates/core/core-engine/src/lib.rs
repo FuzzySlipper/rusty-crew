@@ -23,6 +23,7 @@ mod external_runtime_certification;
 mod external_runtime_compatibility;
 mod github_gate;
 mod github_gate_wait;
+mod install_diplomat;
 mod logical_turns;
 mod review_submission;
 mod review_submission_store;
@@ -237,6 +238,7 @@ pub struct CoreEngine {
     review_submission_lock: Arc<Mutex<()>>,
     external_follow_up_lock: Arc<Mutex<()>>,
     agent_route_lifecycle_lock: Arc<Mutex<()>>,
+    install_diplomat_lock: Arc<Mutex<()>>,
 }
 
 fn parse_rfc3339(value: &str) -> CoreResult<OffsetDateTime> {

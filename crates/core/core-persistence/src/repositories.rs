@@ -240,6 +240,16 @@ const CORE_REPOSITORY_GROUPS: &[RepositoryGroupDescriptor] = &[
         ],
     },
     RepositoryGroupDescriptor {
+        group_id: "install_diplomat",
+        label: "Install Diplomat",
+        correctness_sensitive: true,
+        backend_requirements: &[TXN, JSON, SIZE, PLAN],
+        notes: &[
+            "Owns session-scoped installation diplomat bindings and Telegram interaction loop records.",
+            "Diplomat identity is independent of profile ownership; Telegram remains an external adapter rather than a coordination bus.",
+        ],
+    },
+    RepositoryGroupDescriptor {
         group_id: "profile_registry",
         label: "Profile Registry",
         correctness_sensitive: true,
@@ -335,6 +345,7 @@ mod tests {
             "runtime_search",
             "conversations_attachments",
             "profile_memory",
+            "install_diplomat",
         ] {
             let group = groups
                 .iter()

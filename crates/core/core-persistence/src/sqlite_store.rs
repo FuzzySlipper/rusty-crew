@@ -278,6 +278,93 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn get_install_diplomat_binding(
+        &self,
+        binding_id: &str,
+    ) -> CoreResult<Option<InstallDiplomatBindingRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_install_diplomat_binding(binding_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_install_diplomat_binding(binding_id),
+        }
+    }
+
+    pub fn list_install_diplomat_bindings(
+        &self,
+        query: &InstallDiplomatBindingQuery,
+    ) -> CoreResult<Vec<InstallDiplomatBindingRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_install_diplomat_bindings(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_install_diplomat_bindings(query),
+        }
+    }
+
+    pub fn insert_install_diplomat_binding(
+        &self,
+        record: &InstallDiplomatBindingRecord,
+    ) -> CoreResult<InstallDiplomatBindingRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.insert_install_diplomat_binding(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.insert_install_diplomat_binding(record),
+        }
+    }
+
+    pub fn update_install_diplomat_binding(
+        &self,
+        record: &InstallDiplomatBindingRecord,
+        expected_revision: u64,
+    ) -> CoreResult<InstallDiplomatBindingRecord> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.update_install_diplomat_binding(record, expected_revision)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.update_install_diplomat_binding(record, expected_revision)
+            }
+        }
+    }
+
+    pub fn get_telegram_diplomat_interaction(
+        &self,
+        interaction_id: &str,
+    ) -> CoreResult<Option<TelegramDiplomatInteractionRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_telegram_diplomat_interaction(interaction_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_telegram_diplomat_interaction(interaction_id),
+        }
+    }
+
+    pub fn put_telegram_diplomat_interaction(
+        &self,
+        record: &TelegramDiplomatInteractionRecord,
+        expected_revision: Option<u64>,
+    ) -> CoreResult<TelegramDiplomatInteractionRecord> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.put_telegram_diplomat_interaction(record, expected_revision)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.put_telegram_diplomat_interaction(record, expected_revision)
+            }
+        }
+    }
+
+    pub fn list_telegram_diplomat_interactions(
+        &self,
+        binding_id: &str,
+    ) -> CoreResult<Vec<TelegramDiplomatInteractionRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_telegram_diplomat_interactions(binding_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_telegram_diplomat_interactions(binding_id),
+        }
+    }
+
     pub fn insert_runtime_activity(
         &self,
         record: &RuntimeActivityRecord,

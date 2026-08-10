@@ -55,6 +55,7 @@ impl CoreEngine {
             review_submission_lock: Arc::new(Mutex::new(())),
             external_follow_up_lock: Arc::new(Mutex::new(())),
             agent_route_lifecycle_lock: Arc::new(Mutex::new(())),
+            install_diplomat_lock: Arc::new(Mutex::new(())),
         };
         engine.validate_agent_route_session_collisions()?;
         engine.cleanup_orphaned_delegated_sessions()?;

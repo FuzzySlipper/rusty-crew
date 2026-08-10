@@ -116,6 +116,11 @@ pub(super) fn postgres_backend_repository_groups() -> Vec<RuntimeRepositoryGroup
                     0,
                     "PostgreSQL durable backend status: implemented for profile_dense descriptor projection, dense profile memory conformance, and roleplay_lore record/layer physical schema.".to_string(),
                 );
+            } else if group.group_id == "install_diplomat" {
+                group.notes.insert(
+                    0,
+                    "PostgreSQL durable backend status: implemented for revisioned install-diplomat bindings and restart-safe Telegram interaction budgets.".to_string(),
+                );
             } else {
                 group.notes.insert(
                     0,
