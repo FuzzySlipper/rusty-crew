@@ -3125,7 +3125,7 @@ fn chat_context_accounting_snapshot(
     let latest_artifact = state.artifacts.last();
     let compaction = ContextCompactionProjection {
         strategy_id: compaction_policy.map(|policy| policy.strategy_id.clone()),
-        strategy_revision: Some("rolling_summary_v1".to_string()),
+        strategy_revision: latest_artifact.and_then(|artifact| artifact.strategy_revision.clone()),
         enabled: compaction_policy.is_some_and(|policy| policy.enabled),
         auto_compaction_enabled: compaction_policy
             .is_some_and(|policy| policy.auto_compaction_enabled),

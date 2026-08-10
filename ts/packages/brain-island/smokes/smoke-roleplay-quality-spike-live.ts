@@ -28,6 +28,7 @@ const LIVENESS_TIMEOUT_MS = 5_000;
 const STREAM_TIMEOUT_MS = 120_000; // 2 min for LLM to respond
 const POLL_INTERVAL_MS = 200;
 const SCENARIO_LIMIT = scenarioLimit();
+const CONTEXT_STRATEGY_ID = process.env.RUSTY_CREW_QUALITY_CONTEXT_STRATEGY_ID;
 
 const TEST_PREFIX = `quality-spike-${Date.now()}`;
 const TEST_PROFILE = `${TEST_PREFIX}-narrator`;
@@ -51,6 +52,18 @@ async function adminPost(path: string, body: unknown): Promise<any> {
   if (!data.ok) {
     throw new Error(
       `Admin POST ${path} failed: ${data.error?.code} — ${data.error?.message}`,
+    );
+  }
+  return data.data;
+}
+
+async function adminGet(path: string): Promise<any> {
+  const url = `${ADMIN_BASE.replace(/\/+$/, "")}/v1/admin${path}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!data.ok) {
+    throw new Error(
+      `Admin GET ${path} failed: ${data.error?.code} — ${data.error?.message}`,
     );
   }
   return data.data;
@@ -231,6 +244,7 @@ async function runQualitySpike(): Promise<void> {
   console.log(`Profile: ${TEST_PROFILE}`);
   console.log(`Session: ${TEST_SESSION}`);
   console.log(`Scenario limit: ${SCENARIO_LIMIT}`);
+  console.log(`Context strategy: ${CONTEXT_STRATEGY_ID ?? "profile default"}`);
 
   // ── 1. Liveness check ─────────────────────────────────────────────────────
 
@@ -386,6 +400,34 @@ async function runQualitySpike(): Promise<void> {
 
   await sleep(2000);
 
+  if (CONTEXT_STRATEGY_ID !== undefined) {
+    const registry = await adminGet(
+      `/profiles/registry/${encodeURIComponent(TEST_PROFILE)}`,
+    );
+    assert.equal(typeof registry.revision, "number");
+    const applied = await adminPost(
+      `/profiles/registry/${encodeURIComponent(TEST_PROFILE)}/runtime-config/apply`,
+      {
+        expectedRevision: registry.revision,
+        contextPolicy: {
+          enabled: true,
+          strategyId: CONTEXT_STRATEGY_ID,
+          autoCompactionEnabled: true,
+          compactAtPercent: 2,
+          targetPercentAfterCompaction: 1,
+          maxContextPercentForWake: 95,
+          debugVisibility: "status",
+          includeDebugEventsInModelContext: false,
+          strategyConfig: { certification: "task-6618-roleplay-quality" },
+        },
+        localToolProfileId: "roleplay_lore",
+        mcpBindings: [],
+      },
+    );
+    assert.equal(applied.applied, true);
+    console.log(`   Applied context strategy: ${CONTEXT_STRATEGY_ID}`);
+  }
+
   // ── 6. Test: Continuity across turns ──────────────────────────────────────
 
   console.log("\n── 6. Test: Continuity across turns ──");
@@ -395,6 +437,9 @@ async function runQualitySpike(): Promise<void> {
   );
 
   const continuityEvents = getToolCalls(continuityResult.events);
+  const compactionCompleted = continuityResult.events.some(
+    (event) => event.kind === "context_compaction_completed",
+  );
   const sceneStateUpdated = continuityEvents.some(
     (e) =>
       e.kind === "tool_call_completed" && toolName(e) === "update_scene_state",
@@ -403,6 +448,7 @@ async function runQualitySpike(): Promise<void> {
     (e) => e.kind === "tool_call_started" && toolName(e) === "recall_lore",
   );
   console.log(`   Scene state updated: ${sceneStateUpdated}`);
+  console.log(`   Context compaction completed: ${compactionCompleted}`);
 
   const continuityNarrative = getAssistantText(continuityResult.events);
   const referencesLocket = /locket/i.test(continuityNarrative);
@@ -425,6 +471,12 @@ async function runQualitySpike(): Promise<void> {
     recallInLaterTurn || sceneStateUpdated,
     "narrator should access context in later turns",
   );
+  if (CONTEXT_STRATEGY_ID !== undefined) {
+    assert.ok(
+      compactionCompleted,
+      "configured scene-aware strategy should compact before the continuity response",
+    );
+  }
   assert.ok(referencesLocket, "should reference the locket from turn 2");
   assert.ok(
     referencesPrevious,
