@@ -243,12 +243,25 @@ assert.equal(
 runtimeValue = runtimeConfigWithSession();
 workspaceUpdates.length = 0;
 await assert.rejects(
-  switchCrewSessionWorkspace(lifecycleContext(new Set(), false, true), {
+  switchCrewSessionWorkspace(lifecycleContext(new Set(), false, 2), {
     sessionId: session.sessionId,
     cwd: "/home/dev/failed-switch",
     expectedRevision: 1,
   }),
-  /runtime apply failed/,
+  (error: unknown) => {
+    assert.ok(error instanceof CrewSessionLifecycleError);
+    assert.equal(
+      error.reasonCode,
+      "session_workspace_change_reconciliation_failed",
+    );
+    assert.equal(error.partialOutcome?.canonicalCwd, "/home");
+    assert.equal(error.partialOutcome?.authoredCwd, "/home");
+    assert.equal(
+      error.partialOutcome?.reconciliationError,
+      "runtime apply failed",
+    );
+    return true;
+  },
 );
 assert.equal(
   (runtimeValue.sessions as Array<Record<string, unknown>>)[0]?.workspaceCwd,
@@ -263,7 +276,7 @@ assert.deepEqual(
 
 runtimeValue = runtimeConfigWithSession();
 workspaceUpdates.length = 0;
-const rejectedRollbackContext = lifecycleContext(new Set(), false, true, true);
+const rejectedRollbackContext = lifecycleContext(new Set(), false, 1, true);
 let partialOutcome: CrewSessionLifecycleError["partialOutcome"];
 await assert.rejects(
   switchCrewSessionWorkspace(rejectedRollbackContext, {
@@ -337,10 +350,11 @@ console.log(
 function lifecycleContext(
   inFlightWakes: ReadonlySet<SessionId> = new Set(),
   failArchive = false,
-  failApply = false,
+  failApplyCount = 0,
   failWorkspaceRollback = false,
 ): CrewSessionLifecycleContext {
   let canonicalWorkspace = { ...session.workspace! };
+  let remainingApplyFailures = failApplyCount;
   return {
     bridge: {
       archiveSession: async () => {
@@ -392,7 +406,10 @@ function lifecycleContext(
       runtimeValue = value as Record<string, unknown>;
     },
     applyRuntimeConfigFromDisk: async () => {
-      if (failApply) throw new Error("runtime apply failed");
+      if (remainingApplyFailures > 0) {
+        remainingApplyFailures -= 1;
+        throw new Error("runtime apply failed");
+      }
       return {} as never;
     },
     sessionById: async () => ({ ...session, workspace: canonicalWorkspace }),

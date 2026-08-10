@@ -418,6 +418,18 @@ export async function switchCrewSessionWorkspace(
       settlementApplyError = errorMessage(applyFailure);
     }
 
+    if (settlementApplyError !== undefined) {
+      throw workspaceReconciliationFailure({
+        input,
+        primaryError,
+        ...(compensationError === undefined ? {} : { compensationError }),
+        canonicalCwd: canonicalWorkspace.cwd,
+        canonicalRevision: canonicalWorkspace.revision,
+        authoredCwd: canonicalWorkspace.cwd,
+        reconciliationError: settlementApplyError,
+      });
+    }
+
     if (compensationError !== undefined) {
       throw new CrewSessionLifecycleError(
         "session_workspace_change_reconciled_forward",
@@ -432,9 +444,6 @@ export async function switchCrewSessionWorkspace(
           authoredCwd: canonicalWorkspace.cwd,
           primaryError,
           compensationError,
-          ...(settlementApplyError === undefined
-            ? {}
-            : { reconciliationError: settlementApplyError }),
         },
       );
     }
