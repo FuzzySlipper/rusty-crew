@@ -1,5 +1,10 @@
 # Telegram Normalized Channel Adapter
 
+Status: baseline adapter description. For the current install-diplomat product
+contract and Bot API 10.x requirements, see
+`telegram-install-diplomat-contract.md`. That contract supersedes this document
+where the older single-bot connector description is incomplete.
+
 Telegram is an optional channel provider in Rusty Crew. It maps Telegram Bot API chats, topics, users, messages, and outbound sends into the shared normalized channel contract. It does not introduce Telegram-specific Rust messaging behavior.
 
 ## Scope
