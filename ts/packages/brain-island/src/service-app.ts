@@ -4109,11 +4109,12 @@ function createServiceControlExecutor(
           error instanceof CrewSessionLifecycleError &&
           error.partialOutcome !== undefined
         ) {
+          const affectedIds: Record<string, string | number> = { sessionId };
           return {
             status: "failed",
             summary: error.message,
             reasonCode: error.reasonCode,
-            affectedIds: { sessionId },
+            affectedIds,
             result: error.partialOutcome,
           };
         }

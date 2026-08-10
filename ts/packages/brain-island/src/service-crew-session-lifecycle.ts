@@ -355,7 +355,7 @@ export async function switchCrewSessionWorkspace(
     let canonicalSession: SessionState;
     try {
       canonicalSession = await context.sessionById(input.sessionId);
-      if (canonicalSession.workspace === null) {
+      if (canonicalSession.workspace == null) {
         throw new Error("canonical session has no workspace state");
       }
     } catch (reconciliationFailure) {
