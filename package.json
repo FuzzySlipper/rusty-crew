@@ -176,6 +176,7 @@
     "smoke:rusty-view-chat-context": "npm run smoke:rusty-view-chat-context -w @rusty-crew/brain-island",
     "smoke:rusty-view-chat-read-api": "npm run smoke:rusty-view-chat-read-api -w @rusty-crew/service-host",
     "smoke:telegram": "npm run smoke -w @rusty-crew/adapter-telegram",
+    "smoke:telegram-diplomat": "npm run smoke:diplomat -w @rusty-crew/adapter-telegram",
     "smoke:telegram-live": "npm run smoke:live -w @rusty-crew/adapter-telegram",
     "smoke:mcp": "npm run smoke -w @rusty-crew/adapter-mcp",
     "smoke:debug-tui": "npm run smoke:debug-tui -w @rusty-crew/adapter-tui",

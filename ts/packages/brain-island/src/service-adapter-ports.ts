@@ -532,9 +532,12 @@ export interface TelegramConnectorFactoryInput {
   updateLimit: number;
   ttlMs: number;
   offsetStorePath: string;
+  terminalStorePath: string;
   bindings(): readonly ChannelBindingRecord[];
   now(): string;
-  onInbound(message: NormalizedChannelInboundMessage): Promise<void>;
+  onInbound(
+    message: NormalizedChannelInboundMessage,
+  ): Promise<ChannelIngressResult>;
 }
 
 export type ChannelIngressResult =

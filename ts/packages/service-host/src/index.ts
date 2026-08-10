@@ -29,6 +29,7 @@ import {
   createTelegramAdapterRegistration,
   createTelegramBotApiHttpClient,
   FileTelegramUpdateOffsetStore,
+  FileTelegramUpdateTerminalStore,
   TelegramChannelConnector,
 } from "@rusty-crew/adapter-telegram";
 import type { AdapterId, EngineHandle } from "@rusty-crew/contracts";
@@ -207,6 +208,9 @@ function defaultServiceAdapterFactories(): ServiceAdapterFactories {
           timeoutMs: Math.max(1, input.pollTimeoutSeconds) * 1_000 + 5_000,
         }),
         offsetStore: new FileTelegramUpdateOffsetStore(input.offsetStorePath),
+        terminalStore: new FileTelegramUpdateTerminalStore(
+          input.terminalStorePath,
+        ),
         bindings: input.bindings,
         ttlMs: input.ttlMs,
         pollIntervalMs: input.pollIntervalMs,
@@ -214,8 +218,7 @@ function defaultServiceAdapterFactories(): ServiceAdapterFactories {
         updateLimit: input.updateLimit,
         now: input.now,
         ingest: async (message) => {
-          await input.onInbound(message);
-          return { status: "routed" };
+          return input.onInbound(message);
         },
       }),
     ingestChannelInboundMessage,

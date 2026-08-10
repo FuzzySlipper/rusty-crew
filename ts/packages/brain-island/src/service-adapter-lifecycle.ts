@@ -374,6 +374,12 @@ export async function startTelegramConnector(
       "telegram",
       `${context.config.telegram.adapterId}-offset.json`,
     ),
+    terminalStorePath: join(
+      context.config.paths.dataDir,
+      "data",
+      "telegram",
+      `${context.config.telegram.adapterId}-terminal-updates.jsonl`,
+    ),
     bindings: () =>
       activeTelegramChannelBindings(
         context.runtimeConfig.channelBindings,
@@ -385,7 +391,7 @@ export async function startTelegramConnector(
     updateLimit: context.config.telegram.updateLimit,
     now: context.now,
     onInbound: async (message) => {
-      await context.adapterFactories.ingestChannelInboundMessage(message, {
+      return context.adapterFactories.ingestChannelInboundMessage(message, {
         bridge: {
           injectExternalEvent: (event) =>
             context.bridge.injectExternalEvent(event),

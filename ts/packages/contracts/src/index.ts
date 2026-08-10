@@ -262,6 +262,9 @@ export interface ChannelProviderRefs {
 export interface ChannelAuthorRef {
   externalUserId: string;
   displayLabel?: string;
+  username?: string;
+  kind?: "human" | "bot" | "sender_chat";
+  isBot?: boolean;
 }
 
 export interface ChannelAttachmentRef {
@@ -277,6 +280,8 @@ export interface NormalizedChannelInboundMessage {
   runtime: ChannelRuntimeIdentity;
   providerRefs: ChannelProviderRefs;
   author: ChannelAuthorRef;
+  replyToExternalMessageId?: string;
+  messageMutation?: "original" | "edited";
   body: string;
   summary?: string;
   attachments: ChannelAttachmentRef[];

@@ -10,6 +10,7 @@ import {
   createTelegramAdapterRegistration,
   createTelegramChannelAdapter,
   MemoryTelegramUpdateOffsetStore,
+  MemoryTelegramUpdateTerminalStore,
   normalizeTelegramUpdate,
   TelegramChannelConnector,
   telegramBindingFromChat,
@@ -111,9 +112,9 @@ const request = toTelegramSendMessageRequest(outbound);
 assert.deepEqual(request, {
   chat_id: -100123,
   message_thread_id: 42,
-  reply_to_message_id: 55,
+  reply_parameters: { message_id: 55 },
   text: "Build is green.",
-  disable_web_page_preview: true,
+  link_preview_options: { is_disabled: true },
 });
 
 const sent: TelegramSendMessageRequest[] = [];
@@ -212,6 +213,7 @@ const connector = new TelegramChannelConnector({
   adapterId,
   bot,
   offsetStore,
+  terminalStore: new MemoryTelegramUpdateTerminalStore(),
   bindings: () => [binding],
   ttlMs: 60_000,
   pollTimeoutSeconds: 0,
@@ -259,6 +261,7 @@ const restartedConnector = new TelegramChannelConnector({
   adapterId,
   bot,
   offsetStore,
+  terminalStore: new MemoryTelegramUpdateTerminalStore(),
   bindings: () => [binding],
   ttlMs: 60_000,
   pollTimeoutSeconds: 0,

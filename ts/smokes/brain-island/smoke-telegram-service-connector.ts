@@ -19,6 +19,7 @@ import {
 } from "@rusty-crew/adapter-den";
 import {
   MemoryTelegramUpdateOffsetStore,
+  MemoryTelegramUpdateTerminalStore,
   TelegramChannelConnector,
   type TelegramGetUpdatesRequest,
   type TelegramSendMessageRequest,
@@ -189,6 +190,7 @@ const connector = new TelegramChannelConnector({
   adapterId,
   bot,
   offsetStore,
+  terminalStore: new MemoryTelegramUpdateTerminalStore(),
   bindings: () => bindings,
   ttlMs: 60_000,
   pollTimeoutSeconds: 0,
@@ -256,9 +258,9 @@ assert.deepEqual(sent, [
   {
     chat_id: -100123,
     message_thread_id: 42,
-    reply_to_message_id: undefined,
+    reply_parameters: undefined,
     text: "reply from rusty crew",
-    disable_web_page_preview: true,
+    link_preview_options: { is_disabled: true },
   },
 ]);
 

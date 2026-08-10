@@ -10,6 +10,7 @@
   },
   "scripts": {
     "smoke": "tsx src/smoke-telegram.ts",
+    "smoke:diplomat": "tsx src/smoke-telegram-diplomat.ts",
     "smoke:live": "tsx src/smoke-telegram-live.ts"
   },
   "dependencies": {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type {
   AdapterId,
@@ -26,6 +26,13 @@ export interface TelegramUser {
   is_bot?: boolean;
 }
 
+export interface TelegramMessageEntity {
+  type: string;
+  offset: number;
+  length: number;
+  user?: TelegramUser;
+}
+
 export interface TelegramChat {
   id: number | string;
   type: "private" | "group" | "supergroup" | "channel" | string;
@@ -51,14 +58,17 @@ export interface TelegramMessage {
   message_id: number;
   message_thread_id?: number;
   date: number;
+  edit_date?: number;
   chat: TelegramChat;
   from?: TelegramUser;
   sender_chat?: TelegramChat;
   text?: string;
+  entities?: TelegramMessageEntity[];
   caption?: string;
+  caption_entities?: TelegramMessageEntity[];
   photo?: TelegramPhotoSize[];
   document?: TelegramDocument;
-  reply_to_message?: Pick<TelegramMessage, "message_id">;
+  reply_to_message?: Pick<TelegramMessage, "message_id" | "from">;
 }
 
 export interface TelegramUpdate {
@@ -80,9 +90,13 @@ export interface TelegramSendMessageRequest {
   chat_id: number | string;
   text: string;
   message_thread_id?: number;
-  reply_to_message_id?: number;
+  reply_parameters?: {
+    message_id: number;
+  };
   parse_mode?: "MarkdownV2" | "HTML";
-  disable_web_page_preview?: boolean;
+  link_preview_options?: {
+    is_disabled: boolean;
+  };
 }
 
 export interface TelegramBotApiClient {
@@ -189,6 +203,40 @@ export interface TelegramApiResponse<T> {
   result?: T;
   description?: string;
   error_code?: number;
+  parameters?: {
+    retry_after?: number;
+  };
+}
+
+export class TelegramBotApiError extends Error {
+  readonly status: number;
+  readonly errorCode: number | undefined;
+  readonly retryAfterSeconds: number | undefined;
+  readonly retryable: boolean;
+
+  constructor(input: {
+    method: string;
+    status: number;
+    description: string;
+    errorCode?: number;
+    retryAfterSeconds?: number;
+    retryable?: boolean;
+  }) {
+    super(
+      `Telegram Bot API ${input.method} failed: ${input.status}${input.errorCode === undefined ? "" : `/${input.errorCode}`} ${input.description}`,
+    );
+    this.name = "TelegramBotApiError";
+    this.status = input.status;
+    this.errorCode = input.errorCode;
+    this.retryAfterSeconds = input.retryAfterSeconds;
+    this.retryable =
+      input.retryable ??
+      (input.status === 408 ||
+        input.status === 409 ||
+        input.status === 425 ||
+        input.status === 429 ||
+        input.status >= 500);
+  }
 }
 
 async function telegramApiRequest<T>(
@@ -213,17 +261,31 @@ async function telegramApiRequest<T>(
       body: JSON.stringify(input.body),
     });
     const text = await response.text();
-    const parsed = text.trim()
-      ? (JSON.parse(text) as TelegramApiResponse<T>)
-      : ({
-          ok: false,
-          description: "empty response",
-        } as TelegramApiResponse<T>);
+    let parsed: TelegramApiResponse<T>;
+    try {
+      parsed = text.trim()
+        ? (JSON.parse(text) as TelegramApiResponse<T>)
+        : {
+            ok: false,
+            description: "empty response",
+          };
+    } catch {
+      throw new TelegramBotApiError({
+        method: input.resultName,
+        status: response.status,
+        description: "response was not valid JSON",
+        retryable: true,
+      });
+    }
     if (!response.ok || !parsed.ok) {
       const detail = parsed.description ?? response.statusText;
-      throw new Error(
-        `Telegram Bot API ${input.resultName} failed: ${response.status}${parsed.error_code ? `/${parsed.error_code}` : ""} ${detail}`,
-      );
+      throw new TelegramBotApiError({
+        method: input.resultName,
+        status: response.status,
+        description: detail,
+        errorCode: parsed.error_code,
+        retryAfterSeconds: parsed.parameters?.retry_after,
+      });
     }
     if (parsed.result === undefined) {
       throw new Error(
@@ -285,15 +347,75 @@ export class FileTelegramUpdateOffsetStore implements TelegramUpdateOffsetStore 
   }
 }
 
+export type TelegramTerminalUpdateRecord =
+  | {
+      disposition: "non_executable";
+      updateId: number;
+      reason: TelegramNonExecutableUpdate["reason"];
+      recordedAt: string;
+    }
+  | ({ disposition: "quarantined" } & TelegramQuarantinedUpdate);
+
+export interface TelegramUpdateTerminalStore {
+  record(update: TelegramTerminalUpdateRecord): Promise<void> | void;
+}
+
+export class MemoryTelegramUpdateTerminalStore implements TelegramUpdateTerminalStore {
+  readonly records: TelegramTerminalUpdateRecord[] = [];
+
+  record(update: TelegramTerminalUpdateRecord): void {
+    this.records.push(update);
+  }
+}
+
+export class FileTelegramUpdateTerminalStore implements TelegramUpdateTerminalStore {
+  readonly #path: string;
+
+  constructor(path: string) {
+    this.#path = path;
+  }
+
+  async record(update: TelegramTerminalUpdateRecord): Promise<void> {
+    await mkdir(dirname(this.#path), { recursive: true, mode: 0o750 });
+    await appendFile(this.#path, `${JSON.stringify(update)}\n`, {
+      encoding: "utf8",
+      mode: 0o640,
+    });
+  }
+}
+
 export interface TelegramConnectorIngestResult {
   status: string;
   reason?: string;
+  retryable?: boolean;
+}
+
+export interface TelegramQuarantinedUpdate {
+  updateId: number;
+  attempts: number;
+  reason: string;
+  quarantinedAt: string;
+  updateShape: string;
+}
+
+export interface TelegramNonExecutableUpdate {
+  updateId: number;
+  reason: "edited_message" | "edited_channel_post" | "unsupported_update";
+  message?: NormalizedChannelInboundMessage;
+}
+
+export interface TelegramDeliveryReceipt {
+  idempotencyKey: string;
+  chunkCount: number;
+  attempts: number;
+  externalMessageIds: string[];
 }
 
 export interface TelegramConnectorOptions {
   adapterId: AdapterId;
   bot: TelegramBotApiClient;
   offsetStore: TelegramUpdateOffsetStore;
+  terminalStore: TelegramUpdateTerminalStore;
   bindings: () => readonly ChannelBindingRecord[];
   ingest(
     message: NormalizedChannelInboundMessage,
@@ -303,7 +425,24 @@ export interface TelegramConnectorOptions {
   pollIntervalMs?: number;
   pollTimeoutSeconds?: number;
   updateLimit?: number;
+  maxInboundAttempts?: number;
+  maxOutboundAttempts?: number;
+  maxMessageChars?: number;
+  botUserId?: string;
+  botUsername?: string;
+  participationMode?:
+    | "all_delivered"
+    | "mention_or_reply"
+    | "topic_human_messages";
+  isCorrelatedBotMessage?: (
+    message: NormalizedChannelInboundMessage,
+  ) => boolean;
+  onNonExecutableUpdate?: (
+    update: TelegramNonExecutableUpdate,
+  ) => Promise<void> | void;
+  onQuarantine?: (update: TelegramQuarantinedUpdate) => Promise<void> | void;
   now?: () => string;
+  wait?: (delayMs: number) => Promise<void>;
   setTimer?: typeof setTimeout;
   clearTimer?: typeof clearTimeout;
 }
@@ -326,11 +465,23 @@ export interface TelegramConnectorDiagnostics {
     duplicate: number;
     staleCursor: number;
     failed: number;
+    humanMessages: number;
+    botMessages: number;
+    ignored: number;
+    edited: number;
+    unsupported: number;
+    retryPending: number;
+    quarantined: number;
+    loopTerminated: number;
+    rateLimited: number;
   };
   outbound: {
     sent: number;
+    chunksSent: number;
+    retried: number;
     failed: number;
     lastError?: string;
+    lastExternalMessageId?: string;
   };
 }
 
@@ -339,6 +490,7 @@ export class TelegramChannelConnector {
   readonly #bot: TelegramBotApiClient;
   readonly #adapter: TelegramChannelAdapter;
   readonly #offsetStore: TelegramUpdateOffsetStore;
+  readonly #terminalStore: TelegramUpdateTerminalStore;
   readonly #bindings: () => readonly ChannelBindingRecord[];
   readonly #ingest: (
     message: NormalizedChannelInboundMessage,
@@ -348,7 +500,23 @@ export class TelegramChannelConnector {
   readonly #pollIntervalMs: number;
   readonly #pollTimeoutSeconds: number;
   readonly #updateLimit: number;
+  readonly #maxInboundAttempts: number;
+  readonly #maxOutboundAttempts: number;
+  readonly #maxMessageChars: number;
+  readonly #botUserId: string | undefined;
+  readonly #botUsername: string | undefined;
+  readonly #participationMode: NonNullable<
+    TelegramConnectorOptions["participationMode"]
+  >;
+  readonly #isCorrelatedBotMessage:
+    | TelegramConnectorOptions["isCorrelatedBotMessage"]
+    | undefined;
+  readonly #onNonExecutableUpdate:
+    | TelegramConnectorOptions["onNonExecutableUpdate"]
+    | undefined;
+  readonly #onQuarantine: TelegramConnectorOptions["onQuarantine"] | undefined;
   readonly #now: () => string;
+  readonly #wait: (delayMs: number) => Promise<void>;
   readonly #setTimer: typeof setTimeout;
   readonly #clearTimer: typeof clearTimeout;
 
@@ -360,6 +528,7 @@ export class TelegramChannelConnector {
   #nextOffset: number | undefined;
   #lastError: string | undefined;
   #pollCount = 0;
+  #inboundAttempts = new Map<number, number>();
   #inbound = {
     routed: 0,
     unbound: 0,
@@ -368,11 +537,23 @@ export class TelegramChannelConnector {
     duplicate: 0,
     staleCursor: 0,
     failed: 0,
+    humanMessages: 0,
+    botMessages: 0,
+    ignored: 0,
+    edited: 0,
+    unsupported: 0,
+    retryPending: 0,
+    quarantined: 0,
+    loopTerminated: 0,
+    rateLimited: 0,
   };
   #outbound = {
     sent: 0,
+    chunksSent: 0,
+    retried: 0,
     failed: 0,
     lastError: undefined as string | undefined,
+    lastExternalMessageId: undefined as string | undefined,
   };
 
   constructor(options: TelegramConnectorOptions) {
@@ -383,6 +564,7 @@ export class TelegramChannelConnector {
       bot: options.bot,
     });
     this.#offsetStore = options.offsetStore;
+    this.#terminalStore = options.terminalStore;
     this.#bindings = options.bindings;
     this.#ingest = options.ingest;
     this.#ttlMs = options.ttlMs;
@@ -390,7 +572,35 @@ export class TelegramChannelConnector {
     this.#pollIntervalMs = options.pollIntervalMs ?? 2_000;
     this.#pollTimeoutSeconds = options.pollTimeoutSeconds ?? 20;
     this.#updateLimit = options.updateLimit ?? 50;
+    this.#maxInboundAttempts = options.maxInboundAttempts ?? 3;
+    this.#maxOutboundAttempts = options.maxOutboundAttempts ?? 3;
+    this.#maxMessageChars = options.maxMessageChars ?? 4_096;
+    if (
+      !Number.isSafeInteger(this.#maxInboundAttempts) ||
+      this.#maxInboundAttempts < 1
+    ) {
+      throw new Error("Telegram inbound attempts must be a positive integer");
+    }
+    if (
+      !Number.isSafeInteger(this.#maxOutboundAttempts) ||
+      this.#maxOutboundAttempts < 1
+    ) {
+      throw new Error("Telegram outbound attempts must be a positive integer");
+    }
+    if (
+      !Number.isSafeInteger(this.#maxMessageChars) ||
+      this.#maxMessageChars < 1
+    ) {
+      throw new Error("Telegram message character limit must be positive");
+    }
+    this.#botUserId = options.botUserId;
+    this.#botUsername = normalizeTelegramUsername(options.botUsername);
+    this.#participationMode = options.participationMode ?? "all_delivered";
+    this.#isCorrelatedBotMessage = options.isCorrelatedBotMessage;
+    this.#onNonExecutableUpdate = options.onNonExecutableUpdate;
+    this.#onQuarantine = options.onQuarantine;
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#wait = options.wait ?? waitForTelegramRetry;
     this.#setTimer = options.setTimer ?? setTimeout;
     this.#clearTimer = options.clearTimer ?? clearTimeout;
   }
@@ -434,12 +644,17 @@ export class TelegramChannelConnector {
           "edited_channel_post",
         ],
       });
+      let retryPending = false;
       for (const update of [...updates].sort(
         (left, right) => left.update_id - right.update_id,
       )) {
-        await this.#handleUpdate(update);
+        const disposition = await this.#handleUpdate(update);
+        if (disposition === "retry_pending") {
+          retryPending = true;
+          break;
+        }
       }
-      this.#lastError = undefined;
+      if (!retryPending) this.#lastError = undefined;
     } catch (error) {
       this.#lastError = telegramErrorMessage(error);
     } finally {
@@ -447,11 +662,39 @@ export class TelegramChannelConnector {
     }
   }
 
-  async sendOutbound(message: NormalizedChannelOutboundMessage): Promise<void> {
+  async sendOutbound(
+    message: NormalizedChannelOutboundMessage,
+  ): Promise<TelegramDeliveryReceipt> {
+    const chunks = splitTelegramText(message.body, this.#maxMessageChars);
+    const externalMessageIds: string[] = [];
+    let attempts = 0;
     try {
-      await this.#adapter.sendOutbound(message);
+      for (const [index, chunk] of chunks.entries()) {
+        const request = {
+          ...toTelegramSendMessageRequest(message),
+          text: chunk,
+          reply_parameters:
+            index === 0
+              ? telegramReplyParameters(message.replyToExternalMessageId)
+              : undefined,
+        };
+        const sent = await this.#sendMessageWithRetry(request);
+        attempts += sent.attempts;
+        const externalMessageId = telegramSentMessageId(sent.response);
+        if (externalMessageId !== undefined) {
+          externalMessageIds.push(externalMessageId);
+          this.#outbound.lastExternalMessageId = externalMessageId;
+        }
+        this.#outbound.chunksSent += 1;
+      }
       this.#outbound.sent += 1;
       this.#outbound.lastError = undefined;
+      return {
+        idempotencyKey: message.idempotencyKey,
+        chunkCount: chunks.length,
+        attempts,
+        externalMessageIds,
+      };
     } catch (error) {
       this.#outbound.failed += 1;
       this.#outbound.lastError = telegramErrorMessage(error);
@@ -482,9 +725,37 @@ export class TelegramChannelConnector {
     }, delayMs);
   }
 
-  async #handleUpdate(update: TelegramUpdate): Promise<void> {
+  async #sendMessageWithRetry(request: TelegramSendMessageRequest): Promise<{
+    response: unknown;
+    attempts: number;
+  }> {
+    let attempt = 0;
+    for (;;) {
+      attempt += 1;
+      try {
+        return {
+          response: await this.#bot.sendMessage(request),
+          attempts: attempt,
+        };
+      } catch (error) {
+        if (
+          attempt >= this.#maxOutboundAttempts ||
+          !isRetryableTelegramError(error)
+        ) {
+          throw error;
+        }
+        this.#outbound.retried += 1;
+        await this.#wait(telegramRetryDelayMs(error, attempt));
+      }
+    }
+  }
+
+  async #handleUpdate(
+    update: TelegramUpdate,
+  ): Promise<"advanced" | "retry_pending"> {
     const updateOffset = update.update_id + 1;
     try {
+      const updateShape = telegramUpdateShape(update);
       const binding = this.#normalizationBinding(update);
       const message = this.#adapter.normalizeUpdate(update, {
         binding,
@@ -492,16 +763,131 @@ export class TelegramChannelConnector {
         visibility: this.#visibility,
       });
       if (message === undefined) {
-        this.#inbound.unbound += 1;
-        return;
+        await this.#terminalStore.record({
+          disposition: "non_executable",
+          updateId: update.update_id,
+          reason: "unsupported_update",
+          recordedAt: this.#now(),
+        });
+        await this.#notifyNonExecutableUpdate({
+          updateId: update.update_id,
+          reason: "unsupported_update",
+        });
+        this.#inbound.unsupported += 1;
+        this.#inboundAttempts.delete(update.update_id);
+        await this.#advanceOffset(updateOffset);
+        return "advanced";
+      }
+      if (
+        updateShape === "edited_message" ||
+        updateShape === "edited_channel_post"
+      ) {
+        await this.#terminalStore.record({
+          disposition: "non_executable",
+          updateId: update.update_id,
+          reason: updateShape,
+          recordedAt: this.#now(),
+        });
+        await this.#notifyNonExecutableUpdate({
+          updateId: update.update_id,
+          reason: updateShape,
+          message,
+        });
+        this.#inbound.edited += 1;
+        this.#inboundAttempts.delete(update.update_id);
+        await this.#advanceOffset(updateOffset);
+        return "advanced";
+      }
+      if (message.author.isBot) {
+        this.#inbound.botMessages += 1;
+      } else {
+        this.#inbound.humanMessages += 1;
+      }
+      if (!this.#shouldParticipate(message)) {
+        this.#inbound.ignored += 1;
+        this.#inboundAttempts.delete(update.update_id);
+        await this.#advanceOffset(updateOffset);
+        return "advanced";
       }
       const result = await this.#ingest(message);
+      if (
+        result.retryable === true ||
+        (!isTerminalTelegramIngestStatus(result.status) &&
+          result.retryable !== false)
+      ) {
+        throw new Error(
+          result.reason ??
+            `Telegram ingress returned non-terminal status ${result.status}`,
+        );
+      }
       this.#countIngestResult(result.status);
-    } catch (error) {
-      this.#inbound.failed += 1;
-      this.#lastError = telegramErrorMessage(error);
-    } finally {
+      this.#inboundAttempts.delete(update.update_id);
       await this.#advanceOffset(updateOffset);
+      return "advanced";
+    } catch (error) {
+      return this.#retryOrQuarantine(update, error);
+    }
+  }
+
+  #shouldParticipate(message: NormalizedChannelInboundMessage): boolean {
+    if (this.#participationMode === "all_delivered") return true;
+    const addressed = telegramMessageAddressesBot(message, {
+      botUserId: this.#botUserId,
+      botUsername: this.#botUsername,
+    });
+    if (message.author.isBot) {
+      return addressed || (this.#isCorrelatedBotMessage?.(message) ?? false);
+    }
+    return this.#participationMode === "topic_human_messages" || addressed;
+  }
+
+  async #retryOrQuarantine(
+    update: TelegramUpdate,
+    error: unknown,
+  ): Promise<"advanced" | "retry_pending"> {
+    const attempts = (this.#inboundAttempts.get(update.update_id) ?? 0) + 1;
+    this.#inboundAttempts.set(update.update_id, attempts);
+    this.#lastError = telegramErrorMessage(error);
+    if (attempts < this.#maxInboundAttempts) {
+      this.#inbound.retryPending += 1;
+      return "retry_pending";
+    }
+    const quarantined: TelegramQuarantinedUpdate = {
+      updateId: update.update_id,
+      attempts,
+      reason: telegramErrorMessage(error),
+      quarantinedAt: this.#now(),
+      updateShape: telegramUpdateShape(update),
+    };
+    try {
+      await this.#terminalStore.record({
+        disposition: "quarantined",
+        ...quarantined,
+      });
+    } catch (quarantineError) {
+      this.#lastError = `Telegram quarantine failed: ${telegramErrorMessage(quarantineError)}`;
+      this.#inbound.retryPending += 1;
+      return "retry_pending";
+    }
+    try {
+      await this.#onQuarantine?.(quarantined);
+    } catch (notificationError) {
+      this.#lastError = `Telegram quarantine notification failed: ${telegramErrorMessage(notificationError)}`;
+    }
+    this.#inbound.failed += 1;
+    this.#inbound.quarantined += 1;
+    this.#inboundAttempts.delete(update.update_id);
+    await this.#advanceOffset(update.update_id + 1);
+    return "advanced";
+  }
+
+  async #notifyNonExecutableUpdate(
+    update: TelegramNonExecutableUpdate,
+  ): Promise<void> {
+    try {
+      await this.#onNonExecutableUpdate?.(update);
+    } catch (error) {
+      this.#lastError = `Telegram non-executable update notification failed: ${telegramErrorMessage(error)}`;
     }
   }
 
@@ -560,6 +946,14 @@ export class TelegramChannelConnector {
         return;
       case "ambiguous":
         this.#inbound.ambiguous += 1;
+        return;
+      case "telegram_bot_pair_rate_limited":
+        this.#inbound.rateLimited += 1;
+        return;
+      case "telegram_bot_loop_depth_exceeded":
+      case "telegram_bot_interaction_expired":
+      case "telegram_bot_interaction_terminal":
+        this.#inbound.loopTerminated += 1;
         return;
       case "no_binding":
       case "inactive_binding":
@@ -645,6 +1039,11 @@ export function normalizeTelegramUpdate(
       ? context.binding.externalThreadId
       : String(message.message_thread_id);
   const author = telegramAuthor(message);
+  const updateShape = telegramUpdateShape(update);
+  const messageMutation =
+    updateShape === "edited_message" || updateShape === "edited_channel_post"
+      ? "edited"
+      : "original";
   const providerRefs = {
     provider: "telegram",
     externalChannelId: telegramChatId(message.chat),
@@ -664,19 +1063,50 @@ export function normalizeTelegramUpdate(
     },
     providerRefs,
     author,
+    replyToExternalMessageId:
+      message.reply_to_message?.message_id === undefined
+        ? undefined
+        : String(message.reply_to_message.message_id),
+    messageMutation,
     body,
     summary: summarize(body),
     attachments: telegramAttachments(message),
-    mentions: telegramMentions(body),
+    mentions: telegramMentions(
+      body,
+      message.entities ?? message.caption_entities ?? [],
+    ),
     receivedAt,
     ttlMs: context.ttlMs,
     expiresAt,
     cursor: String(update.update_id),
-    idempotencyKey: telegramIdempotencyKey(providerRefs),
+    idempotencyKey: telegramIdempotencyKey(
+      providerRefs,
+      messageMutation,
+      message.edit_date ?? update.update_id,
+    ),
     visibility: context.visibility ?? "conversation",
     provenance: {
-      sourceShape: telegramUpdateShape(update),
+      sourceShape: updateShape,
       chatType: message.chat.type,
+      senderKind: author.kind,
+      senderUsername: author.username,
+      senderIsBot: author.isBot,
+      replyToExternalMessageId:
+        message.reply_to_message?.message_id === undefined
+          ? undefined
+          : String(message.reply_to_message.message_id),
+      replyToAuthorExternalUserId:
+        message.reply_to_message?.from?.id === undefined
+          ? undefined
+          : String(message.reply_to_message.from.id),
+      replyToAuthorIsBot: message.reply_to_message?.from?.is_bot === true,
+      editDate:
+        message.edit_date === undefined
+          ? undefined
+          : new Date(message.edit_date * 1_000).toISOString(),
+      entityTypes: (message.entities ?? message.caption_entities ?? []).map(
+        (entity) => entity.type,
+      ),
     },
   };
 }
@@ -689,11 +1119,9 @@ export function toTelegramSendMessageRequest(
     message_thread_id: parseOptionalTelegramNumber(
       message.providerRefs.externalThreadId,
     ),
-    reply_to_message_id: parseOptionalTelegramNumber(
-      message.replyToExternalMessageId,
-    ),
+    reply_parameters: telegramReplyParameters(message.replyToExternalMessageId),
     text: message.body,
-    disable_web_page_preview: true,
+    link_preview_options: { is_disabled: true },
   };
 }
 
@@ -732,9 +1160,19 @@ function parseOptionalTelegramNumber(
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
+function telegramReplyParameters(
+  value: string | undefined,
+): { message_id: number } | undefined {
+  const messageId = parseOptionalTelegramNumber(value);
+  return messageId === undefined ? undefined : { message_id: messageId };
+}
+
 function telegramAuthor(message: TelegramMessage): {
   externalUserId: string;
   displayLabel?: string;
+  username?: string;
+  kind: "human" | "bot" | "sender_chat";
+  isBot: boolean;
 } {
   if (message.from) {
     return {
@@ -742,17 +1180,26 @@ function telegramAuthor(message: TelegramMessage): {
       displayLabel: [message.from.first_name, message.from.last_name]
         .filter(Boolean)
         .join(" "),
+      username: message.from.username,
+      kind: message.from.is_bot ? "bot" : "human",
+      isBot: message.from.is_bot === true,
     };
   }
   if (message.sender_chat) {
     return {
       externalUserId: telegramChatId(message.sender_chat),
       displayLabel: message.sender_chat.title ?? message.sender_chat.username,
+      username: message.sender_chat.username,
+      kind: "sender_chat",
+      isBot: false,
     };
   }
   return {
     externalUserId: telegramChatId(message.chat),
     displayLabel: message.chat.title ?? message.chat.username,
+    username: message.chat.username,
+    kind: "sender_chat",
+    isBot: false,
   };
 }
 
@@ -774,21 +1221,49 @@ function telegramAttachments(message: TelegramMessage) {
   return [...photo, ...document];
 }
 
-function telegramMentions(body: string): string[] {
-  return [...body.matchAll(/@([A-Za-z0-9_]{3,32})/g)].map((match) => match[1]!);
+function telegramMentions(
+  body: string,
+  entities: readonly TelegramMessageEntity[],
+): string[] {
+  const entityMentions = entities.flatMap((entity) => {
+    if (entity.type === "mention") {
+      const value = body.slice(entity.offset, entity.offset + entity.length);
+      return value.startsWith("@")
+        ? [normalizeTelegramUsername(value.slice(1))]
+        : [];
+    }
+    if (entity.type === "text_mention" && entity.user !== undefined) {
+      return [
+        ...(entity.user.username === undefined
+          ? []
+          : [normalizeTelegramUsername(entity.user.username)]),
+        String(entity.user.id),
+      ];
+    }
+    return [];
+  });
+  const parsed = [...body.matchAll(/@([A-Za-z0-9_]{3,32})/g)].map((match) =>
+    normalizeTelegramUsername(match[1]),
+  );
+  return dedupeTelegramStrings([...entityMentions, ...parsed]);
 }
 
-function telegramIdempotencyKey(providerRefs: {
-  externalChannelId: string;
-  externalThreadId?: string;
-  externalMessageId?: string;
-}): string {
-  return [
+function telegramIdempotencyKey(
+  providerRefs: {
+    externalChannelId: string;
+    externalThreadId?: string;
+    externalMessageId?: string;
+  },
+  mutation: "original" | "edited",
+  mutationId: number,
+): string {
+  const base = [
     "telegram",
     providerRefs.externalChannelId,
     providerRefs.externalThreadId ?? "main",
     providerRefs.externalMessageId ?? "unknown",
   ].join(":");
+  return mutation === "original" ? base : `${base}:edited:${mutationId}`;
 }
 
 function telegramUpdateShape(update: TelegramUpdate): string {
@@ -808,6 +1283,105 @@ function safeTelegramOffset(value: unknown): number | undefined {
   if (typeof value !== "number") return undefined;
   if (!Number.isSafeInteger(value) || value < 0) return undefined;
   return value;
+}
+
+export function splitTelegramText(body: string, maxChars = 4_096): string[] {
+  if (!Number.isSafeInteger(maxChars) || maxChars < 1) {
+    throw new Error("Telegram message character limit must be positive");
+  }
+  const characters = Array.from(body);
+  if (characters.length <= maxChars) return [body];
+  const chunks: string[] = [];
+  for (let index = 0; index < characters.length; index += maxChars) {
+    chunks.push(characters.slice(index, index + maxChars).join(""));
+  }
+  return chunks;
+}
+
+function telegramMessageAddressesBot(
+  message: NormalizedChannelInboundMessage,
+  bot: { botUserId?: string; botUsername?: string },
+): boolean {
+  const mentions = message.mentions.map(normalizeTelegramUsername);
+  if (
+    bot.botUsername !== undefined &&
+    mentions.includes(normalizeTelegramUsername(bot.botUsername))
+  ) {
+    return true;
+  }
+  if (bot.botUserId !== undefined && mentions.includes(bot.botUserId)) {
+    return true;
+  }
+  const provenance = message.provenance;
+  return (
+    provenance.replyToAuthorIsBot === true &&
+    bot.botUserId !== undefined &&
+    provenance.replyToAuthorExternalUserId === bot.botUserId
+  );
+}
+
+function normalizeTelegramUsername(value: string | undefined): string {
+  return (value ?? "").replace(/^@/, "").trim().toLowerCase();
+}
+
+function dedupeTelegramStrings(values: readonly string[]): string[] {
+  const result: string[] = [];
+  for (const value of values) {
+    if (value && !result.includes(value)) result.push(value);
+  }
+  return result;
+}
+
+function isTerminalTelegramIngestStatus(status: string): boolean {
+  return [
+    "routed",
+    "accepted",
+    "expired",
+    "duplicate",
+    "stale_cursor",
+    "ambiguous",
+    "no_binding",
+    "inactive_binding",
+    "denied",
+    "telegram_bot_pair_rate_limited",
+    "telegram_bot_loop_depth_exceeded",
+    "telegram_bot_interaction_expired",
+    "telegram_bot_interaction_terminal",
+  ].includes(status);
+}
+
+function isRetryableTelegramError(error: unknown): boolean {
+  if (error instanceof TelegramBotApiError) return error.retryable;
+  if (error instanceof Error && error.name === "AbortError") return true;
+  return error instanceof TypeError;
+}
+
+function telegramRetryDelayMs(error: unknown, attempt: number): number {
+  if (
+    error instanceof TelegramBotApiError &&
+    error.retryAfterSeconds !== undefined
+  ) {
+    return Math.min(60_000, Math.max(0, error.retryAfterSeconds * 1_000));
+  }
+  return Math.min(30_000, 250 * 2 ** Math.max(0, attempt - 1));
+}
+
+function waitForTelegramRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function telegramSentMessageId(response: unknown): string | undefined {
+  if (
+    typeof response !== "object" ||
+    response === null ||
+    !("message_id" in response)
+  ) {
+    return undefined;
+  }
+  const messageId = response.message_id;
+  return typeof messageId === "number" || typeof messageId === "string"
+    ? String(messageId)
+    : undefined;
 }
 
 function telegramErrorMessage(error: unknown): string {
