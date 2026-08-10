@@ -9,6 +9,10 @@ shape is `docs/telegram-diplomat-admin-api-v0.openapi.json`. The broader API
 capability artifact remains discovery metadata and does not replace this wire
 contract.
 
+For BotFather setup, Rusty View provisioning, recovery, rebind, diagnostics,
+removal, and the two-install certification checklist, use
+`docs/telegram-install-diplomat-runbook.md`.
+
 It is deliberately not profile configuration. Creating, moving, pausing, or
 removing a diplomat binding does not mutate a profile, a session workspace, or
 either the old or new session. There is no project allowlist, Telegram-user

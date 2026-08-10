@@ -58,6 +58,9 @@ Operator setup references:
   requester prompts plus the durable serial inbox contract.
 - `external-agent-review-cli.md` — the explicit production/debug CLI path for
   unmanaged agents to submit exact-SHA reviews and poll durable outcomes.
+- `telegram-install-diplomat-runbook.md` — one-bot-per-install BotFather,
+  Rusty View binding, recovery, rebind, diagnostics, cleanup, and two-install
+  certification procedure.
 - `skills-list-view-tools.md` — immutable built-in Rusty Crew help, filesystem
   skill catalog behavior, mandatory native tool selection, and diagnostics.
 
