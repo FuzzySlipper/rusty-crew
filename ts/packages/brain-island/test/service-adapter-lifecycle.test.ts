@@ -250,6 +250,7 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
     channelProjectionFailures: [],
     telegramDiplomatPendingReplies: new Map(),
     telegramDiplomatPendingWakeReports: [],
+    telegramDiplomatProcessedWakeReports: new Set(),
     telegramDiplomatReplyProjectionRunning: false,
     now: () => now,
     isStopping: () => false,
@@ -392,6 +393,20 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
     } as never,
   ]);
   await heldStarted;
+  const duplicateProjection = projectTelegramDiplomatWakeReplies(context, [
+    {
+      ...report,
+      wakeId: "wake-3",
+      observedEvents: [
+        {
+          type: "brain_event_observed",
+          sessionId: "session-1",
+          wakeId: "wake-3",
+          event: { type: "text_delta", text: "First final reply." },
+        },
+      ],
+    } as never,
+  ]);
   const secondProjection = projectTelegramDiplomatWakeReplies(context, [
     {
       ...report,
@@ -407,7 +422,7 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
     } as never,
   ]);
   releaseHeldOutbound?.();
-  await Promise.all([firstProjection, secondProjection]);
+  await Promise.all([firstProjection, duplicateProjection, secondProjection]);
   assert.deepEqual(
     outbound.slice(1).map((message) => message.body),
     ["First final reply.", "Second final reply."],

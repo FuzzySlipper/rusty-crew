@@ -497,6 +497,7 @@ interface ServiceState {
   readonly channelProjectionFailures: ChannelProjectionFailureRecord[];
   readonly telegramDiplomatPendingReplies: ServiceAdapterLifecycleContext["telegramDiplomatPendingReplies"];
   readonly telegramDiplomatPendingWakeReports: ServiceAdapterLifecycleContext["telegramDiplomatPendingWakeReports"];
+  readonly telegramDiplomatProcessedWakeReports: ServiceAdapterLifecycleContext["telegramDiplomatProcessedWakeReports"];
   telegramDiplomatReplyProjectionRunning: boolean;
   profileChannelWakePolicies: Map<string, ChannelWakePolicy>;
   mcpManager: McpSurfaceManagerPort;
@@ -773,6 +774,8 @@ function adapterLifecycleContext(
     telegramDiplomatPendingReplies: state.telegramDiplomatPendingReplies,
     telegramDiplomatPendingWakeReports:
       state.telegramDiplomatPendingWakeReports,
+    telegramDiplomatProcessedWakeReports:
+      state.telegramDiplomatProcessedWakeReports,
     get telegramDiplomatReplyProjectionRunning() {
       return state.telegramDiplomatReplyProjectionRunning;
     },
@@ -1167,6 +1170,7 @@ export async function createRustyCrewServiceApp(
       channelProjectionFailures: [],
       telegramDiplomatPendingReplies: new Map(),
       telegramDiplomatPendingWakeReports: [],
+      telegramDiplomatProcessedWakeReports: new Set(),
       telegramDiplomatReplyProjectionRunning: false,
       profileChannelWakePolicies,
       curator,

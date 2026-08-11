@@ -101,6 +101,7 @@ export interface ServiceAdapterLifecycleContext {
     TelegramDiplomatPendingReply[]
   >;
   readonly telegramDiplomatPendingWakeReports: ServiceWakeDispatchReport[];
+  readonly telegramDiplomatProcessedWakeReports: Set<string>;
   telegramDiplomatReplyProjectionRunning: boolean;
   now(): string;
   isStopping(): boolean;
@@ -698,6 +699,11 @@ export async function projectTelegramDiplomatWakeReplies(
       while (context.telegramDiplomatPendingWakeReports.length > 0) {
         const report = context.telegramDiplomatPendingWakeReports.shift();
         if (report === undefined) continue;
+        const reportIdentity = telegramDiplomatWakeReportIdentity(report);
+        if (reportIdentity === undefined) continue;
+        if (context.telegramDiplomatProcessedWakeReports.has(reportIdentity))
+          continue;
+        rememberTelegramDiplomatWakeReport(context, reportIdentity);
         if (wakeReportWasCancelledOrFailed(report)) {
           context.telegramDiplomatPendingReplies.delete(report.sessionId);
           continue;
@@ -765,6 +771,31 @@ export async function projectTelegramDiplomatWakeReplies(
         );
       });
     }
+  }
+}
+
+function telegramDiplomatWakeReportIdentity(
+  report: ServiceWakeDispatchReport,
+): string | undefined {
+  return report.wakeId === undefined
+    ? undefined
+    : `${report.sessionId}\u0000${report.wakeId}`;
+}
+
+function rememberTelegramDiplomatWakeReport(
+  context: ServiceAdapterLifecycleContext,
+  identity: string,
+): void {
+  context.telegramDiplomatProcessedWakeReports.add(identity);
+  const maxRememberedReports = 4_096;
+  while (
+    context.telegramDiplomatProcessedWakeReports.size > maxRememberedReports
+  ) {
+    const oldest = context.telegramDiplomatProcessedWakeReports
+      .values()
+      .next().value;
+    if (oldest === undefined) break;
+    context.telegramDiplomatProcessedWakeReports.delete(oldest);
   }
 }
 
