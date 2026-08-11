@@ -15,6 +15,7 @@ import type {
 import type {
   NativeBridgeModule,
   NativeChannelIngressRoutePlan,
+  NativeTelegramDiplomatIngressPlan,
 } from "@rusty-crew/native-bridge";
 import {
   AgentActivityObservationProducer,
@@ -450,6 +451,7 @@ export async function startTelegramConnector(
     updateLimit: context.config.telegram.updateLimit,
     now: context.now,
     onInbound: async (message) => {
+      let diplomatRoute: ChannelRouteResolution | undefined;
       const diplomatBinding = diplomatBindings.find(
         (binding) => binding.bindingId === message.bindingId,
       );
@@ -495,6 +497,21 @@ export async function startTelegramConnector(
             message,
           };
         }
+        const channelBinding = telegramBindings.find(
+          (binding) => binding.bindingId === diplomatBinding.bindingId,
+        );
+        if (channelBinding === undefined) {
+          return {
+            status: "inactive_binding",
+            reason: "Telegram diplomat binding has no active channel route",
+            message,
+          };
+        }
+        diplomatRoute = telegramDiplomatRouteResolution(
+          message,
+          channelBinding,
+          plan,
+        );
       }
       return context.adapterFactories.ingestChannelInboundMessage(message, {
         bridge: {
@@ -511,7 +528,10 @@ export async function startTelegramConnector(
         bindings: context.runtimeConfig.channelBindings,
         ensureSessionForRoute: ({ binding }) =>
           context.ensureSessionForChannelBinding({ binding }),
-        routePlanner: (input) => planChannelIngressRoute(context.bridge, input),
+        routePlanner:
+          diplomatRoute === undefined
+            ? (input) => planChannelIngressRoute(context.bridge, input)
+            : async () => diplomatRoute,
         deliverRoutedMessage: async ({ message, route }) => {
           const receipt = await context.bridge.deliverAgentMessage({
             caller: {
@@ -557,6 +577,34 @@ export async function startTelegramConnector(
     eventType: "telegram_connector_started",
     summary: `Telegram connector started with ${connector.diagnostics().bindingCount} active binding(s).`,
   });
+}
+
+export function telegramDiplomatRouteResolution(
+  message: NormalizedChannelInboundMessage,
+  binding: ChannelBindingRecord,
+  plan: NativeTelegramDiplomatIngressPlan,
+): Extract<ChannelRouteResolution, { status: "routed" }> {
+  if (
+    plan.decision !== "routed" ||
+    plan.crewCorrelationId == null ||
+    plan.targetSessionId == null
+  ) {
+    throw new Error(
+      "Routed Telegram diplomat ingress plan is missing delivery authority",
+    );
+  }
+  return {
+    status: "routed",
+    binding,
+    route: {
+      from: `channel:telegram:${message.author.externalUserId}` as AgentId,
+      to: binding.agentId,
+      body: message.body,
+      correlationId: plan.crewCorrelationId,
+      bindingId: binding.bindingId,
+      sessionId: plan.targetSessionId,
+    },
+  };
 }
 
 export function telegramBotTokenFromServiceCredentialSecret(
