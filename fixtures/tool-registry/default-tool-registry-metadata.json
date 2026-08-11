@@ -345,6 +345,46 @@
       "version": "0.1.0"
     },
     {
+      "name": "playtest_start",
+      "description": "Start an exact-revision persistent Den playtest session and return durable session and evidence handles.",
+      "category": "browser",
+      "toolsets": ["vision_playtester"],
+      "surfaces": ["brain"],
+      "safety": ["executes_process", "external_write"],
+      "output_shape": "playtest.start_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "playtest_observe",
+      "description": "Capture an ordinary visible screenshot or bounded frame burst from a persistent Den playtest session.",
+      "category": "browser",
+      "toolsets": ["vision_playtester"],
+      "surfaces": ["brain"],
+      "safety": ["read_only", "executes_process"],
+      "output_shape": "playtest.observation_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "playtest_act",
+      "description": "Send ordinary keyboard, mouse, wheel, or wait input to a persistent Den playtest session.",
+      "category": "browser",
+      "toolsets": ["vision_playtester"],
+      "surfaces": ["brain"],
+      "safety": ["executes_process", "external_write"],
+      "output_shape": "playtest.action_result.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "playtest_finish",
+      "description": "Finalize a persistent Den playtest evidence packet with an honest outcome and best-effort cleanup.",
+      "category": "browser",
+      "toolsets": ["vision_playtester"],
+      "surfaces": ["brain"],
+      "safety": ["executes_process", "external_write"],
+      "output_shape": "playtest.finish_result.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "memory_recall",
       "description": "Recall relevant summaries from the configured external memory service for the current profile or work context. This is not a Den document, task, project, or guidance lookup tool; use Den MCP planning tools for those surfaces.",
       "category": "memory",

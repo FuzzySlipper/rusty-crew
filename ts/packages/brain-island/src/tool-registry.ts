@@ -402,6 +402,26 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:tool-registry",
   },
   {
+    name: "playtest_start",
+    implementationModule: "./vision-playtester-tools.js#playtestStartTool",
+    inventoryTest: "smoke:vision-playtester",
+  },
+  {
+    name: "playtest_observe",
+    implementationModule: "./vision-playtester-tools.js#playtestObserveTool",
+    inventoryTest: "smoke:vision-playtester",
+  },
+  {
+    name: "playtest_act",
+    implementationModule: "./vision-playtester-tools.js#playtestActTool",
+    inventoryTest: "smoke:vision-playtester",
+  },
+  {
+    name: "playtest_finish",
+    implementationModule: "./vision-playtester-tools.js#playtestFinishTool",
+    inventoryTest: "smoke:vision-playtester",
+  },
+  {
     name: "memory_recall",
     implementationModule: "./den-memory-tools.js#denMemoryRecallTool",
     inventoryTest: "smoke:tool-registry",

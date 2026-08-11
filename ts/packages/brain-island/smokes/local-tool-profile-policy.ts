@@ -118,6 +118,28 @@ assert.deepEqual(selectedFullCodingAgentTools, [
   "write_file",
 ]);
 
+const visionPlaytesterProfile = seededProfiles.items.find(
+  (profile) => profile.id === "vision_playtester",
+);
+assert.ok(visionPlaytesterProfile, "vision_playtester must be seeded");
+assert.deepEqual(visionPlaytesterProfile.toolsets, ["vision_playtester"]);
+assert.deepEqual(visionPlaytesterProfile.tools, ["deliver_completion_md"]);
+assert.deepEqual(
+  defaultToolRegistry
+    .buildInventory({
+      requestedToolsets: visionPlaytesterProfile.toolsets,
+      requestedTools: visionPlaytesterProfile.tools,
+    })
+    .selectedTools.map((tool) => tool.name),
+  [
+    "deliver_completion_md",
+    "playtest_start",
+    "playtest_observe",
+    "playtest_act",
+    "playtest_finish",
+  ],
+);
+
 await assert.rejects(
   () =>
     store.create({
@@ -184,6 +206,7 @@ console.log(
       fullAgentTools: selectedFullAgentTools.size,
       fullAgentExcludedTools: omittedFullAgentTools,
       fullCodingAgentTools: selectedFullCodingAgentTools.length,
+      visionPlaytesterTools: visionPlaytesterProfile.tools,
       validationCalls: bridge.validations.length,
       createdProfile: customProfile.id,
     },

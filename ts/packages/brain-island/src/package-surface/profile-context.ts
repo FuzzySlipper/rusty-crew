@@ -99,6 +99,24 @@ export {
   estimateContextUsage,
   textFragmentsFromPayload,
 } from "../context-estimate.js";
+export {
+  renderVisionPlaytestMission,
+  validateVisionPlaytestReport,
+  VISION_PLAYTESTER_LOCAL_TOOL_PROFILE_ID,
+  VISION_PLAYTESTER_PROVIDER_ALIAS,
+  VISION_PLAYTESTER_SOURCE_TOOL_NAMES,
+  VISION_PLAYTESTER_SYSTEM_PROMPT,
+} from "../vision-playtester.js";
+export type {
+  VisionPlaytestBudget,
+  VisionPlaytestFinding,
+  VisionPlaytestMission,
+  VisionPlaytestOutcome,
+  VisionPlaytestReport,
+  VisionPlaytestReportValidation,
+  VisionPlaytestResumeState,
+  VisionPlaytesterSourceToolName,
+} from "../vision-playtester.js";
 export type {
   ContextBudgetProvider,
   ContextEstimateInput,

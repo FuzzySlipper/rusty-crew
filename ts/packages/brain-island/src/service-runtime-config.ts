@@ -38,6 +38,7 @@ import {
   type NativeLocalCodeResourcePolicyPlan,
 } from "@rusty-crew/native-bridge";
 import { createBrowserToolResolver } from "./browser-tools.js";
+import { createVisionPlaytesterToolResolver } from "./vision-playtester-tools.js";
 import {
   createCoordinationToolResolver,
   type CoordinationToolRuntime,
@@ -1631,6 +1632,7 @@ function createServiceToolResolver(
       maxScreenshotBytes:
         options.browserResources.resourcePolicy.browser.maxScreenshotBytes,
     }),
+    createVisionPlaytesterToolResolver(),
     createImageGenerationToolResolver(
       createImageGenerationRuntime(
         options.runtimeConfig?.imageGeneration ?? {

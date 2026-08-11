@@ -17,6 +17,30 @@ export type {
   LocalToolProcessResult,
 } from "../local-code-tools.js";
 export {
+  createVisionPlaytesterCliRuntime,
+  createVisionPlaytesterToolResolver,
+  playtestActParameters,
+  playtestActTool,
+  playtestFinishParameters,
+  playtestFinishTool,
+  playtestObserveParameters,
+  playtestObserveTool,
+  playtestStartParameters,
+  playtestStartTool,
+  visionPlaytesterTools,
+  visionPlaytestOutcome,
+} from "../vision-playtester-tools.js";
+export type {
+  PlaytestActParams,
+  PlaytestFinishParams,
+  PlaytestObserveParams,
+  PlaytestStartParams,
+  VisionPlaytesterCliRuntimeOptions,
+  VisionPlaytesterCommandResult,
+  VisionPlaytesterOperation,
+  VisionPlaytesterRuntime,
+} from "../vision-playtester-tools.js";
+export {
   delegationTools,
   fanOutSubagentsTool,
   fanOutSubagentsMarkdownTool,

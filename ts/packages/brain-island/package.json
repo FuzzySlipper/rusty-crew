@@ -39,6 +39,7 @@
     "smoke:tool-registry-parity": "tsx smokes/tool-registry-parity.ts",
     "smoke:tool-registry-diagnostics": "tsx smokes/tool-registry-diagnostics.ts",
     "smoke:local-tool-profile-policy": "tsx smokes/local-tool-profile-policy.ts",
+    "smoke:vision-playtester": "tsx smokes/smoke-vision-playtester.ts",
     "smoke:tool-registry-authority": "npm run smoke:tool-registry-parity && npm run smoke:tool-registry-diagnostics && npm run smoke:mcp-tool-registry && npm run smoke:local-tool-profile-policy",
     "smoke:web-search-tool": "tsx smokes/smoke-web-search-tool.ts",
     "smoke:web-extract-tool": "tsx smokes/smoke-web-extract-tool.ts",

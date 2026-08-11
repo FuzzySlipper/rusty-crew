@@ -335,6 +335,14 @@ function defaultLocalToolProfiles(
       tools: [],
     }),
     defaultProfile(now, {
+      id: "vision_playtester",
+      displayName: "Vision Playtester",
+      description:
+        "Visible playtest session controls and completion reporting; this is task-focus friction, not a security sandbox.",
+      toolsets: ["vision_playtester"],
+      tools: ["deliver_completion_md"],
+    }),
+    defaultProfile(now, {
       id: "full_coding_agent",
       displayName: "Full Coding Agent",
       description:
