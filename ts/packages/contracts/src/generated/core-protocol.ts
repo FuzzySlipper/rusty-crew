@@ -1190,12 +1190,17 @@ export type ExternalTurnInputPart = {
 
 export type ExternalTurnPage = {
   hasMoreBefore: boolean;
-  items: Array<ExternalTurnCorrelation>;
+  items: Array<ExternalTurnPageEntry>;
 };
 
 export type ExternalTurnPageCursor = {
-  createdAt: string;
+  creationOrdinal: number;
   requestId: string;
+};
+
+export type ExternalTurnPageEntry = {
+  cursor: ExternalTurnPageCursor;
+  turn: ExternalTurnCorrelation;
 };
 
 export type ExternalTurnPageQuery = {

@@ -4432,7 +4432,7 @@
         "properties": {
           "hasMoreBefore": { "type": "boolean" },
           "items": {
-            "items": { "$ref": "#/components/schemas/ExternalTurnCorrelation" },
+            "items": { "$ref": "#/components/schemas/ExternalTurnPageEntry" },
             "type": "array"
           }
         },
@@ -4441,10 +4441,22 @@
       },
       "ExternalTurnPageCursor": {
         "properties": {
-          "createdAt": { "type": "string" },
+          "creationOrdinal": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "requestId": { "type": "string" }
         },
-        "required": ["createdAt", "requestId"],
+        "required": ["creationOrdinal", "requestId"],
+        "type": "object"
+      },
+      "ExternalTurnPageEntry": {
+        "properties": {
+          "cursor": { "$ref": "#/components/schemas/ExternalTurnPageCursor" },
+          "turn": { "$ref": "#/components/schemas/ExternalTurnCorrelation" }
+        },
+        "required": ["cursor", "turn"],
         "type": "object"
       },
       "ExternalTurnPageQuery": {

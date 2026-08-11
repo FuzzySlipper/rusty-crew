@@ -5036,7 +5036,7 @@
         },
         "items": {
           "items": {
-            "$ref": "#/$defs/ExternalTurnCorrelation"
+            "$ref": "#/$defs/ExternalTurnPageEntry"
           },
           "type": "array"
         }
@@ -5049,16 +5049,33 @@
     },
     "ExternalTurnPageCursor": {
       "properties": {
-        "createdAt": {
-          "type": "string"
+        "creationOrdinal": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         },
         "requestId": {
           "type": "string"
         }
       },
       "required": [
-        "createdAt",
+        "creationOrdinal",
         "requestId"
+      ],
+      "type": "object"
+    },
+    "ExternalTurnPageEntry": {
+      "properties": {
+        "cursor": {
+          "$ref": "#/$defs/ExternalTurnPageCursor"
+        },
+        "turn": {
+          "$ref": "#/$defs/ExternalTurnCorrelation"
+        }
+      },
+      "required": [
+        "cursor",
+        "turn"
       ],
       "type": "object"
     },

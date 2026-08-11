@@ -8,9 +8,11 @@ page. `includeTurns: true` means “include one bounded page”; it never means
 The default page limit is 50 and the maximum is 100. The first read returns the
 most recent page in chronological order. When `turnPage.hasMoreBefore` is true,
 send `turnPage.beforeCursor` as `beforeCursor` to read the immediately older
-page. Cursors bind the runtime, native thread, immutable turn creation time, and
-request identity. A different thread, malformed cursor, or missing cursor turn
-is an explicit 400/409 error rather than an empty or reset transcript.
+page. Cursors bind the runtime, native thread, backend-owned immutable creation
+ordinal, and request identity. The ordinal is assigned by storage rather than
+derived from caller timestamps or IDs; legacy rows receive a deterministic
+one-time backfill. A different thread, malformed cursor, or missing/mismatched
+cursor row is an explicit 400/409 error rather than an empty or reset transcript.
 
 Each turn and item has stable Crew/native identity. Item text, reasoning
 summaries, and item counts are bounded; `truncated`, `itemsTruncated`, and

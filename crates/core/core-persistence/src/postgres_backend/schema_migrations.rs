@@ -8,7 +8,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 55;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 56;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -296,7 +296,56 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "index external turns by immutable creation cursor",
         apply: Some(apply_postgres_external_turn_creation_cursor),
     },
+    PostgresSchemaMigration {
+        version: 56,
+        description: "order external turns by backend-owned creation ordinal",
+        apply: Some(apply_postgres_external_turn_creation_ordinal),
+    },
 ];
+
+fn apply_postgres_external_turn_creation_ordinal(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    let external_turns_exists = tx
+        .query_opt(
+            "SELECT 1 FROM information_schema.tables
+              WHERE table_schema::text = $1 AND table_name = 'external_turns'",
+            &[&schema],
+        )
+        .map_err(|error| postgres_error("inspect PostgreSQL external turns table", error))?
+        .is_some();
+    if !external_turns_exists {
+        return Ok(());
+    }
+    tx.batch_execute(&format!(
+        "CREATE SEQUENCE IF NOT EXISTS {schema}.external_turn_creation_ordinal_seq;
+         ALTER TABLE {schema}.external_turns ADD COLUMN IF NOT EXISTS creation_ordinal BIGINT;
+         WITH ranked AS (
+            SELECT request_id,
+                   ROW_NUMBER() OVER (ORDER BY created_at, request_id) AS ordinal
+              FROM {schema}.external_turns
+         )
+         UPDATE {schema}.external_turns AS turns
+            SET creation_ordinal = ranked.ordinal
+           FROM ranked
+          WHERE turns.request_id = ranked.request_id
+            AND turns.creation_ordinal IS NULL;
+         SELECT setval(
+            '{schema}.external_turn_creation_ordinal_seq',
+            GREATEST(COALESCE(MAX(creation_ordinal), 0), 1),
+            COALESCE(MAX(creation_ordinal), 0) > 0
+         ) FROM {schema}.external_turns;
+         ALTER TABLE {schema}.external_turns
+            ALTER COLUMN creation_ordinal SET DEFAULT nextval('{schema}.external_turn_creation_ordinal_seq'),
+            ALTER COLUMN creation_ordinal SET NOT NULL;
+         CREATE UNIQUE INDEX IF NOT EXISTS external_turns_creation_ordinal_idx
+            ON {schema}.external_turns(creation_ordinal);
+         CREATE INDEX IF NOT EXISTS external_turns_thread_creation_ordinal_idx
+            ON {schema}.external_turns(runtime_id, native_thread_id, creation_ordinal);"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL external turn creation ordinal", error))
+}
 
 fn apply_postgres_external_turn_creation_cursor(
     tx: &mut Transaction<'_>,
@@ -1902,6 +1951,7 @@ fn apply_postgres_external_runtime(tx: &mut Transaction<'_>, schema: &str) -> Co
             WHERE native_thread_id IS NOT NULL;
          CREATE INDEX IF NOT EXISTS external_agent_bindings_session_idx
             ON {schema}.external_agent_bindings(session_id, status);
+         CREATE SEQUENCE IF NOT EXISTS {schema}.external_turn_creation_ordinal_seq;
          CREATE TABLE IF NOT EXISTS {schema}.external_turns (
             request_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
             runtime_id TEXT NOT NULL REFERENCES {schema}.external_runtime_registrations(runtime_id),
@@ -1909,6 +1959,7 @@ fn apply_postgres_external_runtime(tx: &mut Transaction<'_>, schema: &str) -> Co
             session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
             native_thread_id TEXT NOT NULL, native_turn_id TEXT, phase TEXT NOT NULL,
             revision BIGINT NOT NULL, created_at TEXT NOT NULL,
+            creation_ordinal BIGINT NOT NULL DEFAULT nextval('{schema}.external_turn_creation_ordinal_seq'),
             updated_at TEXT NOT NULL, record_json TEXT NOT NULL);
          CREATE UNIQUE INDEX IF NOT EXISTS external_turns_native_turn_idx
             ON {schema}.external_turns(runtime_id, native_turn_id)
@@ -1917,6 +1968,10 @@ fn apply_postgres_external_runtime(tx: &mut Transaction<'_>, schema: &str) -> Co
             ON {schema}.external_turns(runtime_id, native_thread_id, updated_at);
          CREATE INDEX IF NOT EXISTS external_turns_creation_cursor_idx
             ON {schema}.external_turns(runtime_id, native_thread_id, created_at, request_id);
+         CREATE UNIQUE INDEX IF NOT EXISTS external_turns_creation_ordinal_idx
+            ON {schema}.external_turns(creation_ordinal);
+         CREATE INDEX IF NOT EXISTS external_turns_thread_creation_ordinal_idx
+            ON {schema}.external_turns(runtime_id, native_thread_id, creation_ordinal);
          CREATE INDEX IF NOT EXISTS external_turns_active_session_idx
             ON {schema}.external_turns(session_id, phase, updated_at);
          CREATE TABLE IF NOT EXISTS {schema}.external_control_receipts (

@@ -16647,19 +16647,60 @@ mod tests {
                 .unwrap(),
             vec![turn.clone()]
         );
+        let initial_page = store
+            .query_external_turn_page(&rusty_crew_core_protocol::ExternalTurnPageQuery {
+                runtime_id: turn.runtime_id.clone(),
+                native_thread_id: "native-thread".into(),
+                before: None,
+                limit: 50,
+            })
+            .unwrap();
+        assert_eq!(initial_page.items.len(), 1);
+        assert_eq!(initial_page.items[0].turn, turn);
+        assert!(!initial_page.has_more_before);
+        let initial_cursor = initial_page.items[0].cursor.clone();
+        let original_older = store
+            .query_external_turn_page(&rusty_crew_core_protocol::ExternalTurnPageQuery {
+                runtime_id: turn.runtime_id.clone(),
+                native_thread_id: "native-thread".into(),
+                before: Some(initial_cursor.clone()),
+                limit: 50,
+            })
+            .unwrap();
+        for (suffix, request_id, created_at) in [
+            ("lower", "000-later", "2026-07-10T00:00:00Z"),
+            ("higher", "zzz-later", "2026-07-10T00:00:00Z"),
+            ("offset", "offset-later", "2026-07-10T00:00:00+00:00"),
+            ("fraction", "fraction-later", "2026-07-10T00:00:00.000Z"),
+        ] {
+            let mut later = turn.clone();
+            later.request.request_id =
+                rusty_crew_core_protocol::ExternalTurnRequestId::new(request_id);
+            later.request.idempotency_key = format!("postgres-later-{suffix}");
+            later.request.created_at = created_at.into();
+            later.native_turn_id = Some(format!("postgres-native-later-{suffix}"));
+            let mut later = store.create_external_turn(&later).unwrap();
+            later.phase = rusty_crew_core_protocol::ExternalTurnPhase::Starting;
+            later.updated_at = "2026-07-10T00:00:01Z".into();
+            let mut later = store.update_external_turn(&later, 1).unwrap();
+            later.phase = rusty_crew_core_protocol::ExternalTurnPhase::Active;
+            later.updated_at = "2026-07-10T00:00:02Z".into();
+            let mut later = store.update_external_turn(&later, later.revision).unwrap();
+            later.phase = rusty_crew_core_protocol::ExternalTurnPhase::Completed;
+            later.capacity_lease_id = None;
+            later.updated_at = "2026-07-10T00:00:03Z".into();
+            store.update_external_turn(&later, later.revision).unwrap();
+        }
         assert_eq!(
             store
                 .query_external_turn_page(&rusty_crew_core_protocol::ExternalTurnPageQuery {
                     runtime_id: turn.runtime_id.clone(),
                     native_thread_id: "native-thread".into(),
-                    before: None,
+                    before: Some(initial_cursor),
                     limit: 50,
-                },)
+                })
                 .unwrap(),
-            rusty_crew_core_protocol::ExternalTurnPage {
-                items: vec![turn.clone()],
-                has_more_before: false,
-            }
+            original_older,
         );
         let mut starting_turn = turn.clone();
         starting_turn.phase = rusty_crew_core_protocol::ExternalTurnPhase::Starting;

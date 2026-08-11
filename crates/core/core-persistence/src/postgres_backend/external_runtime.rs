@@ -13,8 +13,9 @@ use rusty_crew_core_protocol::{
     ExternalInteractionStatus, ExternalRuntimeCertificationInvalidation,
     ExternalRuntimeCertificationRecord, ExternalRuntimeCertificationStatus,
     ExternalRuntimeEventInput, ExternalRuntimeId, ExternalRuntimeProbeEvidenceRecord,
-    ExternalRuntimeRegistration, ExternalTurnCorrelation, ExternalTurnPage, ExternalTurnPageQuery,
-    ExternalTurnRequestId, NormalizedExternalRuntimeEvent,
+    ExternalRuntimeRegistration, ExternalTurnCorrelation, ExternalTurnPage, ExternalTurnPageCursor,
+    ExternalTurnPageEntry, ExternalTurnPageQuery, ExternalTurnRequestId,
+    NormalizedExternalRuntimeEvent,
 };
 
 impl PostgresBackendStore {
@@ -1074,31 +1075,54 @@ impl PostgresBackendStore {
         let limit = query.limit.clamp(1, 100);
         let fetch = i64::from(limit + 1);
         let mut client = self.client()?;
+        if let Some(before) = query.before.as_ref() {
+            let stored = client
+                .query_opt(
+                    &format!(
+                        "SELECT creation_ordinal FROM {schema}.external_turns
+                         WHERE runtime_id = $1 AND native_thread_id = $2 AND request_id = $3"
+                    ),
+                    &[
+                        &query.runtime_id.0,
+                        &query.native_thread_id,
+                        &before.request_id.0,
+                    ],
+                )
+                .map_err(|error| {
+                    postgres_error("validate PostgreSQL external turn page cursor", error)
+                })?
+                .map(|row| row.get::<_, i64>(0));
+            if stored != Some(before.creation_ordinal as i64) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "external_turn_page_cursor_mismatch",
+                ));
+            }
+        }
         let mut items = if let Some(before) = query.before.as_ref() {
-            load_list(
+            load_external_turn_page_entries(
                 &mut *client,
                 &format!(
-                    "SELECT record_json FROM {schema}.external_turns
+                    "SELECT creation_ordinal, record_json FROM {schema}.external_turns
                      WHERE runtime_id = $1 AND native_thread_id = $2
-                       AND (created_at < $3 OR (created_at = $3 AND request_id < $4))
-                     ORDER BY created_at DESC, request_id DESC LIMIT $5"
+                       AND creation_ordinal < $3
+                     ORDER BY creation_ordinal DESC LIMIT $4"
                 ),
                 &[
                     &query.runtime_id.0,
                     &query.native_thread_id,
-                    &before.created_at,
-                    &before.request_id.0,
+                    &(before.creation_ordinal as i64),
                     &fetch,
                 ],
                 "query PostgreSQL external turn page",
             )?
         } else {
-            load_list(
+            load_external_turn_page_entries(
                 &mut *client,
                 &format!(
-                    "SELECT record_json FROM {schema}.external_turns
+                    "SELECT creation_ordinal, record_json FROM {schema}.external_turns
                      WHERE runtime_id = $1 AND native_thread_id = $2
-                     ORDER BY created_at DESC, request_id DESC LIMIT $3"
+                     ORDER BY creation_ordinal DESC LIMIT $3"
                 ),
                 &[&query.runtime_id.0, &query.native_thread_id, &fetch],
                 "query PostgreSQL external turn page",
@@ -2325,6 +2349,31 @@ fn load_list<T: serde::de::DeserializeOwned>(
         .map(|row| {
             let json: String = row.get(0);
             parse_postgres_json(&json, context)
+        })
+        .collect()
+}
+
+fn load_external_turn_page_entries(
+    client: &mut impl postgres::GenericClient,
+    sql: &str,
+    params: &[&(dyn postgres::types::ToSql + Sync)],
+    context: &str,
+) -> CoreResult<Vec<ExternalTurnPageEntry>> {
+    client
+        .query(sql, params)
+        .map_err(|error| postgres_error(context, error))?
+        .into_iter()
+        .map(|row| {
+            let creation_ordinal: i64 = row.get(0);
+            let json: String = row.get(1);
+            let turn: ExternalTurnCorrelation = parse_postgres_json(&json, context)?;
+            Ok(ExternalTurnPageEntry {
+                cursor: ExternalTurnPageCursor {
+                    creation_ordinal: creation_ordinal as u64,
+                    request_id: turn.request.request_id.clone(),
+                },
+                turn,
+            })
         })
         .collect()
 }

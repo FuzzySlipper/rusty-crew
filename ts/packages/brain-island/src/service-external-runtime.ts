@@ -691,12 +691,22 @@ export class ServiceExternalRuntimeController {
         turnPage: emptyExternalThreadTurnPage(limit),
       };
     }
-    const page = await this.#bridge.queryExternalTurnPage({
-      runtimeId,
-      nativeThreadId: threadId,
-      ...(before === null ? {} : { before }),
-      limit,
-    });
+    const page = await this.#bridge
+      .queryExternalTurnPage({
+        runtimeId,
+        nativeThreadId: threadId,
+        ...(before === null ? {} : { before }),
+        limit,
+      })
+      .catch((error: unknown) => {
+        if (String(error).includes("external_turn_page_cursor_mismatch")) {
+          throw new ExternalThreadLifecycleError(
+            "external_thread_cursor_out_of_range",
+            "turn cursor no longer resolves at its immutable creation ordinal",
+          );
+        }
+        throw error;
+      });
     const nativeTurns = Array.isArray(
       requireNativeRecord(result.thread, "thread").turns,
     )
@@ -720,8 +730,8 @@ export class ServiceExternalRuntimeController {
       };
     }
     const turns = await Promise.all(
-      page.items.map((correlation) =>
-        this.#projectExternalTurnFromDurableEvents(runtimeId, correlation),
+      page.items.map((entry) =>
+        this.#projectExternalTurnFromDurableEvents(runtimeId, entry.turn),
       ),
     );
     projected = { ...projected, turns };
@@ -734,16 +744,16 @@ export class ServiceExternalRuntimeController {
         hasMoreBefore: page.hasMoreBefore,
         beforeCursor:
           page.hasMoreBefore && first !== undefined
-            ? encodeExternalTurnCursor(runtimeId, threadId, first)
+            ? encodeExternalTurnCursor(runtimeId, threadId, first.cursor)
             : null,
         pageStartCursor:
           first === undefined
             ? null
-            : encodeExternalTurnCursor(runtimeId, threadId, first),
+            : encodeExternalTurnCursor(runtimeId, threadId, first.cursor),
         pageEndCursor:
           last === undefined
             ? null
-            : encodeExternalTurnCursor(runtimeId, threadId, last),
+            : encodeExternalTurnCursor(runtimeId, threadId, last.cursor),
       },
     };
   }
@@ -774,14 +784,17 @@ export class ServiceExternalRuntimeController {
       turn === undefined ||
       turn.runtimeId !== runtimeId ||
       turn.nativeThreadId !== threadId ||
-      turn.request.createdAt !== decoded.createdAt
+      turn.request.requestId !== decoded.requestId
     ) {
       throw new ExternalThreadLifecycleError(
         "external_thread_cursor_out_of_range",
         "turn cursor no longer resolves within the selected native thread",
       );
     }
-    return { createdAt: decoded.createdAt, requestId: decoded.requestId };
+    return {
+      creationOrdinal: decoded.creationOrdinal,
+      requestId: decoded.requestId,
+    };
   }
 
   async #projectExternalTurnFromDurableEvents(
@@ -3651,7 +3664,7 @@ export class ServiceExternalRuntimeController {
       predecessorNativeThreadId: predecessor.nativeThreadId,
       transitionId,
       reasonCode,
-      createdAt: predecessor.updatedAt,
+      createdAt: created.creation.createdAt,
     };
     if (successor.lineage == null) {
       try {
@@ -5264,24 +5277,24 @@ function projectTerminalError(value: ExternalTurnCorrelation["terminalError"]) {
 }
 
 type ExternalTurnCursorPayload = {
-  readonly version: 1;
+  readonly version: 2;
   readonly runtimeId: string;
   readonly threadId: string;
-  readonly createdAt: string;
+  readonly creationOrdinal: number;
   readonly requestId: string;
 };
 
 function encodeExternalTurnCursor(
   runtimeId: string,
   threadId: string,
-  correlation: ExternalTurnCorrelation,
+  cursor: { readonly creationOrdinal: number; readonly requestId: string },
 ): string {
   const payload: ExternalTurnCursorPayload = {
-    version: 1,
+    version: 2,
     runtimeId,
     threadId,
-    createdAt: correlation.request.createdAt,
-    requestId: correlation.request.requestId,
+    creationOrdinal: cursor.creationOrdinal,
+    requestId: cursor.requestId,
   };
   return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
 }
@@ -5296,23 +5309,25 @@ function decodeExternalTurnCursor(cursor: string): ExternalTurnCursorPayload {
   } catch {
     throw new Error("turn cursor is not valid base64url JSON");
   }
-  if (!isRecord(value) || value.version !== 1) {
+  if (!isRecord(value) || value.version !== 2) {
     throw new Error("turn cursor version is unsupported");
   }
   const runtimeId = stringValue(value.runtimeId);
   const threadId = stringValue(value.threadId);
-  const createdAt = stringValue(value.createdAt);
+  const creationOrdinal = value.creationOrdinal;
   const requestId = stringValue(value.requestId);
   if (
     runtimeId === undefined ||
     threadId === undefined ||
-    createdAt === undefined ||
+    typeof creationOrdinal !== "number" ||
+    !Number.isSafeInteger(creationOrdinal) ||
+    creationOrdinal < 1 ||
     requestId === undefined ||
-    !Number.isFinite(Date.parse(createdAt))
+    requestId.length === 0
   ) {
     throw new Error("turn cursor payload is malformed");
   }
-  return { version: 1, runtimeId, threadId, createdAt, requestId };
+  return { version: 2, runtimeId, threadId, creationOrdinal, requestId };
 }
 
 function externalThreadPageLimit(value: unknown): number {

@@ -23571,272 +23571,298 @@ export const bridgeWireSchemaArtifact = {
         "items": {
           "items": {
             "properties": {
-              "capacityLeaseId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "nativeThreadId": {
-                "type": "string"
-              },
-              "nativeTurnId": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "phase": {
-                "enum": [
-                  "accepted",
-                  "starting",
-                  "active",
-                  "waiting_interaction",
-                  "completed",
-                  "failed",
-                  "interrupted",
-                  "outcome_unknown"
-                ],
-                "type": "string"
-              },
-              "request": {
+              "cursor": {
                 "properties": {
-                  "bindingId": {
+                  "creationOrdinal": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "creationOrdinal",
+                  "requestId"
+                ],
+                "type": "object"
+              },
+              "turn": {
+                "properties": {
+                  "capacityLeaseId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "nativeThreadId": {
                     "type": "string"
                   },
-                  "collaborationMode": {
+                  "nativeTurnId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "phase": {
                     "enum": [
-                      "plan",
-                      null
+                      "accepted",
+                      "starting",
+                      "active",
+                      "waiting_interaction",
+                      "completed",
+                      "failed",
+                      "interrupted",
+                      "outcome_unknown"
                     ],
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "createdAt": {
                     "type": "string"
                   },
-                  "expiresAt": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "idempotencyKey": {
-                    "type": "string"
-                  },
-                  "input": {
-                    "items": {
-                      "oneOf": [
-                        {
-                          "properties": {
-                            "text": {
-                              "type": "string"
-                            },
-                            "type": {
-                              "const": "text",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "text"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "properties": {
-                            "type": {
-                              "const": "image",
-                              "type": "string"
-                            },
-                            "url": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "url"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "properties": {
-                            "name": {
-                              "type": "string"
-                            },
-                            "path": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
-                            },
-                            "type": {
-                              "const": "skill",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "name"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "properties": {
-                            "kind": {
-                              "type": "string"
-                            },
-                            "payload": true,
-                            "type": {
-                              "const": "machine_fact",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "type",
-                            "kind",
-                            "payload"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    "type": "array"
-                  },
-                  "provenance": {
+                  "request": {
                     "properties": {
-                      "correlationId": {
+                      "bindingId": {
+                        "type": "string"
+                      },
+                      "collaborationMode": {
+                        "enum": [
+                          "plan",
+                          null
+                        ],
                         "type": [
                           "string",
                           "null"
                         ]
                       },
-                      "kind": {
-                        "enum": [
-                          "operator",
-                          "routed_agent_message",
-                          "scheduled_wake",
-                          "external_wait_result",
-                          "control"
-                        ],
+                      "createdAt": {
                         "type": "string"
                       },
-                      "sourceId": {
+                      "expiresAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "idempotencyKey": {
+                        "type": "string"
+                      },
+                      "input": {
+                        "items": {
+                          "oneOf": [
+                            {
+                              "properties": {
+                                "text": {
+                                  "type": "string"
+                                },
+                                "type": {
+                                  "const": "text",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "text"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "properties": {
+                                "type": {
+                                  "const": "image",
+                                  "type": "string"
+                                },
+                                "url": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "url"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "properties": {
+                                "name": {
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                },
+                                "type": {
+                                  "const": "skill",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "name"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "properties": {
+                                "kind": {
+                                  "type": "string"
+                                },
+                                "payload": true,
+                                "type": {
+                                  "const": "machine_fact",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "kind",
+                                "payload"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "type": "array"
+                      },
+                      "provenance": {
+                        "properties": {
+                          "correlationId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "kind": {
+                            "enum": [
+                              "operator",
+                              "routed_agent_message",
+                              "scheduled_wake",
+                              "external_wait_result",
+                              "control"
+                            ],
+                            "type": "string"
+                          },
+                          "sourceId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      "requestId": {
+                        "type": "string"
+                      },
+                      "runId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "sessionId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "requestId",
+                      "idempotencyKey",
+                      "sessionId",
+                      "bindingId",
+                      "input",
+                      "provenance",
+                      "createdAt"
+                    ],
+                    "type": "object"
+                  },
+                  "revision": {
+                    "format": "uint64",
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "runtimeId": {
+                    "type": "string"
+                  },
+                  "taskRef": {
+                    "properties": {
+                      "project_id": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "task_id": {
                         "type": [
                           "string",
                           "null"
                         ]
                       }
                     },
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  },
+                  "terminalError": {
+                    "default": null,
+                    "properties": {
+                      "additionalDetails": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "code": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "willRetry": {
+                        "type": [
+                          "boolean",
+                          "null"
+                        ]
+                      }
+                    },
                     "required": [
-                      "kind"
+                      "message"
                     ],
-                    "type": "object"
+                    "type": [
+                      "object",
+                      "null"
+                    ]
                   },
-                  "requestId": {
-                    "type": "string"
-                  },
-                  "runId": {
+                  "terminalReasonCode": {
                     "type": [
                       "string",
                       "null"
                     ]
                   },
-                  "sessionId": {
+                  "updatedAt": {
                     "type": "string"
                   }
                 },
                 "required": [
-                  "requestId",
-                  "idempotencyKey",
-                  "sessionId",
-                  "bindingId",
-                  "input",
-                  "provenance",
-                  "createdAt"
+                  "request",
+                  "runtimeId",
+                  "nativeThreadId",
+                  "phase",
+                  "revision",
+                  "updatedAt"
                 ],
                 "type": "object"
-              },
-              "revision": {
-                "format": "uint64",
-                "minimum": 0,
-                "type": "integer"
-              },
-              "runtimeId": {
-                "type": "string"
-              },
-              "taskRef": {
-                "properties": {
-                  "project_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "task_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                },
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "terminalError": {
-                "default": null,
-                "properties": {
-                  "additionalDetails": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "code": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "message": {
-                    "type": "string"
-                  },
-                  "willRetry": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "message"
-                ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "terminalReasonCode": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "updatedAt": {
-                "type": "string"
               }
             },
             "required": [
-              "request",
-              "runtimeId",
-              "nativeThreadId",
-              "phase",
-              "revision",
-              "updatedAt"
+              "cursor",
+              "turn"
             ],
             "type": "object"
           },

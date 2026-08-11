@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 73;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 74;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -383,6 +383,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 73,
         description: "index external turns by immutable creation cursor",
         apply: repos::external_runtime::migrate_v73_add_external_turn_creation_cursor,
+    },
+    SchemaMigration {
+        version: 74,
+        description: "order external turns by backend-owned creation ordinal",
+        apply: repos::external_runtime::migrate_v74_add_external_turn_creation_ordinal,
     },
 ];
 

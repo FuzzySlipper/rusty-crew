@@ -3171,6 +3171,114 @@ test("new command retries an archived partial predecessor without duplicate succ
   }
 });
 
+test("new command reconciles after successor lineage persistence across restart", async () => {
+  const bridgeFailure = {
+    operation: "record_lineage_event" as const,
+    message: "injected lineage event failure",
+    remaining: 1,
+  };
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    bridgeFailure,
+  );
+  let reloaded: ServiceExternalRuntimeController | undefined;
+  try {
+    const predecessor = await fixture.controller.createAgentSession({
+      idempotencyKey: "new-lineage-predecessor",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const predecessorBinding = predecessor.creation.binding;
+    await fixture.bridge.putAgentRoute({
+      routeKey: "lineage-retry-route",
+      label: "Lineage retry route",
+      enabled: true,
+      target: {
+        type: "managed_external",
+        agentId: predecessorBinding.agentId ?? "missing-agent",
+        bindingId: predecessorBinding.bindingId,
+        bindingRevision: predecessorBinding.revision,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+    const failed = await fixture.controller.executeCommand({
+      bindingId: predecessorBinding.bindingId,
+      commandInput: "/new",
+      idempotencyKey: "new-lineage-attempt-1",
+    });
+    assert.equal(failed.status, "rejected");
+    assert.equal(failed.reasonCode, "external_command_restart_failed");
+    const successorBeforeRestart = (
+      await fixture.bridge.listExternalBindings()
+    ).find(
+      (binding) =>
+        binding.lineage?.predecessorBindingId === predecessorBinding.bindingId,
+    );
+    assert.ok(successorBeforeRestart);
+    const stableLineageCreatedAt = successorBeforeRestart.lineage?.createdAt;
+    assert.ok(stableLineageCreatedAt);
+
+    await fixture.controller.stop();
+    reloaded = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "new-lineage-retry-reloaded",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+    await reloaded.connect(fixture.runtimeId);
+    const retried = await reloaded.executeCommand({
+      bindingId: predecessorBinding.bindingId,
+      commandInput: "/new",
+      idempotencyKey: "new-lineage-attempt-2",
+    });
+    assert.equal(retried.status, "applied", JSON.stringify(retried));
+    assert.equal(
+      retried.result.threadReplacement?.bindingId,
+      successorBeforeRestart.bindingId,
+    );
+    assert.equal(
+      (
+        await fixture.bridge.getExternalBinding(
+          successorBeforeRestart.bindingId,
+        )
+      )?.lineage?.createdAt,
+      stableLineageCreatedAt,
+    );
+    assert.equal(
+      (await fixture.bridge.listSessions()).filter(
+        (session) => session.profileId === fixture.profileId,
+      ).length,
+      2,
+    );
+    const route = await fixture.bridge.getAgentRouteResolution(
+      "lineage-retry-route",
+    );
+    assert.equal(
+      route?.route?.target.type === "managed_external"
+        ? route.route.target.bindingId
+        : null,
+      successorBeforeRestart.bindingId,
+    );
+    const events = await fixture.bridge.queryExternalRuntimeEvents({
+      runtimeId: fixture.runtimeId,
+      afterSequence: 0,
+      limit: 1_000,
+    });
+    assert.equal(
+      events.filter((event) => event.kind === "thread_lineage_replaced").length,
+      1,
+    );
+  } finally {
+    await reloaded?.stop().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
 test("controller deletes native thread trees only after durable binding reconciliation", async () => {
   const fixture = await externalCreationFixture(false);
   try {
@@ -4457,7 +4565,11 @@ async function externalCreationFixture(
   loseFirstStartResponse: boolean,
   startFailureMessage?: string,
   bridgeFailure?: {
-    operation: "mark_native_starting" | "complete" | "archive_session";
+    operation:
+      | "mark_native_starting"
+      | "complete"
+      | "archive_session"
+      | "record_lineage_event";
     message: string;
     remaining?: number;
   },
@@ -4507,6 +4619,23 @@ async function externalCreationFixture(
         (bridgeFailure.remaining ?? 1) > 0
       ) {
         return async () => {
+          bridgeFailure.remaining = (bridgeFailure.remaining ?? 1) - 1;
+          throw new Error(bridgeFailure.message);
+        };
+      }
+      if (
+        bridgeFailure?.operation === "record_lineage_event" &&
+        property === "recordExternalRuntimeEvent" &&
+        (bridgeFailure.remaining ?? 1) > 0
+      ) {
+        return async (
+          input: Parameters<
+            NativeBridgeModule["recordExternalRuntimeEvent"]
+          >[0],
+        ) => {
+          if (input.event.kind !== "thread_lineage_replaced") {
+            return target.recordExternalRuntimeEvent(input);
+          }
           bridgeFailure.remaining = (bridgeFailure.remaining ?? 1) - 1;
           throw new Error(bridgeFailure.message);
         };
