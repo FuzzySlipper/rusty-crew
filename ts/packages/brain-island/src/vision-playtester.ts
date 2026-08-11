@@ -118,7 +118,7 @@ export function renderVisionPlaytestMission(
       ? undefined
       : `- estimated model cost USD: ${mission.budget.maxEstimatedCostUsd}`,
     `- artifact policy: ${mission.artifactPolicy}`,
-    "Pass the action, session-minute, and optional estimated-cost budget unchanged to playtest_start. The adapter rejects further act/observe work after the delegated action or session budget, while finish remains available for an evidence-backed terminal report.",
+    `Pass ${mission.repositoryRevision} unchanged as expected_revision to playtest_start, along with the action, session-minute, and optional estimated-cost budget. The adapter rejects a different repository HEAD before launch and verifies that the broker evidence index records the same commit. It rejects further act/observe work after the delegated action or session budget, while finish remains available for an evidence-backed terminal report.`,
     ...(resume
       ? [
           "",

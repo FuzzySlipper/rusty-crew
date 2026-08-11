@@ -6,6 +6,7 @@ import type { ProfileId } from "@rusty-crew/contracts";
 import { parseProfileConfigDraft } from "../src/profile-loading.js";
 import { selectToolProfile } from "../src/tool-profile-selection.js";
 import {
+  createVisionPlaytesterCliRuntime,
   playtestActParameters,
   playtestObserveParameters,
   playtestStartParameters,
@@ -77,6 +78,23 @@ assert.match(observeSchemaText, /frameBurst/);
 assert.doesNotMatch(observeSchemaText, /expressions|storage|dom|application/);
 const startSchemaText = JSON.stringify(playtestStartParameters);
 assert.doesNotMatch(startSchemaText, /headed|record_video|viewport/);
+assert.match(startSchemaText, /expected_revision/);
+
+const staleRevisionStart = await createVisionPlaytesterCliRuntime({
+  cliPath: "/must-not-run/den-playwright",
+  configPath: "/tmp/playtest-config.yaml",
+  resolveRevision: async () => "1".repeat(40),
+}).execute("start", {
+  project: "revision-probe",
+  repo_root: "/tmp/revision-probe",
+  expected_revision: "2".repeat(40),
+  manifest_path: "/tmp/revision-probe/.den-playwright.json",
+  scenario: "reject-stale-revision",
+  budget: { max_actions: 1, max_session_minutes: 1 },
+});
+assert.equal(staleRevisionStart.ok, false);
+assert.match(staleRevisionStart.error ?? "", /revision mismatch/);
+assert.match(staleRevisionStart.error ?? "", /infrastructure_error/);
 
 const temp = await mkdtemp(join(tmpdir(), "rusty-crew-playtester-"));
 try {

@@ -60,6 +60,15 @@ delegated provider budget and final report validation; it is not approximated
 from wall-clock time. None of these limits silently terminates a healthy Crew
 turn.
 
+`playtest_start` also requires `expected_revision`. Before launching, the
+adapter compares that full commit SHA with the supplied repository root's
+current Git commit. After launch, it reads the broker's authoritative evidence
+index and requires `revision.commit_sha` to match again. A stale checkout,
+non-Git harness root, unreadable index, or mismatch returns an
+`infrastructure_error`-appropriate tool failure without claiming that mission
+revision. The expected SHA is additionally retained in broker metadata; this
+is evidence binding, not sandboxing.
+
 ## Mission contract
 
 An orchestrator should provide:
@@ -121,5 +130,6 @@ npm run smoke:local-tool-profile-policy -w @rusty-crew/brain-island
 
 The focused smoke covers exact catalog composition, absence of ordinary bypass
 fields, image attachment, infrastructure-error reporting, same-session resume,
-all four outcomes, evidence requirements, and budget diagnostics. Real model
-campaigns remain manual, scheduled, or review-triggered.
+all four outcomes, stale-revision rejection, evidence requirements, and budget
+diagnostics. Real model campaigns remain manual, scheduled, or
+review-triggered.

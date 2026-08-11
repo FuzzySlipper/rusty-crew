@@ -42,6 +42,7 @@ const visibleActionSchema = Type.Union([
 export const playtestStartParameters = Type.Object({
   project: nonEmptyString,
   repo_root: nonEmptyString,
+  expected_revision: Type.String({ pattern: "^[0-9a-fA-F]{40}$" }),
   manifest_path: nonEmptyString,
   owner: Type.Optional(nonEmptyString),
   scenario: nonEmptyString,
@@ -118,6 +119,8 @@ export interface VisionPlaytesterCliRuntimeOptions {
   cliPath?: string;
   configPath?: string;
   operationTimeoutMs?: number;
+  resolveRevision?: (repoRoot: string) => Promise<string>;
+  readEvidenceIndex?: (indexPath: string) => Promise<unknown>;
 }
 
 interface ActivePlaytestBudget {
@@ -136,6 +139,8 @@ export function createVisionPlaytesterCliRuntime(
   const configPath =
     options.configPath ?? process.env.RUSTY_CREW_PLAYTEST_CONFIG;
   const operationTimeoutMs = options.operationTimeoutMs ?? 120_000;
+  const resolveRevision = options.resolveRevision ?? resolveGitRevision;
+  const readEvidenceIndex = options.readEvidenceIndex ?? readJsonFile;
   const cliRuntime: VisionPlaytesterRuntime = {
     async execute(operation, request, signal) {
       if (!configPath?.trim()) {
@@ -147,6 +152,13 @@ export function createVisionPlaytesterCliRuntime(
           imagePaths: [],
         };
       }
+      if (operation === "start") {
+        const revisionFailure = await verifyRequestedRevision(
+          request,
+          resolveRevision,
+        );
+        if (revisionFailure) return revisionFailure;
+      }
       const args = cliArguments(operation, request, configPath);
       try {
         const result = await execFileAsync(cliPath, args, {
@@ -156,7 +168,28 @@ export function createVisionPlaytesterCliRuntime(
           encoding: "utf8",
         });
         const stdout = String(result.stdout);
-        const value = parseCommandOutput(stdout);
+        let value = parseCommandOutput(stdout);
+        if (operation === "start") {
+          const binding = await verifyEvidenceRevision(
+            value,
+            String(request.expected_revision),
+            readEvidenceIndex,
+          );
+          if (!binding.ok) {
+            await cancelStartedSession(cliPath, configPath, value);
+            return {
+              ok: false,
+              operation,
+              error: binding.error,
+              stdout,
+              stderr: String(result.stderr),
+              imagePaths: [],
+            };
+          }
+          value = isRecord(value)
+            ? { ...value, revision_binding: binding.value }
+            : value;
+        }
         return {
           ok: true,
           operation,
@@ -412,7 +445,130 @@ function cliArguments(
   optionalArg(args, "-owner", request.owner);
   optionalArg(args, "-den-project", request.den_project_id);
   optionalArg(args, "-den-task", request.den_task_id);
+  optionalArg(
+    args,
+    "-metadata",
+    JSON.stringify({ expected_revision: request.expected_revision }),
+  );
   return args;
+}
+
+async function verifyRequestedRevision(
+  request: Record<string, unknown>,
+  resolveRevision: (repoRoot: string) => Promise<string>,
+): Promise<VisionPlaytesterCommandResult | undefined> {
+  const expected = String(request.expected_revision ?? "").toLowerCase();
+  if (!/^[0-9a-f]{40}$/.test(expected)) {
+    return {
+      ok: false,
+      operation: "start",
+      error:
+        "playtest infrastructure rejected the mission: expected_revision must be a full 40-character commit SHA",
+      imagePaths: [],
+    };
+  }
+  try {
+    const actual = (
+      await resolveRevision(String(request.repo_root))
+    ).toLowerCase();
+    if (actual !== expected) {
+      return {
+        ok: false,
+        operation: "start",
+        error: `playtest infrastructure revision mismatch: requested ${expected}, repository HEAD is ${actual}; report infrastructure_error without claiming mission evidence`,
+        imagePaths: [],
+      };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      operation: "start",
+      error: `playtest infrastructure could not verify the requested repository revision: ${error instanceof Error ? error.message : String(error)}`,
+      imagePaths: [],
+    };
+  }
+  return undefined;
+}
+
+async function verifyEvidenceRevision(
+  startValue: unknown,
+  expectedRevision: string,
+  readEvidenceIndex: (indexPath: string) => Promise<unknown>,
+): Promise<
+  { ok: true; value: Record<string, unknown> } | { ok: false; error: string }
+> {
+  const indexPath = findStringField(startValue, "index_path");
+  if (!indexPath) {
+    return {
+      ok: false,
+      error:
+        "playtest infrastructure start result omitted the authoritative evidence index path",
+    };
+  }
+  try {
+    const index = await readEvidenceIndex(indexPath);
+    const revision = isRecord(index) ? index.revision : undefined;
+    const actual = isRecord(revision)
+      ? findStringField(revision, "commit_sha")?.toLowerCase()
+      : undefined;
+    const expected = expectedRevision.toLowerCase();
+    if (actual !== expected) {
+      return {
+        ok: false,
+        error: `playtest infrastructure evidence revision mismatch: requested ${expected}, evidence index recorded ${actual ?? "no commit SHA"}; report infrastructure_error without claiming mission evidence`,
+      };
+    }
+    return {
+      ok: true,
+      value: {
+        expected_revision: expected,
+        observed_revision: actual,
+        index_path: indexPath,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: `playtest infrastructure could not verify the evidence revision: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+async function cancelStartedSession(
+  cliPath: string,
+  configPath: string,
+  startValue: unknown,
+): Promise<void> {
+  const sessionId = findStringField(startValue, "session_id");
+  if (!sessionId) return;
+  try {
+    await execFileAsync(cliPath, [
+      "playtest",
+      "cancel",
+      sessionId,
+      "-config",
+      configPath,
+      "-request",
+      JSON.stringify({
+        reason: "authoritative evidence revision mismatch",
+      }),
+    ]);
+  } catch {
+    // The caller receives the binding failure. Cleanup remains best effort.
+  }
+}
+
+async function resolveGitRevision(repoRoot: string): Promise<string> {
+  const result = await execFileAsync(
+    "git",
+    ["-C", repoRoot, "rev-parse", "--verify", "HEAD^{commit}"],
+    { encoding: "utf8" },
+  );
+  return String(result.stdout).trim();
+}
+
+async function readJsonFile(path: string): Promise<unknown> {
+  return JSON.parse(await readFile(path, "utf8"));
 }
 
 function optionalArg(args: string[], flag: string, value: unknown): void {

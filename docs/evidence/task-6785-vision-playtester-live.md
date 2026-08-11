@@ -5,7 +5,10 @@
 - Rusty Crew service: disposable SQLite debug service at
   `http://127.0.0.1:9348`
 - profile: `task-6785-vision-playtester-cert`
-- Crew session: `task-6785-vision-playtester-cert-session`
+- Crew sessions:
+  - initial exploratory run: `task-6785-vision-playtester-cert-session`
+  - stale-revision probe: `task-6785-vision-playtester-mismatch-session`
+  - exact-revision rerun: `task-6785-vision-playtester-rereview-session`
 - provider: `deepseek-flash-responses`
 - model: `deepseek-v4-flash`
 - target: `/home/dev/rusty-engine-demo`
@@ -48,9 +51,9 @@ certification:
 The prompt also makes one reproduction literal: one additional call for a
 failed operation, without resetting the count through alternate parameters.
 
-## Passing WebGL mission
+## Initial WebGL mission and authority correction
 
-The certification mission supplied only the visible initial `NEW GAME` button
+The initial mission supplied only the visible initial `NEW GAME` button
 coordinate, leaving the worker to explore the game surface with ordinary input.
 It passed an eight-action, eight-minute, USD 0.25 estimated-cost budget to
 `playtest_start` unchanged.
@@ -80,10 +83,59 @@ Observed sequence:
    remaining. The model issued no further input and finalized the broker with
    outcome `pass`.
 
+This run established the interaction and image path but is not exact-revision
+acceptance evidence. Its temporary broker repository root produced
+`revision: {}` in the authoritative index. Review round 4405 correctly rejected
+the prose-only association with the target SHA.
+
 No page errors were recorded. The final report named the actual provider,
 model, broker session, evidence index, action count, and artifact offsets. It
 also retained a low-uncertainty caveat rather than claiming pixel-perfect
 causality from one screenshot.
+
+## Exact-revision rejection and rerun
+
+The production start contract now requires a full `expected_revision`. It
+checks the supplied Git root's current commit before launch, passes the
+expectation into broker metadata, then reads the newly created evidence index
+and requires its `revision.commit_sha` to match before returning a usable
+session.
+
+A live DeepSeek Flash probe supplied the stale all-zero revision for
+`/home/dev/rusty-engine-demo`. Its single `playtest_start` call failed before
+browser publication with actual HEAD
+`2a0f9dc60209b1c2a780a40241ee9c9f07ff5f1b` and explicit guidance to report
+`infrastructure_error` without claiming mission evidence. No retry or repair
+was attempted.
+
+The exact-revision mission then used the actual Git repository as `repo_root`
+and supplied that HEAD. Broker session:
+
+`task-6785-rusty-engine-demo-playtest-20260811T043027.848835697Z-500044`
+
+Authoritative evidence index:
+
+`/home/agent/.cache/den-playwright/runs/task-6785-rusty-engine-demo/task-6785-rusty-engine-demo-playtest-20260811T043027.848835697Z-500044/playtest-index.json`
+
+The start result returned a revision binding whose expected and observed SHA
+both equal `2a0f9dc60209b1c2a780a40241ee9c9f07ff5f1b`. The index independently records:
+
+- repository `/home/dev/rusty-engine-demo`;
+- that same `revision.commit_sha`;
+- `dirty: true`, with the two pre-existing unrelated documentation changes
+  named in `dirty_status`;
+- origin `https://github.com/FuzzySlipper/rusty-engine-demo.git`;
+- metadata `expected_revision` with the same SHA.
+
+The worker used exactly 8/8 primitive actions and stayed within the eight-minute
+and USD 0.25 budgets. `NEW GAME` loaded `#/game?mode=new`, one WebSocket opened,
+and the game-surface click acquired pointer lock on `canvas`. The two subsequent
+six-frame bursts were byte-identical after 900 ms `w` and `a` holds, so this
+honest rerun finalized `fail` for visible movement rather than laundering the
+earlier pass. That product/scenario result is still a successful playtest
+completion for task 6785: the agent operated the visible interface, did not
+repair or broaden the mission, retained artifacts, and reported what happened.
+Cleanup closed the browser and stopped the driver.
 
 ## Deterministic coverage
 
@@ -91,7 +143,8 @@ causality from one screenshot.
 mandatory help), absence of bypass schemas, image attachment, structured
 infrastructure errors, same-session resume after provider interruption, action
 and session budget enforcement with finish still available, all four outcomes,
-evidence requirements, and cost-budget report diagnostics.
+stale-revision rejection, evidence requirements, and cost-budget report
+diagnostics.
 
 The profile has no whole-turn duration ceiling and defaults delegation depth to
 zero. Per-operation CLI timeout and explicit mission budgets remain bounded;
