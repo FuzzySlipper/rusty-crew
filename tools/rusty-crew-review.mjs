@@ -27,9 +27,15 @@ const main = async () => {
     return;
   }
   const command = options.positionals[0];
-  if (command !== "submit" && command !== "status" && command !== "recover") {
+  if (
+    command !== "submit" &&
+    command !== "status" &&
+    command !== "recover" &&
+    command !== "reconcile" &&
+    command !== "diagnostics"
+  ) {
     throw new CliError(
-      "command must be submit, status, or recover",
+      "command must be submit, status, recover, reconcile, or diagnostics",
       EXIT.USAGE,
     );
   }
@@ -47,9 +53,13 @@ const main = async () => {
       ? await submit(client, options, deploymentRole)
       : command === "recover"
         ? await recover(client, options, deploymentRole)
-        : await readStatus(client, options, deploymentRole);
+        : command === "reconcile"
+          ? await reconcile(client, options, deploymentRole)
+          : command === "diagnostics"
+            ? await diagnostics(client, deploymentRole)
+            : await readStatus(client, options, deploymentRole);
   printData(data, options.json);
-  if (options.wait) {
+  if (options.wait && command !== "diagnostics") {
     const final = await waitForTerminal(
       client,
       options,
@@ -61,7 +71,11 @@ const main = async () => {
     return;
   }
   process.exitCode =
-    command === "status" ? terminalExitCode(data) : acceptedExitCode(data);
+    command === "status" || command === "reconcile"
+      ? terminalExitCode(data)
+      : command === "diagnostics"
+        ? EXIT.OK
+        : acceptedExitCode(data);
 };
 
 async function submit(client, options, deploymentRole) {
@@ -123,6 +137,32 @@ async function recover(client, options, deploymentRole) {
     "POST",
     `/v1/admin/review-submissions/${encodeURIComponent(submissionId)}/recover`,
     { expectedRevision, expectedDeploymentRole: deploymentRole },
+  );
+}
+
+async function reconcile(client, options, deploymentRole) {
+  const submissionId = requiredOption(options, "submission-id");
+  const expectedRevision = integerOption(
+    options,
+    "expected-revision",
+    undefined,
+    0,
+  );
+  if (expectedRevision === undefined) {
+    throw new CliError("reconcile requires --expected-revision", EXIT.USAGE);
+  }
+  return client.request(
+    "POST",
+    `/v1/admin/review-submissions/${encodeURIComponent(submissionId)}/reconcile`,
+    { expectedRevision, expectedDeploymentRole: deploymentRole },
+  );
+}
+
+async function diagnostics(client, deploymentRole) {
+  const query = new URLSearchParams({ expectedDeploymentRole: deploymentRole });
+  return client.request(
+    "GET",
+    `/v1/admin/diagnostics/review-submission-recovery?${query}`,
   );
 }
 
@@ -368,6 +408,20 @@ function printData(data, json) {
     process.stdout.write(`${JSON.stringify(data)}\n`);
     return;
   }
+  if (data.submissionId === undefined) {
+    process.stdout.write(
+      [
+        `pending: ${data.pendingSubmissionCount}`,
+        `oldest_eligible_age_ms: ${data.oldestEligibleAgeMs ?? "none"}`,
+        `retry_eligible: ${data.retryBackoff?.eligible ?? 0}`,
+        `retry_waiting: ${data.retryBackoff?.waiting ?? 0}`,
+        `retry_exhausted: ${data.retryBackoff?.exhausted ?? 0}`,
+        `terminal_reconciliations: ${data.terminalReconciliations ?? 0}`,
+        `suppressed_stale_dispatches: ${data.suppressedStaleDispatches ?? 0}`,
+      ].join("\n") + "\n",
+    );
+    return;
+  }
   const lines = [
     `submission: ${data.submissionId}`,
     `service: ${data.deploymentRole}`,
@@ -390,7 +444,7 @@ function printUsage() {
     "Submit requires one or more --check NAME arguments, or explicit --no-checks.\n\n",
   );
   process.stdout.write(
-    `Usage:\n  rusty-crew-review submit --service-url URL --deployment-role production|debug \\\n    --project-id PROJECT --task ID --repository OWNER/REPO --sha SHA --ref REF \\\n    --check NAME --base-sha SHA --summary TEXT|--summary-file PATH \\\n    --client-id ID --idempotency-key KEY [--wait] [--json]\n\n  rusty-crew-review status --service-url URL --deployment-role production|debug \\\n    --submission-id ID [--wait] [--json]\n\n  rusty-crew-review recover --service-url URL --deployment-role production|debug \\\n    --submission-id ID --expected-revision REVISION [--wait] [--json]\n\nEnvironment:\n  RUSTY_CREW_ADMIN_TOKEN  Bearer token for the selected service (when enabled).\n\nExit codes:\n  0 success/accepted, 2 pending, 3 GitHub gate failed, 4 changes requested,\n  5 superseded, 64 usage error, 70 service error.\n`,
+    `Usage:\n  rusty-crew-review submit --service-url URL --deployment-role production|debug \\\n    --project-id PROJECT --task ID --repository OWNER/REPO --sha SHA --ref REF \\\n    --check NAME --base-sha SHA --summary TEXT|--summary-file PATH \\\n    --client-id ID --idempotency-key KEY [--wait] [--json]\n\n  rusty-crew-review status --service-url URL --deployment-role production|debug \\\n    --submission-id ID [--wait] [--json]\n\n  rusty-crew-review recover --service-url URL --deployment-role production|debug \\\n    --submission-id ID --expected-revision REVISION [--wait] [--json]\n\n  rusty-crew-review reconcile --service-url URL --deployment-role production|debug \\\n    --submission-id ID --expected-revision REVISION [--wait] [--json]\n\n  rusty-crew-review diagnostics --service-url URL --deployment-role production|debug [--json]\n\nEnvironment:\n  RUSTY_CREW_ADMIN_TOKEN  Bearer token for the selected service (when enabled).\n\nExit codes:\n  0 success/accepted, 2 pending, 3 GitHub gate failed, 4 changes requested,\n  5 superseded, 64 usage error, 70 service error.\n`,
   );
 }
 

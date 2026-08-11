@@ -191,6 +191,41 @@ progress, does not create another Den round or GitHub gate, and rejects stale
 operator revisions. A missing or ambiguous inbox record remains on the same
 submission as an explicit diagnostic instead of being guessed around.
 
+Startup and periodic recovery also reconcile the exact Den task and review
+round before initial dispatch or redispatch. A task that is already `done` or
+`cancelled`, or an exact-head round that is already finalized, is retired as a
+durable terminal Crew submission and is never sent to a reviewer. The stored
+round, dispatch coordinates, and submission history remain available for
+audit. Automatic task retirement uses terminal reasons
+`automatic_den_task_already_done` and
+`automatic_den_task_already_cancelled`.
+
+A missing, disabled, or archived `@reviewer` route is retried at 30, 60, 120,
+240, and 480 seconds, with a sixth and final attempt for that exact route and
+binding generation. Later sweeps are read-only. A route or binding revision
+change starts a new bounded generation so replacing the reviewer resumes live
+work without resurrecting a terminal submission.
+
+Operators can inspect the bounded recovery summary and explicitly reconcile
+one current revision without direct database access:
+
+```bash
+rusty-crew-review diagnostics \
+  --service-url http://127.0.0.1:9347 \
+  --deployment-role production
+
+rusty-crew-review reconcile \
+  --service-url http://127.0.0.1:9347 \
+  --deployment-role production \
+  --submission-id review-submission:<sha256-id> \
+  --expected-revision 12
+```
+
+Diagnostics report pending count, oldest eligible age, retry
+eligible/waiting/exhausted counts, terminal reconciliation count, suppressed
+stale dispatches, and at most 100 essential per-submission records. Reconcile
+is idempotent at the resulting state and rejects a stale expected revision.
+
 The normal durable phase vocabulary is `gate_pending`,
 `reviewer_dispatched`, `den_finalization_pending`, `reply_pending`, and
 `review_terminal`. Accepted or pending state is never review completion.
@@ -216,12 +251,15 @@ The CLI uses authenticated admin routes:
 ```text
 POST /v1/admin/review-submissions
 GET  /v1/admin/review-submissions/{submission_id}?expectedDeploymentRole=production|debug
+POST /v1/admin/review-submissions/{submission_id}/reconcile
+GET  /v1/admin/diagnostics/review-submission-recovery?expectedDeploymentRole=production|debug
 ```
 
 Both return the normal `{ ok, data, meta }` Rusty Crew envelope. The public
 capability inventory and generated OpenAPI artifact expose these routes as
 `review.submissions.external.create` and
-`review.submissions.external.read`.
+`review.submissions.external.read`, `review.submissions.reconcile`, and
+`review.submissions.diagnostics.recovery`.
 
 ## Boundaries And Troubleshooting
 

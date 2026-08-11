@@ -10,7 +10,9 @@ import {
   denReviewRequestByteLength,
   parseExternalReviewRecoveryRequest,
   parseExternalReviewSubmissionRequest,
+  reconcileReviewSubmissionNow,
   reconcileReviewSubmissions,
+  reviewSubmissionRecoveryDiagnostics,
   reviewerDispatchIdentity,
   selectReviewDenBinding,
   selectRoutedReviewRecord,
@@ -155,7 +157,7 @@ test("review dispatch identity changes only with resolved route authority", () =
       resolution,
       "review-delivery:original",
     ),
-    "review-1:recovery-390f042ab9e80e4e71441196a4a0ed205a2a1104991a355b31d0dfd9e4593a2b",
+    "review-1:route-3:binding-14:recovery-390f042ab9e80e4e71441196a4a0ed205a2a1104991a355b31d0dfd9e4593a2b",
   );
   assert.equal(
     reviewerDispatchIdentity(
@@ -163,8 +165,237 @@ test("review dispatch identity changes only with resolved route authority", () =
       { ...resolution, route: { ...resolution.route!, revision: 99 } },
       "review-delivery:original",
     ),
-    "review-1:recovery-390f042ab9e80e4e71441196a4a0ed205a2a1104991a355b31d0dfd9e4593a2b",
+    "review-1:route-99:binding-14:recovery-390f042ab9e80e4e71441196a4a0ed205a2a1104991a355b31d0dfd9e4593a2b",
   );
+});
+
+test("disabled reviewer route stops durable churn after one bounded generation", async () => {
+  let nowMs = Date.parse("2026-08-11T10:00:00.000Z");
+  let durable = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "incident-regression",
+      idempotencyKey: "disabled-route",
+    }),
+    phase: "reviewer_dispatch_pending" as const,
+    revision: 4,
+  } as ReviewSubmissionRecord;
+  let transitions = 0;
+  const context = {
+    bridge: {
+      listReviewSubmissions: async () => [durable],
+      resolveAgentAddress: async () => ({
+        address: "@reviewer",
+        routable: false,
+        reasonCode: "route_disabled",
+        route: { revision: 9 },
+      }),
+      transitionReviewSubmission: async (request: {
+        transition: { type: string; retryGeneration: string };
+      }) => {
+        assert.equal(request.transition.type, "reviewer_dispatch_failed");
+        transitions += 1;
+        const attempts =
+          durable.reviewerDispatchGeneration ===
+          request.transition.retryGeneration
+            ? (durable.reviewerDispatchAttempts ?? 0) + 1
+            : 1;
+        durable = {
+          ...durable,
+          reviewerDispatchAttempts: attempts,
+          reviewerDispatchGeneration: request.transition.retryGeneration,
+          reviewerDispatchNextRetryAt:
+            attempts >= 6
+              ? null
+              : new Date(nowMs + 30_000 * 2 ** (attempts - 1)).toISOString(),
+          revision: durable.revision + 1,
+        } as ReviewSubmissionRecord;
+        return durable;
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => new Date(nowMs).toISOString(),
+    callDenTool: activeTaskDenCall(() => durable),
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  };
+
+  for (let sweep = 0; sweep < 40; sweep += 1) {
+    await reconcileReviewSubmissions(context);
+    nowMs += 60 * 60_000;
+  }
+
+  assert.equal(transitions, 6);
+  assert.equal(durable.reviewerDispatchAttempts, 6);
+  assert.equal(durable.reviewerDispatchNextRetryAt, null);
+});
+
+test("startup incident reconciliation retires twelve terminal tasks and dispatches one active review", async () => {
+  let records = Array.from({ length: 13 }, (_, index) => ({
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "incident-regression",
+      idempotencyKey: `incident-${index}`,
+    }),
+    submissionId: `incident-review-${index}`,
+    taskId: String(7_000 + index),
+    phase: "reviewer_dispatch_pending" as const,
+    revision: 3,
+  })) as ReviewSubmissionRecord[];
+  const terminalTransitions: string[] = [];
+  const deliveries: string[] = [];
+  const context = {
+    bridge: {
+      listReviewSubmissions: async () => records,
+      transitionReviewSubmission: async (request: {
+        submissionId: string;
+        transition: { type: string; terminalReason?: string };
+      }) => {
+        const index = records.findIndex(
+          (record) => record.submissionId === request.submissionId,
+        );
+        const current = records[index]!;
+        if (request.transition.type === "den_task_terminal") {
+          terminalTransitions.push(request.transition.terminalReason!);
+          records[index] = {
+            ...current,
+            phase: "superseded",
+            terminalReason: request.transition.terminalReason,
+            revision: current.revision + 1,
+          } as ReviewSubmissionRecord;
+        } else if (request.transition.type === "reviewer_dispatched") {
+          records[index] = {
+            ...current,
+            phase: "reviewer_dispatched",
+            revision: current.revision + 1,
+          } as ReviewSubmissionRecord;
+        } else {
+          assert.fail(`unexpected transition ${request.transition.type}`);
+        }
+        return records[index]!;
+      },
+      resolveAgentAddress: async () => ({
+        address: "@reviewer",
+        routable: true,
+        route: { revision: 11 },
+        resolvedTarget: {
+          bindingRevision: 4,
+          sessionId: "reviewer-session",
+        },
+      }),
+      getAgentMessageDelivery: async () => undefined,
+      deliverAgentMessage: async (request: {
+        deliveryId: string;
+        messageId: string;
+      }) => {
+        deliveries.push(request.deliveryId);
+        return {
+          status: "accepted",
+          request: { ...request, toSessionId: "reviewer-session" },
+        };
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-11T11:00:00.000Z",
+    callDenTool: async (
+      _binding: unknown,
+      toolName: string,
+      args: Record<string, unknown>,
+    ) => {
+      if (toolName === "list_review_rounds") return { items: [] };
+      if (toolName === "get_task") {
+        const taskId = Number(args.task_id);
+        return {
+          id: taskId,
+          project_id: "rusty-crew",
+          status: taskId === 7_012 ? "in_progress" : "done",
+        };
+      }
+      throw new Error(`unexpected Den tool ${toolName}`);
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  };
+
+  await reconcileReviewSubmissions(context);
+
+  assert.equal(terminalTransitions.length, 12);
+  assert.ok(
+    terminalTransitions.every(
+      (reason) => reason === "automatic_den_task_already_done",
+    ),
+  );
+  assert.equal(deliveries.length, 1);
+  assert.equal(
+    records.filter((record) => record.phase === "superseded").length,
+    12,
+  );
+  assert.equal(records[12]!.phase, "reviewer_dispatched");
+});
+
+test("operator reconciliation is revision-guarded and recovery diagnostics are bounded", async () => {
+  let durable = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "operator",
+      idempotencyKey: "reconcile-terminal",
+    }),
+    phase: "reviewer_dispatch_pending" as const,
+    submissionId: `review-submission:${"c".repeat(64)}`,
+    revision: 8,
+  } as ReviewSubmissionRecord;
+  let transitions = 0;
+  const context = {
+    bridge: {
+      listReviewSubmissions: async ({
+        pendingOnly,
+      }: {
+        pendingOnly: boolean;
+      }) => (pendingOnly && durable.phase === "superseded" ? [] : [durable]),
+      getReviewSubmission: async () => durable,
+      transitionReviewSubmission: async (request: {
+        transition: { type: string; terminalReason: string };
+      }) => {
+        transitions += 1;
+        durable = {
+          ...durable,
+          phase: "superseded",
+          terminalReason: request.transition.terminalReason,
+          revision: durable.revision + 1,
+        } as ReviewSubmissionRecord;
+        return durable;
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-11T12:00:00.000Z",
+    callDenTool: async (_binding: unknown, toolName: string) =>
+      toolName === "list_review_rounds"
+        ? { items: [] }
+        : {
+            id: Number(durable.taskId),
+            project_id: durable.projectId,
+            status: "done",
+          },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  };
+
+  const reconciled = await reconcileReviewSubmissionNow(
+    context,
+    durable.submissionId,
+    { expectedRevision: 8 },
+  );
+  assert.equal(reconciled.phase, "superseded");
+  assert.equal(transitions, 1);
+  await reconcileReviewSubmissionNow(context, durable.submissionId, {
+    expectedRevision: 9,
+  });
+  assert.equal(transitions, 1);
+
+  const diagnostics = await reviewSubmissionRecoveryDiagnostics(context);
+  assert.equal(diagnostics.pendingSubmissionCount, 0);
+  assert.equal(diagnostics.terminalReconciliations, 1);
+  assert.equal(diagnostics.submissions.length, 1);
 });
 
 test("completed reviewer turn is redispatched once with a new durable identity", async () => {
@@ -251,6 +482,7 @@ test("completed reviewer turn is redispatched once with a new durable identity",
     runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
     serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-10T12:00:00.000Z",
+    callDenTool: activeTaskDenCall(() => durable),
     applyCoordinationDelivery: async (receipt: never) => receipt,
   };
 
@@ -283,7 +515,6 @@ test("ambiguous accepted recovery resumes one stable delivery after revision adv
   } as ReviewSubmissionRecord;
   let storedDelivery: Record<string, unknown> | undefined;
   let applyAttempts = 0;
-  let resolutionRevision = 4;
   const deliveredIds: string[] = [];
   const lookedUpIds: string[] = [];
   const transitionTypes: string[] = [];
@@ -293,7 +524,7 @@ test("ambiguous accepted recovery resumes one stable delivery after revision adv
       resolveAgentAddress: async () => ({
         address: "@reviewer",
         routable: true,
-        route: { revision: resolutionRevision++ },
+        route: { revision: 4 },
         resolvedTarget: {
           bindingRevision: 5,
           sessionId: "reviewer-session",
@@ -344,6 +575,7 @@ test("ambiguous accepted recovery resumes one stable delivery after revision adv
     runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
     serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-10T12:00:00.000Z",
+    callDenTool: activeTaskDenCall(() => durable),
     applyCoordinationDelivery: async (receipt: never) => {
       applyAttempts += 1;
       if (applyAttempts === 1) {
@@ -359,7 +591,10 @@ test("ambiguous accepted recovery resumes one stable delivery after revision adv
   await reconcileReviewSubmissions(context);
 
   assert.equal(durable.phase, "reviewer_dispatched");
-  assert.deepEqual(transitionTypes, ["adapter_failed", "reviewer_dispatched"]);
+  assert.deepEqual(transitionTypes, [
+    "reviewer_dispatch_failed",
+    "reviewer_dispatched",
+  ]);
   assert.equal(deliveredIds.length, 1);
   assert.deepEqual(lookedUpIds, [deliveredIds[0], deliveredIds[0]]);
   assert.equal(applyAttempts, 2);
@@ -409,6 +644,7 @@ test("stale accepted reviewer turn with no native claim returns to dispatch pend
     runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
     serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-10T12:00:00.000Z",
+    callDenTool: activeTaskDenCall(() => pending),
     applyCoordinationDelivery: async (receipt: never) => receipt,
   });
 
@@ -764,6 +1000,13 @@ test("cross-project reconciliation ignores Den wrapper project metadata and keep
           ],
         };
       }
+      if (toolName === "get_task") {
+        return {
+          id: Number(submitted.taskId),
+          project_id: submitted.projectId,
+          status: "in_progress",
+        };
+      }
       if (toolName === "watch_github_checks") {
         return { gate: { id: 2738, status: "pending" } };
       }
@@ -772,7 +1015,12 @@ test("cross-project reconciliation ignores Den wrapper project metadata and keep
     applyCoordinationDelivery: async (receipt: never) => receipt,
   });
 
-  assert.deepEqual(denCalls, ["list_review_rounds", "watch_github_checks"]);
+  assert.deepEqual(denCalls, [
+    "list_review_rounds",
+    "get_task",
+    "list_review_rounds",
+    "watch_github_checks",
+  ]);
   assert.equal(
     transitions.some(
       (request) =>
@@ -820,6 +1068,27 @@ function scopedSubmissionRecord(
     revision: 1,
     updatedAt: "2026-08-05T00:00:00.000Z",
   } as ReviewSubmissionRecord;
+}
+
+function activeTaskDenCall(
+  getRecord: () => ReviewSubmissionRecord,
+  fallback?: (toolName: string) => unknown | Promise<unknown>,
+) {
+  return async (_binding: unknown, toolName: string): Promise<unknown> => {
+    const current = getRecord();
+    if (toolName === "list_review_rounds") {
+      return { project_id: current.projectId, items: [] };
+    }
+    if (toolName === "get_task") {
+      return {
+        id: Number(current.taskId),
+        project_id: current.projectId,
+        status: "in_progress",
+      };
+    }
+    if (fallback !== undefined) return fallback(toolName);
+    throw new Error(`unexpected Den tool ${toolName}`);
+  };
 }
 
 function reviewScopeContext(
@@ -918,8 +1187,16 @@ function gateReconciliationContext(
     serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-05T00:01:00.000Z",
     callDenTool: async (_binding: unknown, toolName: string) => {
-      assert.equal(toolName, "get_github_check_gate");
-      return gate;
+      if (toolName === "list_review_rounds") return { items: [] };
+      if (toolName === "get_task") {
+        return {
+          id: Number(pending.taskId),
+          project_id: pending.projectId,
+          status: "in_progress",
+        };
+      }
+      if (toolName === "get_github_check_gate") return gate;
+      assert.fail(`unexpected Den tool ${toolName}`);
     },
     applyCoordinationDelivery: async (receipt: never) => receipt,
   };
@@ -1022,12 +1299,20 @@ test("checkless external review advances from Den handoff without registering a 
     now: () => "2026-08-11T05:00:00.000Z",
     callDenTool: async (_authority: unknown, toolName: string) => {
       denCalls.push(toolName);
+      if (toolName === "list_review_rounds") return { items: [] };
+      if (toolName === "get_task") {
+        return {
+          id: Number(pending.taskId),
+          project_id: pending.projectId,
+          status: "in_progress",
+        };
+      }
       throw new Error(`unexpected Den tool ${toolName}`);
     },
     applyCoordinationDelivery: async (receipt: never) => receipt,
   });
 
-  assert.deepEqual(denCalls, []);
+  assert.deepEqual(denCalls, ["list_review_rounds", "get_task"]);
   assert.deepEqual(transitions, [
     {
       submissionId: pending.submissionId,

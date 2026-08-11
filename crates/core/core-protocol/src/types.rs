@@ -657,6 +657,10 @@ pub struct ReviewSubmissionRecord {
     pub reply_reason_code: Option<String>,
     pub terminal_reason: Option<String>,
     pub last_adapter_error: Option<String>,
+    #[serde(default)]
+    pub reviewer_dispatch_attempts: u32,
+    pub reviewer_dispatch_generation: Option<String>,
+    pub reviewer_dispatch_next_retry_at: Option<IsoTimestamp>,
     pub created_at: IsoTimestamp,
     pub updated_at: IsoTimestamp,
     pub revision: u64,
@@ -682,6 +686,11 @@ pub enum ReviewSubmissionTransition {
     AdapterFailed {
         reason_code: String,
         summary: String,
+    },
+    ReviewerDispatchFailed {
+        reason_code: String,
+        summary: String,
+        retry_generation: String,
     },
     ReviewerDispatched {
         reviewer_session_id: SessionId,
@@ -709,6 +718,10 @@ pub enum ReviewSubmissionTransition {
         review_round_id: u64,
         exact_head_commit: String,
         verdict: String,
+        terminal_reason: String,
+    },
+    DenTaskTerminal {
+        task_status: String,
         terminal_reason: String,
     },
     ReplyPending,

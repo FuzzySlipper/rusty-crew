@@ -9,6 +9,7 @@ import {
 
 export const REVIEW_DEN_REQUIRED_TOOLS = [
   "finalize_review",
+  "get_task",
   "get_github_check_gate",
   "list_review_rounds",
   "request_review",

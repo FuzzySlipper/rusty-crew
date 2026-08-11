@@ -86,6 +86,94 @@ test("review CLI requires an explicit check mode", async () => {
   assert.match(conflicting.stderr, /either --check or --no-checks/);
 });
 
+test("review CLI exposes revision-guarded reconciliation without SQL", async () => {
+  let observed;
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    observed = {
+      method: request.method,
+      url: request.url,
+      body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
+    };
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        ok: true,
+        data: {
+          submissionId: `review-submission:${"d".repeat(64)}`,
+          phase: "superseded",
+          terminalReason: "automatic_den_task_already_done",
+        },
+      }),
+    );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  const submissionId = `review-submission:${"d".repeat(64)}`;
+  const result = await run([
+    "reconcile",
+    "--service-url",
+    `http://127.0.0.1:${address.port}`,
+    "--deployment-role",
+    "debug",
+    "--submission-id",
+    submissionId,
+    "--expected-revision",
+    "12",
+    "--json",
+  ]);
+  server.close();
+
+  assert.equal(result.code, 5, result.stderr);
+  assert.deepEqual(observed, {
+    method: "POST",
+    url: `/v1/admin/review-submissions/${encodeURIComponent(submissionId)}/reconcile`,
+    body: { expectedRevision: 12, expectedDeploymentRole: "debug" },
+  });
+});
+
+test("review CLI reads bounded recovery diagnostics", async () => {
+  let observedUrl;
+  const server = createServer((request, response) => {
+    observedUrl = request.url;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        ok: true,
+        data: {
+          pendingSubmissionCount: 0,
+          oldestEligibleAgeMs: null,
+          retryBackoff: { eligible: 0, waiting: 0, exhausted: 0 },
+          terminalReconciliations: 12,
+          suppressedStaleDispatches: 0,
+          submissionsTruncated: false,
+          submissions: [],
+        },
+      }),
+    );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  const result = await run([
+    "diagnostics",
+    "--service-url",
+    `http://127.0.0.1:${address.port}`,
+    "--deployment-role",
+    "debug",
+    "--json",
+  ]);
+  server.close();
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(
+    observedUrl,
+    "/v1/admin/diagnostics/review-submission-recovery?expectedDeploymentRole=debug",
+  );
+});
+
 function run(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {

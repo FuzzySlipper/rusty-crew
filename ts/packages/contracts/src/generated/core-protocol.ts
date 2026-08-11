@@ -1881,6 +1881,9 @@ export type ReviewSubmissionRecord = {
   reviewTaskStatus?: string | null;
   reviewVerdict?: string | null;
   reviewer: string;
+  reviewerDispatchAttempts?: number;
+  reviewerDispatchGeneration?: string | null;
+  reviewerDispatchNextRetryAt?: string | null;
   reviewerSessionId?: string | null;
   revision: number;
   submissionId: string;
@@ -1920,6 +1923,11 @@ export type ReviewSubmissionTransition = {
   summary: string;
   type: "adapter_failed";
 } | {
+  reasonCode: string;
+  retryGeneration: string;
+  summary: string;
+  type: "reviewer_dispatch_failed";
+} | {
   dispatchDeliveryId: string;
   dispatchMessageId: string;
   reviewerSessionId: string;
@@ -1947,6 +1955,10 @@ export type ReviewSubmissionTransition = {
   terminalReason: string;
   type: "den_already_finalized";
   verdict: string;
+} | {
+  taskStatus: string;
+  terminalReason: string;
+  type: "den_task_terminal";
 } | {
   type: "reply_pending";
 } | {

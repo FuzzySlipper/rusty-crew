@@ -8007,6 +8007,24 @@
         "reviewer": {
           "type": "string"
         },
+        "reviewerDispatchAttempts": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reviewerDispatchGeneration": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewerDispatchNextRetryAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "reviewerSessionId": {
           "type": [
             "string",
@@ -8198,6 +8216,30 @@
         },
         {
           "properties": {
+            "reasonCode": {
+              "type": "string"
+            },
+            "retryGeneration": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "type": {
+              "const": "reviewer_dispatch_failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reasonCode",
+            "summary",
+            "retryGeneration"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "dispatchDeliveryId": {
               "type": "string"
             },
@@ -8337,6 +8379,26 @@
             "reviewRoundId",
             "exactHeadCommit",
             "verdict",
+            "terminalReason"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "taskStatus": {
+              "type": "string"
+            },
+            "terminalReason": {
+              "type": "string"
+            },
+            "type": {
+              "const": "den_task_terminal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "taskStatus",
             "terminalReason"
           ],
           "type": "object"

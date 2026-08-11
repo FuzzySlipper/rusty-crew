@@ -92,6 +92,31 @@ export interface ExternalReviewRecoveryRequest {
   readonly expectedDeploymentRole?: "production" | "debug";
 }
 
+export interface ReviewSubmissionRecoveryDiagnostics {
+  readonly pendingSubmissionCount: number;
+  readonly oldestEligibleAgeMs: number | null;
+  readonly retryBackoff: {
+    readonly eligible: number;
+    readonly waiting: number;
+    readonly exhausted: number;
+  };
+  readonly terminalReconciliations: number;
+  readonly suppressedStaleDispatches: number;
+  readonly submissionsTruncated: boolean;
+  readonly submissions: readonly {
+    readonly submissionId: string;
+    readonly projectId: string;
+    readonly taskId: number;
+    readonly phase: ReviewSubmissionRecord["phase"];
+    readonly ageMs: number;
+    readonly reviewerDispatchAttempts: number;
+    readonly reviewerDispatchGeneration?: string;
+    readonly reviewerDispatchNextRetryAt?: string;
+    readonly terminalReason?: string;
+    readonly lastAdapterError?: string;
+  }[];
+}
+
 export function parseExternalReviewRecoveryRequest(
   body: unknown,
 ): ExternalReviewRecoveryRequest {
@@ -215,12 +240,144 @@ export async function recoverExternalReviewDispatch(
       `Review submission phase ${record.phase} does not have an outstanding reviewer dispatch.`,
     );
   }
+  const terminalReconciled = await reconcileSubmissionAgainstDen(
+    context,
+    record,
+  );
+  if (terminalReconciled === undefined) {
+    record = await getReviewSubmissionRecord(context, submissionId);
+    return externalReviewReceipt(context, record);
+  }
+  record = terminalReconciled;
+  if (reviewSubmissionTerminal(record.phase)) {
+    return externalReviewReceipt(context, record);
+  }
   record = await reconcileDispatchedReviewer(context, record);
   if (record.phase === "reviewer_dispatch_pending") {
     await dispatchReviewer(context, record);
     record = await getReviewSubmissionRecord(context, submissionId);
   }
   return externalReviewReceipt(context, record);
+}
+
+export async function reconcileReviewSubmissionNow(
+  context: ServiceReviewSubmissionContext,
+  submissionId: string,
+  input: ExternalReviewRecoveryRequest,
+): Promise<ReviewSubmissionRecord> {
+  assertExpectedDeploymentRole(context, input.expectedDeploymentRole);
+  let record = await getReviewSubmissionRecord(context, submissionId);
+  if (record.revision !== input.expectedRevision) {
+    throw new ReviewSubmissionAdapterError(
+      "review_submission_reconciliation_revision_conflict",
+      `Expected revision ${input.expectedRevision}, found ${record.revision}.`,
+    );
+  }
+  const reconciled = await reconcileSubmissionAgainstDen(context, record);
+  if (reconciled === undefined) {
+    return getReviewSubmissionRecord(context, submissionId);
+  }
+  record = reconciled;
+  if (reviewSubmissionTerminal(record.phase)) return record;
+  if (record.phase === "submitted" || record.phase === "den_handoff_recorded") {
+    await advanceDenHandoff(context, record);
+  } else if (record.phase === "gate_pending") {
+    await reconcilePendingGate(context, record);
+  } else if (record.phase === "gate_failed") {
+    await settleFailedGate(context, record);
+  } else if (record.phase === "reviewer_dispatch_pending") {
+    await dispatchReviewer(context, record);
+  } else if (record.phase === "reviewer_dispatched") {
+    record = await reconcileDispatchedReviewer(context, record);
+    if (record.phase === "reviewer_dispatch_pending") {
+      await dispatchReviewer(context, record);
+    }
+  } else if (
+    record.phase === "den_finalized" ||
+    record.phase === "den_finalization_pending" ||
+    record.phase === "reply_pending"
+  ) {
+    await resumeRoutedReview(context, record);
+  }
+  return getReviewSubmissionRecord(context, submissionId);
+}
+
+export async function reviewSubmissionRecoveryDiagnostics(
+  context: ServiceReviewSubmissionContext,
+): Promise<ReviewSubmissionRecoveryDiagnostics> {
+  const records = await context.bridge.listReviewSubmissions({
+    pendingOnly: false,
+  });
+  const now = Date.parse(context.now());
+  const pending = records.filter(
+    (record) => !reviewSubmissionTerminal(record.phase),
+  );
+  let eligible = 0;
+  let waiting = 0;
+  let exhausted = 0;
+  for (const record of pending) {
+    if (record.phase !== "reviewer_dispatch_pending") continue;
+    if ((record.reviewerDispatchAttempts ?? 0) >= 6) exhausted += 1;
+    else if (
+      record.reviewerDispatchNextRetryAt != null &&
+      Date.parse(record.reviewerDispatchNextRetryAt) > now
+    ) {
+      waiting += 1;
+    } else eligible += 1;
+  }
+  const sorted = [...records].sort(
+    (left, right) =>
+      reviewSubmissionTimestamp(left.updatedAt) -
+      reviewSubmissionTimestamp(right.updatedAt),
+  );
+  const items = sorted.slice(0, 100).map((record) => ({
+    submissionId: record.submissionId,
+    projectId: String(record.projectId),
+    taskId: Number(record.taskId),
+    phase: record.phase,
+    ageMs: reviewSubmissionAgeMs(now, record.updatedAt),
+    reviewerDispatchAttempts: record.reviewerDispatchAttempts ?? 0,
+    ...(record.reviewerDispatchGeneration == null
+      ? {}
+      : { reviewerDispatchGeneration: record.reviewerDispatchGeneration }),
+    ...(record.reviewerDispatchNextRetryAt == null
+      ? {}
+      : { reviewerDispatchNextRetryAt: record.reviewerDispatchNextRetryAt }),
+    ...(record.terminalReason == null
+      ? {}
+      : { terminalReason: record.terminalReason }),
+    ...(record.lastAdapterError == null
+      ? {}
+      : { lastAdapterError: record.lastAdapterError }),
+  }));
+  const eligibleAges = pending
+    .filter(
+      (record) =>
+        record.phase !== "reviewer_dispatch_pending" ||
+        (record.reviewerDispatchAttempts ?? 0) < 6,
+    )
+    .map((record) => reviewSubmissionAgeMs(now, record.updatedAt));
+  return {
+    pendingSubmissionCount: pending.length,
+    oldestEligibleAgeMs:
+      eligibleAges.length === 0 ? null : Math.max(...eligibleAges),
+    retryBackoff: { eligible, waiting, exhausted },
+    terminalReconciliations: records.filter((record) =>
+      record.terminalReason?.startsWith("automatic_den_"),
+    ).length,
+    suppressedStaleDispatches: waiting + exhausted,
+    submissionsTruncated: records.length > items.length,
+    submissions: items,
+  };
+}
+
+function reviewSubmissionTimestamp(value: string): number {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function reviewSubmissionAgeMs(now: number, updatedAt: string): number {
+  return Math.max(0, now - reviewSubmissionTimestamp(updatedAt));
 }
 
 export function assertExpectedDeploymentRole(
@@ -451,7 +608,10 @@ export async function reconcileReviewSubmissions(
   const pending = await context.bridge.listReviewSubmissions({
     pendingOnly: true,
   });
-  for (const record of pending) {
+  for (const pendingRecord of pending) {
+    const record = await reconcileSubmissionAgainstDen(context, pendingRecord);
+    if (record === undefined) continue;
+    if (reviewSubmissionTerminal(record.phase)) continue;
     if (
       (record.phase === "submitted" ||
         record.phase === "den_handoff_recorded") &&
@@ -475,6 +635,94 @@ export async function reconcileReviewSubmissions(
       await resumeRoutedReview(context, record);
     }
   }
+}
+
+async function reconcileSubmissionAgainstDen(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+): Promise<ReviewSubmissionRecord | undefined> {
+  if (
+    ![
+      "submitted",
+      "den_handoff_recorded",
+      "gate_pending",
+      "gate_failed",
+      "reviewer_dispatch_pending",
+      "reviewer_dispatched",
+    ].includes(record.phase)
+  ) {
+    return record;
+  }
+  const binding = selectReviewDenBinding(context, record.submitterSessionId);
+  if (binding === undefined) return record;
+  try {
+    const rounds = await reviewRounds(context, binding, Number(record.taskId));
+    const finalized = exactHeadFinalizedRound(
+      rounds,
+      record.commitSha,
+      record.reviewRoundId ?? undefined,
+    );
+    if (finalized !== undefined) {
+      return settleAlreadyFinalizedReview(context, record, finalized);
+    }
+    const taskPayload = await denCall(context, binding, "get_task", {
+      task_id: Number(record.taskId),
+    });
+    const task = exactDenTask(taskPayload, record);
+    const status = stringValue(task, ["status"]);
+    if (status !== "done" && status !== "cancelled") return record;
+    return context.bridge.transitionReviewSubmission({
+      submissionId: record.submissionId,
+      expectedRevision: record.revision,
+      transition: {
+        type: "den_task_terminal",
+        taskStatus: status,
+        terminalReason: `automatic_den_task_already_${status}`,
+      },
+      now: context.now(),
+    });
+  } catch (error) {
+    await recordAdapterFailure(
+      context,
+      record,
+      error instanceof ReviewSubmissionAdapterError
+        ? error.reasonCode
+        : "den_terminal_reconciliation_failed",
+      errorMessage(error),
+    );
+    return undefined;
+  }
+}
+
+function exactDenTask(
+  payload: unknown,
+  record: ReviewSubmissionRecord,
+): Record<string, unknown> {
+  const task = allObjects(payload).find((candidate) => {
+    const taskId = numericValue(candidate, ["id", "task_id", "taskId"]);
+    const projectId = stringValue(candidate, ["project_id", "projectId"]);
+    return (
+      taskId === Number(record.taskId) && projectId === String(record.projectId)
+    );
+  });
+  if (task === undefined) {
+    throw new ReviewSubmissionAdapterError(
+      "den_task_scope_mismatch",
+      `Den did not return task #${record.taskId} in project ${record.projectId}.`,
+    );
+  }
+  return task;
+}
+
+function reviewSubmissionTerminal(
+  phase: ReviewSubmissionRecord["phase"],
+): boolean {
+  return [
+    "replied",
+    "reply_terminal",
+    "review_terminal",
+    "superseded",
+  ].includes(phase);
 }
 
 async function submitReview(
@@ -1441,10 +1689,15 @@ async function dispatchReviewer(
   record: ReviewSubmissionRecord,
 ): Promise<void> {
   const identity = record.submissionId.replaceAll(":", "-");
+  let retryGeneration = `address:${record.reviewer}:unresolved`;
   try {
     const resolution = await context.bridge.resolveAgentAddress(
       record.reviewer,
     );
+    retryGeneration = reviewerRouteGeneration(resolution);
+    if (!reviewerDispatchRetryDue(record, retryGeneration, context.now())) {
+      return;
+    }
     if (!resolution.routable) {
       throw new ReviewSubmissionAdapterError(
         resolution.reasonCode ?? "reviewer_route_unavailable",
@@ -1498,14 +1751,20 @@ async function dispatchReviewer(
       now: context.now(),
     });
   } catch (error) {
-    await recordAdapterFailure(
-      context,
-      record,
-      error instanceof ReviewSubmissionAdapterError
-        ? error.reasonCode
-        : "reviewer_dispatch_failed",
-      errorMessage(error),
-    );
+    await context.bridge.transitionReviewSubmission({
+      submissionId: record.submissionId,
+      expectedRevision: record.revision,
+      transition: {
+        type: "reviewer_dispatch_failed",
+        reasonCode:
+          error instanceof ReviewSubmissionAdapterError
+            ? error.reasonCode
+            : "reviewer_dispatch_failed",
+        summary: errorMessage(error),
+        retryGeneration,
+      },
+      now: context.now(),
+    });
   }
 }
 
@@ -1521,7 +1780,34 @@ export function reviewerDispatchIdentity(
   const recoveryGeneration = createHash("sha256")
     .update(recoveryOfDeliveryId)
     .digest("hex");
-  return `${submissionIdentity}:recovery-${recoveryGeneration}`;
+  return `${base}:recovery-${recoveryGeneration}`;
+}
+
+function reviewerRouteGeneration(resolution: AgentRouteResolution): string {
+  return [
+    `route-${resolution.route?.revision ?? 0}`,
+    `binding-${resolution.resolvedTarget?.bindingRevision ?? 0}`,
+    `session-${resolution.resolvedTarget?.sessionId ?? "none"}`,
+    `routable-${resolution.routable ? "yes" : "no"}`,
+    `reason-${resolution.reasonCode ?? "none"}`,
+  ].join(":");
+}
+
+function reviewerDispatchRetryDue(
+  record: ReviewSubmissionRecord,
+  retryGeneration: string,
+  now: string,
+): boolean {
+  if (record.reviewerDispatchGeneration !== retryGeneration) return true;
+  if ((record.reviewerDispatchAttempts ?? 0) >= 6) return false;
+  if (record.reviewerDispatchNextRetryAt == null) return true;
+  const retryAt = Date.parse(record.reviewerDispatchNextRetryAt);
+  const observedAt = Date.parse(now);
+  return (
+    !Number.isFinite(retryAt) ||
+    !Number.isFinite(observedAt) ||
+    observedAt >= retryAt
+  );
 }
 
 async function reconcileDispatchedReviewer(

@@ -775,6 +775,17 @@
         "public": true
       },
       {
+        "id": "review.submissions.diagnostics.recovery",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/review-submission-recovery",
+        "description": "Read bounded pending, retry/backoff, terminal reconciliation, and suppressed-dispatch diagnostics.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics", "governance"],
+        "public": true
+      },
+      {
         "id": "review.submissions.external.create",
         "method": "POST",
         "path_template": "/v1/admin/review-submissions",
@@ -801,6 +812,17 @@
         "method": "POST",
         "path_template": "/v1/admin/review-submissions/{submission_id}/recover",
         "description": "Reconcile one exact durable reviewer dispatch and redispatch only when its Rust-owned inbox state is no longer active.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "governance", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "review.submissions.reconcile",
+        "method": "POST",
+        "path_template": "/v1/admin/review-submissions/{submission_id}/reconcile",
+        "description": "Idempotently reconcile one submission against authoritative Den and its durable delivery state.",
         "auth": "admin",
         "mutation": "write",
         "stability": "experimental",
@@ -3294,6 +3316,13 @@
         "auth_phase": "after_auth"
       },
       {
+        "capability_id": "review.submissions.diagnostics.recovery",
+        "method": "GET",
+        "path_template": "/v1/admin/diagnostics/review-submission-recovery",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
         "capability_id": "review.submissions.external.create",
         "method": "POST",
         "path_template": "/v1/admin/review-submissions",
@@ -3311,6 +3340,13 @@
         "capability_id": "review.submissions.external.recover",
         "method": "POST",
         "path_template": "/v1/admin/review-submissions/{submission_id}/recover",
+        "route_id": "admin.review_submissions.external",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.submissions.reconcile",
+        "method": "POST",
+        "path_template": "/v1/admin/review-submissions/{submission_id}/reconcile",
         "route_id": "admin.review_submissions.external",
         "auth_phase": "after_auth"
       },

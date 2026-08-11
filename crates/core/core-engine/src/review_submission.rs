@@ -155,6 +155,9 @@ impl CoreEngine {
             reply_reason_code: None,
             terminal_reason: None,
             last_adapter_error: None,
+            reviewer_dispatch_attempts: 0,
+            reviewer_dispatch_generation: None,
+            reviewer_dispatch_next_retry_at: None,
             created_at: request.now.clone(),
             updated_at: request.now,
             revision: 1,
@@ -264,8 +267,42 @@ impl CoreEngine {
                 summary,
             } => {
                 let failure = format!("{reason_code}: {summary}");
+                if record.last_adapter_error.as_deref() == Some(&failure) {
+                    return Ok(record);
+                }
                 record.last_adapter_error = Some(failure);
-                if record.phase == ReviewSubmissionPhase::ReviewerDispatchPending {
+            }
+            ReviewSubmissionTransition::ReviewerDispatchFailed {
+                reason_code,
+                summary,
+                retry_generation,
+            } => {
+                require_review_phase(&record, ReviewSubmissionPhase::ReviewerDispatchPending)?;
+                if reason_code.trim().is_empty()
+                    || summary.trim().is_empty()
+                    || retry_generation.trim().is_empty()
+                {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "reviewer dispatch failure requires reason, summary, and retry generation",
+                    ));
+                }
+                let same_generation = record.reviewer_dispatch_generation.as_deref()
+                    == Some(retry_generation.as_str());
+                if same_generation
+                    && record.reviewer_dispatch_attempts >= MAX_REVIEWER_DISPATCH_ATTEMPTS
+                {
+                    return Ok(record);
+                }
+                if !same_generation {
+                    record.reviewer_dispatch_attempts = 0;
+                }
+                record.reviewer_dispatch_attempts += 1;
+                record.reviewer_dispatch_generation = Some(retry_generation);
+                record.last_adapter_error = Some(format!("{reason_code}: {summary}"));
+                record.reviewer_dispatch_next_retry_at =
+                    reviewer_dispatch_retry_at(&request.now, record.reviewer_dispatch_attempts)?;
+                if record.reviewer_dispatch_attempts == 1 {
                     self.schedule_review_submission_failure_wake(
                         &record,
                         &reason_code,
@@ -285,6 +322,7 @@ impl CoreEngine {
                 record.dispatch_delivery_id = Some(dispatch_delivery_id);
                 record.phase = ReviewSubmissionPhase::ReviewerDispatched;
                 record.last_adapter_error = None;
+                record.reviewer_dispatch_next_retry_at = None;
             }
             ReviewSubmissionTransition::ReviewerRedispatchPending { reason_code } => {
                 require_review_phase(&record, ReviewSubmissionPhase::ReviewerDispatched)?;
@@ -299,6 +337,9 @@ impl CoreEngine {
                 record.phase = ReviewSubmissionPhase::ReviewerDispatchPending;
                 record.last_adapter_error =
                     Some(format!("reviewer_redispatch_pending: {reason_code}"));
+                record.reviewer_dispatch_attempts = 0;
+                record.reviewer_dispatch_generation = None;
+                record.reviewer_dispatch_next_retry_at = None;
             }
             ReviewSubmissionTransition::DenFinalizationPending {
                 result_digest,
@@ -381,6 +422,27 @@ impl CoreEngine {
                 record.terminal_reason = Some(terminal_reason);
                 record.phase = ReviewSubmissionPhase::ReviewTerminal;
                 record.last_adapter_error = None;
+            }
+            ReviewSubmissionTransition::DenTaskTerminal {
+                task_status,
+                terminal_reason,
+            } => {
+                if review_submission_terminal(record.phase) {
+                    return Ok(record);
+                }
+                if !matches!(task_status.as_str(), "done" | "cancelled")
+                    || terminal_reason.trim().is_empty()
+                {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "invalid terminal Den task reconciliation",
+                    ));
+                }
+                record.review_task_status = Some(task_status);
+                record.terminal_reason = Some(terminal_reason);
+                record.phase = ReviewSubmissionPhase::Superseded;
+                record.last_adapter_error = None;
+                record.reviewer_dispatch_next_retry_at = None;
             }
             ReviewSubmissionTransition::ReplyPending => {
                 require_review_phase(&record, ReviewSubmissionPhase::DenFinalized)?;
@@ -699,6 +761,28 @@ fn review_submission_terminal(phase: ReviewSubmissionPhase) -> bool {
             | ReviewSubmissionPhase::ReviewTerminal
             | ReviewSubmissionPhase::Superseded
     )
+}
+
+const MAX_REVIEWER_DISPATCH_ATTEMPTS: u32 = 6;
+
+fn reviewer_dispatch_retry_at(
+    now: &IsoTimestamp,
+    attempts: u32,
+) -> CoreResult<Option<IsoTimestamp>> {
+    if attempts >= MAX_REVIEWER_DISPATCH_ATTEMPTS {
+        return Ok(None);
+    }
+    let exponent = attempts.saturating_sub(1).min(4);
+    let delay_seconds = 30_i64 * (1_i64 << exponent);
+    (parse_rfc3339(now)? + Duration::seconds(delay_seconds))
+        .format(&Rfc3339)
+        .map(Some)
+        .map_err(|error| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                format!("format reviewer dispatch retry time: {error}"),
+            )
+        })
 }
 
 fn review_submission_id(

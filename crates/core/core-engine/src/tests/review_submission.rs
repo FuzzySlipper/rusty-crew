@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn repeated_adapter_failure_records_retry_time_and_revision() {
+fn repeated_unchanged_adapter_failure_is_a_durable_noop() {
     let engine = test_engine();
     let session = engine
         .create_session(session_config(
@@ -34,9 +34,92 @@ fn repeated_adapter_failure_records_retry_time_and_revision() {
         .unwrap();
 
     assert_eq!(retry.phase, ReviewSubmissionPhase::Submitted);
-    assert_eq!(retry.revision, first.revision + 1);
-    assert_eq!(retry.updated_at, "2026-08-08T09:01:00Z");
+    assert_eq!(retry.revision, first.revision);
+    assert_eq!(retry.updated_at, first.updated_at);
     assert_eq!(retry.last_adapter_error, first.last_adapter_error);
+}
+
+#[test]
+fn reviewer_dispatch_failures_exhaust_one_generation_and_route_change_rearms() {
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "review-bounded-retry-session",
+            "review-bounded-retry-agent",
+            "review-bounded-retry-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let mut record = begin(&engine, &session.session_id, 6841, 'b');
+    for transition in [
+        ReviewSubmissionTransition::DenHandoffRecorded {
+            review_round_id: 4475,
+        },
+        ReviewSubmissionTransition::GateRegistered { gate_id: 3237 },
+        ReviewSubmissionTransition::GateTerminal {
+            gate_status: "passed".to_string(),
+            terminal_reason: "checks_passed".to_string(),
+        },
+    ] {
+        record = engine
+            .transition_review_submission(ReviewSubmissionTransitionRequest {
+                submission_id: record.submission_id.clone(),
+                expected_revision: record.revision,
+                transition,
+                now: "2026-08-11T16:00:00Z".to_string(),
+            })
+            .unwrap();
+    }
+
+    for minute in 1..=6 {
+        record = engine
+            .transition_review_submission(ReviewSubmissionTransitionRequest {
+                submission_id: record.submission_id.clone(),
+                expected_revision: record.revision,
+                transition: ReviewSubmissionTransition::ReviewerDispatchFailed {
+                    reason_code: "agent_route_disabled".to_string(),
+                    summary: "reviewer route is disabled".to_string(),
+                    retry_generation: "route-4:binding-9".to_string(),
+                },
+                now: format!("2026-08-11T16:{minute:02}:00Z"),
+            })
+            .unwrap();
+    }
+    assert_eq!(record.reviewer_dispatch_attempts, 6);
+    assert_eq!(record.reviewer_dispatch_next_retry_at, None);
+    let exhausted_revision = record.revision;
+    let unchanged = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::ReviewerDispatchFailed {
+                reason_code: "agent_route_disabled".to_string(),
+                summary: "reviewer route is disabled".to_string(),
+                retry_generation: "route-4:binding-9".to_string(),
+            },
+            now: "2026-08-12T16:00:00Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(unchanged.revision, exhausted_revision);
+
+    let rearmed = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id,
+            expected_revision: unchanged.revision,
+            transition: ReviewSubmissionTransition::ReviewerDispatchFailed {
+                reason_code: "agent_route_disabled".to_string(),
+                summary: "replacement reviewer is not enabled yet".to_string(),
+                retry_generation: "route-5:binding-10".to_string(),
+            },
+            now: "2026-08-12T16:01:00Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(rearmed.reviewer_dispatch_attempts, 1);
+    assert_eq!(
+        rearmed.reviewer_dispatch_generation.as_deref(),
+        Some("route-5:binding-10")
+    );
+    assert!(rearmed.reviewer_dispatch_next_retry_at.is_some());
 }
 
 #[test]
@@ -648,7 +731,58 @@ fn postgres_review_submission_matches_restart_and_revision_contract() {
             SessionKind::Full,
         ))
         .unwrap();
-    let record = begin(&engine, &session.session_id, 6574, '4');
+    let mut record = begin(&engine, &session.session_id, 6574, '4');
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::DenHandoffRecorded {
+                review_round_id: 8_201,
+            },
+            now: "2026-08-02T00:01:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::GateRegistered { gate_id: 8_202 },
+            now: "2026-08-02T00:02:00Z".to_string(),
+        })
+        .unwrap();
+    engine
+        .consume_github_gate_terminal_event(GitHubGateTerminalEvent {
+            event_id: 8_203,
+            gate_id: 8_202,
+            project_id: ProjectId::new("rusty-crew"),
+            task_id: TaskId::new("6574"),
+            commit_sha: exact_sha('4'),
+            status: "passed".to_string(),
+            terminal_reason: "checks_passed".to_string(),
+            summary: None,
+            failure_summary: None,
+            completed_at: "2026-08-02T00:03:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .list_review_submissions(&ReviewSubmissionQuery {
+            submission_id: Some(record.submission_id.clone()),
+            ..ReviewSubmissionQuery::default()
+        })
+        .unwrap()
+        .remove(0);
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::ReviewerDispatchFailed {
+                reason_code: "route_disabled".to_string(),
+                summary: "Reviewer route is disabled.".to_string(),
+                retry_generation: "route-7:binding-0".to_string(),
+            },
+            now: "2026-08-02T00:04:00Z".to_string(),
+        })
+        .unwrap();
     drop(engine);
 
     let hydrated = CoreEngine::initialize(config).unwrap();
@@ -659,6 +793,15 @@ fn postgres_review_submission_matches_restart_and_revision_contract() {
         })
         .unwrap();
     assert_eq!(pending, vec![record]);
+    assert_eq!(pending[0].reviewer_dispatch_attempts, 1);
+    assert_eq!(
+        pending[0].reviewer_dispatch_generation.as_deref(),
+        Some("route-7:binding-0")
+    );
+    assert_eq!(
+        pending[0].reviewer_dispatch_next_retry_at.as_deref(),
+        Some("2026-08-02T00:04:30Z")
+    );
 }
 
 fn begin(

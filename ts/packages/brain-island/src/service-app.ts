@@ -422,7 +422,9 @@ import {
   parseExternalReviewRecoveryRequest,
   parseExternalReviewSubmissionRequest,
   recoverExternalReviewDispatch,
+  reconcileReviewSubmissionNow,
   reconcileReviewSubmissions,
+  reviewSubmissionRecoveryDiagnostics,
   ReviewSubmissionAdapterError,
   submitExternalReview,
   type ServiceReviewSubmissionContext,
@@ -1482,6 +1484,25 @@ async function handleHttpRequest(
     });
   }
 
+  if (url.pathname === "/v1/admin/diagnostics/review-submission-recovery") {
+    if ((request.method ?? "GET").toUpperCase() !== "GET") {
+      return failure(405, requestId(request), {
+        code: "method_not_allowed",
+        reason_code: "review_submission_recovery_method_not_allowed",
+        message: "review submission recovery diagnostics support GET only",
+        retryable: false,
+      });
+    }
+    assertExpectedDeploymentRole(
+      reviewSubmissionContext(state),
+      url.searchParams.get("expectedDeploymentRole") ?? undefined,
+    );
+    return successRoute(
+      requestId(request),
+      await reviewSubmissionRecoveryDiagnostics(reviewSubmissionContext(state)),
+    );
+  }
+
   if (route?.id === "admin.review_submissions.external") {
     const method = (request.method ?? "GET").toUpperCase();
     try {
@@ -1497,6 +1518,36 @@ async function handleHttpRequest(
           input,
         );
         return successRoute(requestId(request), receipt);
+      }
+      if (
+        method === "POST" &&
+        url.pathname.endsWith("/reconcile") &&
+        url.pathname.startsWith("/v1/admin/review-submissions/")
+      ) {
+        const encodedSubmissionId = url.pathname.slice(
+          "/v1/admin/review-submissions/".length,
+          -"/reconcile".length,
+        );
+        const submissionId = decodeURIComponent(encodedSubmissionId);
+        if (!submissionId) {
+          return failure(404, requestId(request), {
+            code: "not_found",
+            reason_code: "review_submission_not_found",
+            message: "A review submission id is required.",
+            retryable: false,
+          });
+        }
+        const input = parseExternalReviewRecoveryRequest(
+          await readJsonBody(request),
+        );
+        return successRoute(
+          requestId(request),
+          await reconcileReviewSubmissionNow(
+            reviewSubmissionContext(state),
+            submissionId,
+            input,
+          ),
+        );
       }
       if (
         method === "POST" &&
@@ -1559,7 +1610,7 @@ async function handleHttpRequest(
         code: "method_not_allowed",
         reason_code: "external_review_submission_method_not_allowed",
         message:
-          "External review submissions support POST collection, GET by submission id, and POST /{submissionId}/recover.",
+          "Review submissions support POST collection, GET by submission id, POST /{submissionId}/recover, and POST /{submissionId}/reconcile.",
         retryable: false,
       });
     } catch (error) {

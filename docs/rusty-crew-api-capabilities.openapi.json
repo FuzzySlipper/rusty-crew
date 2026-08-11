@@ -1597,6 +1597,24 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/diagnostics/review-submission-recovery": {
+      "get": {
+        "operationId": "reviewSubmissionsDiagnosticsRecovery",
+        "summary": "Read bounded pending, retry/backoff, terminal reconciliation, and suppressed-dispatch diagnostics.",
+        "tags": ["service", "diagnostics", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.submissions.diagnostics.recovery",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/diagnostics/review-submission-scope": {
       "get": {
         "operationId": "reviewSubmissionsDiagnosticsScope",
@@ -2624,6 +2642,32 @@
         "x-rusty-crew-auth": "admin",
         "x-rusty-crew-mutation": "read",
         "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/review-submissions/{submission_id}/reconcile": {
+      "post": {
+        "operationId": "reviewSubmissionsReconcile",
+        "summary": "Idempotently reconcile one submission against authoritative Den and its durable delivery state.",
+        "tags": ["service", "governance", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "submission_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.submissions.reconcile",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
         "x-rusty-crew-contract-detail": "capability"
       }
     },
@@ -6047,7 +6091,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 244,
+    "capability_count": 246,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

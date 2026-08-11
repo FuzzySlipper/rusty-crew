@@ -6178,6 +6178,24 @@ export const bridgeWireSchemaArtifact = {
           "reviewer": {
             "type": "string"
           },
+          "reviewerDispatchAttempts": {
+            "default": 0,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reviewerDispatchGeneration": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewerDispatchNextRetryAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "reviewerSessionId": {
             "type": [
               "string",
@@ -26084,6 +26102,24 @@ export const bridgeWireSchemaArtifact = {
         },
         "reviewer": {
           "type": "string"
+        },
+        "reviewerDispatchAttempts": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reviewerDispatchGeneration": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewerDispatchNextRetryAt": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reviewerSessionId": {
           "type": [
