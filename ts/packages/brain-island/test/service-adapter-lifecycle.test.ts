@@ -117,6 +117,19 @@ test("Telegram connector rejects malformed JSON envelopes without exposing input
   );
 });
 
+test("Telegram connector rejects array-shaped stored JSON without exposing input", () => {
+  const secret = '["must-not-appear"]';
+  assert.throws(
+    () => telegramBotTokenFromServiceCredentialSecret(secret),
+    (error: unknown) => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /secret envelope is invalid/u);
+      assert.doesNotMatch(error.message, /must-not-appear/u);
+      return true;
+    },
+  );
+});
+
 test("routed Telegram diplomat ingress delivers once without generic channel bindings", async () => {
   let connectorInput: TelegramConnectorFactoryInput | undefined;
   let deliveryCount = 0;
@@ -250,6 +263,33 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
     status: "completed",
     summary: "completed",
     observedEvents: [
+      {
+        type: "brain_event_observed",
+        sessionId: "session-1",
+        wakeId: "wake-1",
+        event: { type: "text_delta", text: "I will inspect it." },
+      },
+      {
+        type: "brain_event_observed",
+        sessionId: "session-1",
+        wakeId: "wake-1",
+        event: {
+          type: "tool_call_started",
+          toolName: "inspect_service",
+          argumentsJson: "{}",
+        },
+      },
+      {
+        type: "brain_event_observed",
+        sessionId: "session-1",
+        wakeId: "wake-1",
+        event: {
+          type: "tool_call_finished",
+          toolName: "inspect_service",
+          resultJson: "{}",
+          isError: false,
+        },
+      },
       {
         type: "brain_event_observed",
         sessionId: "session-1",

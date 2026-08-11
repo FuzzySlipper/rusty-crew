@@ -128,6 +128,82 @@ fn diplomat_binding_is_session_scoped_revisioned_and_restart_hydrated() {
 }
 
 #[test]
+fn shutdown_preserves_bound_diplomat_session_and_binding() {
+    let data_dir = unique_data_dir("install-diplomat-clean-restart");
+    let session_id;
+    {
+        let engine = test_engine_with_data_dir(data_dir.clone());
+        let session = engine
+            .create_session(session_config(
+                "diplomat-session",
+                "install-diplomat",
+                "diplomat-profile",
+                SessionKind::Full,
+            ))
+            .unwrap();
+        session_id = session.session_id.clone();
+        engine
+            .put_install_diplomat_binding(binding_write(
+                "diplomat-binding",
+                &session,
+                "-100500",
+                None,
+            ))
+            .unwrap();
+
+        let summary = engine.shutdown_with_timeout(25).unwrap();
+        assert_eq!(summary.archived_sessions, 0);
+    }
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    assert_ne!(
+        restarted.get_session(&session_id).unwrap().status,
+        SessionStatus::Archived
+    );
+    let binding = restarted
+        .get_install_diplomat_binding("diplomat-binding")
+        .unwrap()
+        .unwrap();
+    assert_eq!(binding.status, InstallDiplomatBindingStatus::Active);
+    assert_eq!(binding.revision, 1);
+    drop(restarted);
+    let _ = std::fs::remove_dir_all(data_dir);
+}
+
+#[test]
+fn reactivating_exact_diplomat_session_repairs_archive_degradation() {
+    let engine = test_engine();
+    let config = session_config(
+        "diplomat-session",
+        "install-diplomat",
+        "diplomat-profile",
+        SessionKind::Full,
+    );
+    let session = engine.create_session(config.clone()).unwrap();
+    engine
+        .put_install_diplomat_binding(binding_write("diplomat-binding", &session, "-100500", None))
+        .unwrap();
+
+    engine.archive_session(&session.session_id).unwrap();
+    assert_eq!(
+        engine
+            .get_install_diplomat_binding("diplomat-binding")
+            .unwrap()
+            .unwrap()
+            .status,
+        InstallDiplomatBindingStatus::NeedsRebind
+    );
+
+    engine.ensure_configured_session(config).unwrap();
+    let repaired = engine
+        .get_install_diplomat_binding("diplomat-binding")
+        .unwrap()
+        .unwrap();
+    assert_eq!(repaired.status, InstallDiplomatBindingStatus::Active);
+    assert_eq!(repaired.degraded_reason, None);
+}
+
+#[test]
 fn diplomat_ingress_preserves_sender_and_terminates_correlated_bot_loops() {
     let engine = test_engine();
     let diplomat = engine

@@ -754,12 +754,21 @@ function wakeReportWasCancelledOrFailed(
 export function assistantTextFromWakeReport(
   report: ServiceWakeDispatchReport,
 ): string | undefined {
-  const text = (report.observedEvents ?? [])
-    .flatMap((event) =>
-      event.type === "brain_event_observed" && event.event.type === "text_delta"
-        ? [event.event.text]
-        : [],
-    )
+  let finalSegment: string[] = [];
+  for (const event of report.observedEvents ?? []) {
+    if (event.type !== "brain_event_observed") continue;
+    if (
+      event.event.type === "tool_call_started" ||
+      event.event.type === "tool_call_finished"
+    ) {
+      finalSegment = [];
+      continue;
+    }
+    if (event.event.type === "text_delta") {
+      finalSegment.push(event.event.text);
+    }
+  }
+  const text = finalSegment
     .filter((part) => part.length > 0)
     .reduce((merged, part) => {
       if (!merged) return part;
@@ -803,7 +812,7 @@ export function telegramBotTokenFromServiceCredentialSecret(
   secret: string,
 ): string {
   const trimmed = secret.trim();
-  if (!trimmed.startsWith("{")) {
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
     return trimmed;
   }
 

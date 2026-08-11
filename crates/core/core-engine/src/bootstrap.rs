@@ -102,6 +102,7 @@ impl CoreEngine {
 
     pub fn shutdown_with_timeout(self, drain_timeout_ms: u32) -> CoreResult<ShutdownSummary> {
         let active_external_session_ids = self.active_external_session_ids()?;
+        let bound_diplomat_session_ids = self.bound_install_diplomat_session_ids()?;
         let active_sessions = self
             .sessions
             .all_sessions()?
@@ -109,6 +110,7 @@ impl CoreEngine {
             .filter(|session| {
                 session.status != SessionStatus::Archived
                     && !active_external_session_ids.contains(&session.session_id)
+                    && !bound_diplomat_session_ids.contains(&session.session_id)
             })
             .collect::<Vec<_>>();
         let archived_sessions = active_sessions.len() as u32;

@@ -34,7 +34,7 @@ import type {
 export interface ServiceWakeDispatchReport {
   sessionId: SessionId;
   wakeId?: string;
-  status: "completed" | "continuing" | "skipped" | "failed";
+  status: "completed" | "continuing" | "skipped" | "failed" | "cancelled";
   summary: string;
   reasonCode?: string;
   completionPacket?: CompletionPacket;
@@ -324,25 +324,35 @@ export async function dispatchWake(
       }
     }
     const accepted = observed.accepted;
-    const completionPacket = wakeCompletionPacket(observed.events);
+    const lifecycleDisposition = wakeLifecycleDisposition(observed.events);
+    const completionPacket =
+      lifecycleDisposition?.status === "cancelled" ||
+      lifecycleDisposition?.status === "failed"
+        ? undefined
+        : wakeCompletionPacket(observed.events);
     const completionSummary = wakeCompletionSummary(observed.events);
     const continuing = accepted.outcome === "continuing";
     const report: ServiceWakeDispatchReport = {
       sessionId,
       wakeId,
-      status: accepted.accepted
-        ? continuing
-          ? "continuing"
-          : "completed"
-        : "failed",
+      status:
+        lifecycleDisposition?.status ??
+        (accepted.accepted
+          ? continuing
+            ? "continuing"
+            : "completed"
+          : "failed"),
       summary:
+        lifecycleDisposition?.summary ??
         completionSummary ??
         (accepted.accepted
           ? continuing
             ? `wake ${wakeId} yielded and will continue for ${session.agentId}`
             : `wake ${wakeId} completed for ${session.agentId}`
           : `wake ${wakeId} was rejected for ${session.agentId}`),
-      reasonCode: accepted.accepted ? undefined : "wake_rejected",
+      reasonCode:
+        lifecycleDisposition?.reasonCode ??
+        (accepted.accepted ? undefined : "wake_rejected"),
       completionPacket,
       observedEvents: observed.events,
     };
@@ -356,11 +366,35 @@ export async function dispatchWake(
           summary: completionSummary ?? report.summary,
         },
       );
+    } else if (appendChatEvents && report.status === "cancelled") {
+      await ensureChatWakeTerminalEventsFromChatLog(context, session, wakeId, {
+        status: "cancelled",
+        summary: report.summary,
+        reasonCode: report.reasonCode,
+        source: "logical_turn_cancelled",
+        requireCompletion: false,
+      });
+    } else if (appendChatEvents && report.status === "failed") {
+      await ensureChatWakeTerminalEventsFromChatLog(context, session, wakeId, {
+        status: "failed",
+        summary: report.summary,
+        reasonCode: report.reasonCode,
+        source: "logical_turn_failed",
+        allowWithoutAssistantTurn: true,
+      });
     }
     context.recordEvent({
       source: "service-host",
-      eventType: "brain_wake_dispatched",
-      severity: accepted.accepted ? undefined : "error",
+      eventType:
+        report.status === "cancelled"
+          ? "brain_wake_cancelled"
+          : "brain_wake_dispatched",
+      severity:
+        report.status === "failed"
+          ? "error"
+          : report.status === "cancelled"
+            ? "warning"
+            : undefined,
       summary: `${report.summary} (${source}).`,
     });
     if (report.status === "completed") {
@@ -569,7 +603,9 @@ function runtimeDispatchFinish(
     status:
       report.status === "completed" || report.status === "continuing"
         ? "completed"
-        : "failed",
+        : report.status === "cancelled"
+          ? "cancelled"
+          : "failed",
     phase: report.status,
     reasonCode: report.reasonCode,
     summary: `wake dispatch ${report.status}`,
@@ -1247,7 +1283,7 @@ async function ensureChatWakeTerminalEventsFromChatLog(
   session: SessionState,
   wakeId: string,
   input: {
-    status: "completed" | "failed";
+    status: "completed" | "failed" | "cancelled";
     summary?: string;
     reasonCode?: string;
     source: string;
@@ -1468,6 +1504,36 @@ function wakeCompletionSummary(
     ),
   ).trim();
   return text ? truncate(text, 480) : undefined;
+}
+
+export function wakeLifecycleDisposition(
+  events: readonly CoreEvent[],
+):
+  | { status: "cancelled" | "failed"; summary: string; reasonCode: string }
+  | undefined {
+  let disposition:
+    | { status: "cancelled" | "failed"; summary: string; reasonCode: string }
+    | undefined;
+  for (const event of events) {
+    if (event.type !== "logical_turn_lifecycle_observed") continue;
+    if (
+      event.lifecycle.kind === "cancel_requested" ||
+      event.lifecycle.kind === "cancelled"
+    ) {
+      disposition = {
+        status: "cancelled",
+        summary: event.lifecycle.summary,
+        reasonCode: event.lifecycle.reasonCode,
+      };
+    } else if (event.lifecycle.kind === "failed") {
+      disposition = {
+        status: "failed",
+        summary: event.lifecycle.summary,
+        reasonCode: event.lifecycle.reasonCode,
+      };
+    }
+  }
+  return disposition;
 }
 
 function wakeCompletionPacket(

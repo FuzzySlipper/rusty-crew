@@ -92,7 +92,13 @@ import type {
 } from "./rusty-view-chat-api.js";
 
 export interface RustyViewChatWakeReport {
-  status: "completed" | "continuing" | "rejected" | "skipped" | "failed";
+  status:
+    | "completed"
+    | "continuing"
+    | "rejected"
+    | "skipped"
+    | "failed"
+    | "cancelled";
   wakeId?: string;
   summary: string;
   reasonCode?: string;

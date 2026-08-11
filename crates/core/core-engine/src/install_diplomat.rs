@@ -15,6 +15,21 @@ const DEFAULT_TELEGRAM_INTERACTION_MINUTES: i64 = 5;
 const DEFAULT_TELEGRAM_PAIR_MESSAGES_PER_MINUTE: usize = 8;
 
 impl CoreEngine {
+    pub(crate) fn bound_install_diplomat_session_ids(&self) -> CoreResult<HashSet<SessionId>> {
+        Ok(self
+            .store
+            .list_install_diplomat_bindings(&InstallDiplomatBindingQuery::default())?
+            .into_iter()
+            .filter(|record| {
+                matches!(
+                    record.status,
+                    InstallDiplomatBindingStatus::Active | InstallDiplomatBindingStatus::Paused
+                )
+            })
+            .map(|record| record.session_id)
+            .collect())
+    }
+
     pub fn put_install_diplomat_binding(
         &self,
         write: InstallDiplomatBindingWrite,
@@ -331,6 +346,36 @@ impl CoreEngine {
             record.revision += 1;
             record.status = InstallDiplomatBindingStatus::NeedsRebind;
             record.degraded_reason = Some("diplomat_session_archived".to_string());
+            record.updated_at = now.to_string();
+            self.store
+                .update_install_diplomat_binding(&record, expected_revision)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn reconcile_install_diplomat_bindings_for_session(
+        &self,
+        session: &SessionState,
+        now: &str,
+    ) -> CoreResult<()> {
+        if session.kind != SessionKind::Full || session.status == SessionStatus::Archived {
+            return Ok(());
+        }
+        let records = self
+            .store
+            .list_install_diplomat_bindings(&InstallDiplomatBindingQuery {
+                session_id: Some(session.session_id.clone()),
+                ..InstallDiplomatBindingQuery::default()
+            })?;
+        for mut record in records.into_iter().filter(|record| {
+            record.status == InstallDiplomatBindingStatus::NeedsRebind
+                && record.degraded_reason.as_deref() == Some("diplomat_session_archived")
+                && record.agent_id == session.agent_id
+        }) {
+            let expected_revision = record.revision;
+            record.revision += 1;
+            record.status = InstallDiplomatBindingStatus::Active;
+            record.degraded_reason = None;
             record.updated_at = now.to_string();
             self.store
                 .update_install_diplomat_binding(&record, expected_revision)?;

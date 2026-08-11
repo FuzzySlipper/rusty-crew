@@ -5,8 +5,179 @@ import type { CoreEvent, SessionState } from "@rusty-crew/contracts";
 
 import {
   appendCoreEventsToChatLog,
+  dispatchWake,
   type ServiceWakeDispatchContext,
+  wakeLifecycleDisposition,
 } from "../src/service-wake-dispatch.js";
+
+test("cancelled logical turn overrides accumulated assistant text", () => {
+  const events = [
+    {
+      type: "brain_event_observed",
+      sessionId: "session-1",
+      wakeId: "wake-1",
+      event: { type: "text_delta", text: "partial answer" },
+    },
+    {
+      type: "logical_turn_lifecycle_observed",
+      lifecycle: {
+        kind: "cancel_requested",
+        summary: "operator requested cancellation",
+        reasonCode: "operator_cancel_requested",
+      },
+    },
+    {
+      type: "logical_turn_lifecycle_observed",
+      lifecycle: {
+        kind: "cancelled",
+        summary: "operator cancelled the turn",
+        reasonCode: "operator_cancelled",
+      },
+    },
+  ] as unknown as CoreEvent[];
+
+  assert.deepEqual(wakeLifecycleDisposition(events), {
+    status: "cancelled",
+    summary: "operator cancelled the turn",
+    reasonCode: "operator_cancelled",
+  });
+});
+
+test("dispatch preserves cancellation without a completed terminal fallback", async () => {
+  const session = {
+    sessionId: "session-1",
+    agentId: "agent-1",
+    profileId: "profile-1",
+    status: "idle",
+    resourceLimits: {},
+  } as unknown as SessionState;
+  const coreEvents = [
+    {
+      type: "brain_event_observed",
+      sessionId: session.sessionId,
+      wakeId: "wake-1",
+      event: { type: "started" },
+    },
+    {
+      type: "brain_event_observed",
+      sessionId: session.sessionId,
+      wakeId: "wake-1",
+      event: { type: "text_delta", text: "partial answer" },
+    },
+    {
+      type: "logical_turn_lifecycle_observed",
+      lifecycle: {
+        sessionId: session.sessionId,
+        wakeId: "wake-1",
+        kind: "cancelled",
+        summary: "operator cancelled the turn",
+        reasonCode: "operator_cancelled",
+      },
+    },
+  ] as unknown as CoreEvent[];
+  let drained = false;
+  const chatEvents: Array<{ kind: string; payload: unknown }> = [];
+  const settled: Array<{ status: string }> = [];
+  const finished: Array<{ status: string }> = [];
+  let postTurnCount = 0;
+  const context = {
+    bridge: {
+      listSessions: async () => [session],
+      beginRuntimeActivity: async () => undefined,
+      finishRuntimeActivity: async (input: { status: string }) => {
+        finished.push(input);
+      },
+      settleRuntimeActivityWake: async (input: { status: string }) => {
+        settled.push(input);
+      },
+      buildBrainWakeRequestForSession: async () => ({}),
+      wakeBrain: async () => ({ accepted: true, outcome: "completed" }),
+      subscribeEvents: async () => ({ subscriptionId: "subscription-1" }),
+      drainSubscriptionEvents: async () => {
+        if (drained) return [];
+        drained = true;
+        return coreEvents;
+      },
+      unsubscribeEvents: async () => undefined,
+      readChatSession: async () => {
+        throw new Error("readback intentionally unavailable in focused test");
+      },
+    },
+    inFlightWakes: new Set(),
+    deferredWakeSessions: new Set(),
+    toolCallDebugStore: {},
+    brainForProfile: () => ({}),
+    configuredSessionForRuntimeSession: () => undefined,
+    loadProfileContext: async () => ({
+      profile: {
+        profileId: "profile-1",
+        displayName: "Cancellation Test",
+        modelConfig: { provider: "openai", modelName: "test" },
+        prompt: { system: "test", instructions: [] },
+      },
+      skills: [],
+      toolSelection: {
+        inventory: {
+          selectedTools: [],
+          selectedBindings: [],
+          selectedDescriptors: [],
+          items: [],
+        },
+        toolProfile: { tools: [] },
+      },
+    }),
+    nextWakeId: () => "wake-1",
+    prepareContextStrategy: async () => ({ additionalInstructions: [] }),
+    roleplayPromptContextForSession: async () => undefined,
+    appendChatEvent: async (
+      _sessionId: string,
+      event: { kind: string; payload: unknown },
+    ) => {
+      chatEvents.push(event);
+      return event;
+    },
+    listChatEventsAfterCursor: async () => chatEvents,
+    publishWakeToolActivity: async () => undefined,
+    runPostTurnMaintenance: async () => {
+      postTurnCount += 1;
+    },
+    persistSessionActivityDigest: async () => undefined,
+    runtimePauseForSession: () => undefined,
+    deferRuntimeActivitySettlement: () => undefined,
+    recordEvent: () => undefined,
+    now: () => "2026-08-11T00:00:00Z",
+  } as unknown as ServiceWakeDispatchContext;
+
+  const report = await dispatchWake(
+    context,
+    { type: "brain_wake_requested", sessionId: session.sessionId },
+    "chat",
+  );
+
+  assert.equal(report.status, "cancelled");
+  assert.equal(report.reasonCode, "operator_cancelled");
+  assert.equal(report.completionPacket, undefined);
+  assert.deepEqual(
+    settled.map((item) => item.status),
+    ["cancelled"],
+  );
+  assert.deepEqual(
+    finished.map((item) => item.status),
+    ["cancelled"],
+  );
+  assert.equal(postTurnCount, 0);
+  assert.equal(
+    chatEvents.some((event) => event.kind === "assistant_message_completed"),
+    false,
+  );
+  const terminal = chatEvents.find(
+    (event) => event.kind === "assistant_turn_finished",
+  );
+  assert.equal(
+    (terminal?.payload as { status?: string } | undefined)?.status,
+    "cancelled",
+  );
+});
 
 test("chat terminal events keep completion before turn finished", async () => {
   const appended: Array<{ kind: string; payload: unknown }> = [];

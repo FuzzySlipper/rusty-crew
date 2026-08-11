@@ -65,6 +65,7 @@ impl CoreEngine {
                     self.sessions.apply_config(&config)?;
                     let state = self.sessions.reactivate_session(&config.session_id, now)?;
                     save_engine_session(&self.store, &state)?;
+                    self.reconcile_install_diplomat_bindings_for_session(&state, &self.now())?;
                     self.publish_session_execution(&config.session_id)?;
                     return Ok(state);
                 }
