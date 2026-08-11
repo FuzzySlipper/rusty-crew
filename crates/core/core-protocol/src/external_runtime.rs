@@ -973,6 +973,29 @@ pub struct ExternalTurnCorrelation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalTurnPageCursor {
+    pub created_at: IsoTimestamp,
+    pub request_id: ExternalTurnRequestId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalTurnPageQuery {
+    pub runtime_id: ExternalRuntimeId,
+    pub native_thread_id: String,
+    pub before: Option<ExternalTurnPageCursor>,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalTurnPage {
+    pub items: Vec<ExternalTurnCorrelation>,
+    pub has_more_before: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(
     rename_all = "snake_case",
     rename_all_fields = "camelCase",

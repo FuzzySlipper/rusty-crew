@@ -117,6 +117,7 @@ struct ControllerInteractionResolution {
 struct RuntimeEventQuery {
     runtime_id: ExternalRuntimeId,
     native_thread_id: Option<String>,
+    native_turn_id: Option<String>,
     after_sequence: u64,
     limit: u32,
     #[serde(default)]
@@ -458,6 +459,19 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn query_external_turn_page_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<rusty_crew_core_protocol::ExternalTurnPageQuery>(&input_json)?;
+        serialize_json(
+            &self
+                .bridge()?
+                .engine()
+                .map_err(to_napi_error)?
+                .query_external_turn_page(&input)
+                .map_err(to_napi_error)?,
+        )
+    }
+
+    #[napi]
     pub fn list_active_external_turns_json(&self) -> napi::Result<String> {
         serialize_json(
             &self
@@ -613,7 +627,16 @@ impl NativeBridgeBinding {
         let input = parse_json::<RuntimeEventQuery>(&input_json)?;
         let bridge = self.bridge()?;
         let engine = bridge.engine().map_err(to_napi_error)?;
-        let events = if let Some(native_thread_id) = input.native_thread_id.as_deref() {
+        let events = if let Some(native_turn_id) = input.native_turn_id.as_deref() {
+            engine
+                .query_external_runtime_turn_events(
+                    &input.runtime_id,
+                    native_turn_id,
+                    input.after_sequence,
+                    input.limit,
+                )
+                .map_err(to_napi_error)?
+        } else if let Some(native_thread_id) = input.native_thread_id.as_deref() {
             engine
                 .query_external_runtime_thread_events(
                     &input.runtime_id,

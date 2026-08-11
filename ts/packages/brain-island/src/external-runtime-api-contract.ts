@@ -6,7 +6,25 @@ import type {
   ExternalRuntimeRegistration,
 } from "@rusty-crew/contracts";
 
-export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.18.0";
+export const EXTERNAL_RUNTIME_API_CONTRACT_VERSION = "0.19.0";
+
+export const EXTERNAL_THREAD_READ_API_REASON_CODES = [
+  "external_thread_cursor_invalid",
+  "external_thread_cursor_stale",
+  "external_thread_cursor_out_of_range",
+  "external_thread_listing_limit_exceeded",
+] as const;
+
+export const EXTERNAL_THREAD_LIFECYCLE_API_REASON_CODES = [
+  "external_thread_not_found",
+  "external_thread_active",
+  "external_thread_interaction_pending",
+  "external_thread_context_unavailable",
+  "external_thread_listing_limit_exceeded",
+  "external_thread_binding_reconciliation_failed",
+  "external_thread_crew_session_reconciliation_failed",
+  "external_thread_native_delete_failed",
+] as const;
 
 export const EXTERNAL_BINDING_PROFILE_REFRESH_API_REASON_CODES = [
   "external_binding_profile_refresh_invalid_request",
@@ -103,6 +121,8 @@ export interface ExternalThreadItemProjection {
   readonly summary?: readonly string[];
   readonly messagePhase?: ExternalAgentMessagePhase;
   readonly inputImages?: readonly ExternalInputImageReference[];
+  readonly detailHandle?: string;
+  readonly truncated?: boolean;
 }
 
 export interface ExternalInputImageReference {
@@ -129,6 +149,7 @@ export interface ExternalThreadTurnProjection {
   readonly completedAt: number | null;
   readonly durationMs: number | null;
   readonly items: readonly ExternalThreadItemProjection[];
+  readonly itemsTruncated?: boolean;
 }
 
 export interface ExternalThreadTurnErrorProjection {
@@ -170,6 +191,15 @@ export interface ExternalThreadPage {
 
 export interface ExternalThreadReadResult {
   readonly thread: ExternalThreadProjection;
+  readonly turnPage: ExternalThreadTurnPage;
+}
+
+export interface ExternalThreadTurnPage {
+  readonly limit: number;
+  readonly hasMoreBefore: boolean;
+  readonly beforeCursor: string | null;
+  readonly pageStartCursor: string | null;
+  readonly pageEndCursor: string | null;
 }
 
 export interface ExternalThreadLifecycleBindingTransition {
@@ -179,6 +209,12 @@ export interface ExternalThreadLifecycleBindingTransition {
   readonly revision: number;
 }
 
+export interface ExternalThreadLifecycleSessionTransition {
+  readonly sessionId: string;
+  readonly previousStatus: string;
+  readonly currentStatus: string;
+}
+
 export interface ExternalThreadLifecycleReceipt {
   readonly runtimeId: string;
   readonly threadId: string;
@@ -186,6 +222,7 @@ export interface ExternalThreadLifecycleReceipt {
   readonly outcome: "applied" | "already_archived" | "already_active";
   readonly nativeArchived: boolean;
   readonly bindings: readonly ExternalThreadLifecycleBindingTransition[];
+  readonly crewSessions: readonly ExternalThreadLifecycleSessionTransition[];
 }
 
 export interface ExternalThreadDeleteReceipt {
@@ -466,6 +503,8 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_RUNTIME_API_PATHS.threadRead,
     "ExternalThreadReadResult",
     "ExternalThreadReadRequest",
+    undefined,
+    EXTERNAL_THREAD_READ_API_REASON_CODES,
   ),
   operation(
     "external.runtimes.threads.archive",
@@ -473,6 +512,9 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     "post",
     EXTERNAL_RUNTIME_API_PATHS.threadArchive,
     "ExternalThreadLifecycleReceipt",
+    undefined,
+    undefined,
+    EXTERNAL_THREAD_LIFECYCLE_API_REASON_CODES,
   ),
   operation(
     "external.runtimes.threads.delete",
@@ -480,6 +522,9 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     "post",
     EXTERNAL_RUNTIME_API_PATHS.threadDelete,
     "ExternalThreadDeleteReceipt",
+    undefined,
+    undefined,
+    EXTERNAL_THREAD_LIFECYCLE_API_REASON_CODES,
   ),
   operation(
     "external.runtimes.threads.unarchive",
@@ -487,6 +532,9 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     "post",
     EXTERNAL_RUNTIME_API_PATHS.threadUnarchive,
     "ExternalThreadLifecycleReceipt",
+    undefined,
+    undefined,
+    EXTERNAL_THREAD_LIFECYCLE_API_REASON_CODES,
   ),
   operation(
     "external.runtimes.events.list",
@@ -1809,7 +1857,19 @@ function routeSchemas(): Record<string, JsonSchema> {
       required: ["threadId"],
       properties: {
         threadId: { type: "string", minLength: 1 },
-        includeTurns: { type: "boolean", default: true },
+        includeTurns: {
+          type: "boolean",
+          default: true,
+          description:
+            "When true, returns one bounded turn page. It never requests the complete native transcript.",
+        },
+        limit: {
+          type: "integer",
+          minimum: 1,
+          maximum: 100,
+          default: 50,
+        },
+        beforeCursor: { type: "string", minLength: 1, maxLength: 2048 },
       },
       additionalProperties: false,
     },
@@ -1830,6 +1890,8 @@ function routeSchemas(): Record<string, JsonSchema> {
           type: "array",
           items: { $ref: "#/components/schemas/ExternalInputImageReference" },
         },
+        detailHandle: { type: "string" },
+        truncated: { type: "boolean" },
       },
       additionalProperties: false,
     },
@@ -1887,6 +1949,7 @@ function routeSchemas(): Record<string, JsonSchema> {
           type: "array",
           items: { $ref: "#/components/schemas/ExternalThreadItemProjection" },
         },
+        itemsTruncated: { type: "boolean" },
       },
       additionalProperties: false,
     },
@@ -1976,9 +2039,28 @@ function routeSchemas(): Record<string, JsonSchema> {
     },
     ExternalThreadReadResult: {
       type: "object",
-      required: ["thread"],
+      required: ["thread", "turnPage"],
       properties: {
         thread: { $ref: "#/components/schemas/ExternalThreadProjection" },
+        turnPage: { $ref: "#/components/schemas/ExternalThreadTurnPage" },
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadTurnPage: {
+      type: "object",
+      required: [
+        "limit",
+        "hasMoreBefore",
+        "beforeCursor",
+        "pageStartCursor",
+        "pageEndCursor",
+      ],
+      properties: {
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        hasMoreBefore: { type: "boolean" },
+        beforeCursor: nullableString,
+        pageStartCursor: nullableString,
+        pageEndCursor: nullableString,
       },
       additionalProperties: false,
     },
@@ -2002,6 +2084,7 @@ function routeSchemas(): Record<string, JsonSchema> {
         "outcome",
         "nativeArchived",
         "bindings",
+        "crewSessions",
       ],
       properties: {
         runtimeId: { type: "string" },
@@ -2018,6 +2101,22 @@ function routeSchemas(): Record<string, JsonSchema> {
             $ref: "#/components/schemas/ExternalThreadLifecycleBindingTransition",
           },
         },
+        crewSessions: {
+          type: "array",
+          items: {
+            $ref: "#/components/schemas/ExternalThreadLifecycleSessionTransition",
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    ExternalThreadLifecycleSessionTransition: {
+      type: "object",
+      required: ["sessionId", "previousStatus", "currentStatus"],
+      properties: {
+        sessionId: { type: "string" },
+        previousStatus: { type: "string" },
+        currentStatus: { type: "string" },
       },
       additionalProperties: false,
     },

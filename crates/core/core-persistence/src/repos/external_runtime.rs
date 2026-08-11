@@ -244,6 +244,20 @@ pub(crate) fn migrate_v71_add_external_runtime_thread_cursor(
     .map_err(|error| persistence_error("apply schema migration 71", error))
 }
 
+pub(crate) fn migrate_v73_add_external_turn_creation_cursor(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "ALTER TABLE external_turns ADD COLUMN created_at TEXT;
+         UPDATE external_turns
+            SET created_at = json_extract(record_json, '$.request.createdAt')
+          WHERE created_at IS NULL;
+         CREATE INDEX external_turns_creation_cursor_idx
+            ON external_turns(runtime_id, native_thread_id, created_at, request_id);",
+    )
+    .map_err(|error| persistence_error("add external turn creation cursor", error))
+}
+
 pub(crate) fn compact_terminal_external_runtime_events_in_tx(
     tx: &rusqlite::Transaction<'_>,
     cutoff: &IsoTimestamp,
@@ -1414,8 +1428,8 @@ impl CoordinationStore {
         tx.execute(
             "INSERT INTO external_turns
                 (request_id, idempotency_key, runtime_id, binding_id, session_id,
-                 native_thread_id, native_turn_id, phase, revision, updated_at, record_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 native_thread_id, native_turn_id, phase, revision, created_at, updated_at, record_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 record.request.request_id.0,
                 record.request.idempotency_key,
@@ -1426,6 +1440,7 @@ impl CoordinationStore {
                 record.native_turn_id,
                 enum_json(&record.phase)?,
                 record.revision as i64,
+                record.request.created_at,
                 record.updated_at,
                 to_json_text(record)?,
             ],
@@ -1486,8 +1501,8 @@ impl CoordinationStore {
         tx.execute(
             "INSERT INTO external_turns
                 (request_id, idempotency_key, runtime_id, binding_id, session_id,
-                 native_thread_id, native_turn_id, phase, revision, updated_at, record_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                 native_thread_id, native_turn_id, phase, revision, created_at, updated_at, record_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 record.request.request_id.0,
                 record.request.idempotency_key,
@@ -1498,6 +1513,7 @@ impl CoordinationStore {
                 record.native_turn_id,
                 enum_json(&record.phase)?,
                 record.revision as i64,
+                record.request.created_at,
                 record.updated_at,
                 to_json_text(record)?,
             ],
@@ -1605,6 +1621,51 @@ impl CoordinationStore {
             params![runtime_id.0.as_str(), native_thread_id],
             "list external turns for native thread",
         )
+    }
+
+    pub fn query_external_turn_page(
+        &self,
+        query: &rusty_crew_core_protocol::ExternalTurnPageQuery,
+    ) -> CoreResult<rusty_crew_core_protocol::ExternalTurnPage> {
+        let limit = query.limit.clamp(1, 100);
+        let conn = self.conn()?;
+        let mut items = if let Some(before) = query.before.as_ref() {
+            load_json_list(
+                &conn,
+                "SELECT record_json FROM external_turns
+                 WHERE runtime_id = ?1 AND native_thread_id = ?2
+                   AND (created_at < ?3 OR (created_at = ?3 AND request_id < ?4))
+                 ORDER BY created_at DESC, request_id DESC LIMIT ?5",
+                params![
+                    query.runtime_id.0,
+                    query.native_thread_id,
+                    before.created_at,
+                    before.request_id.0,
+                    i64::from(limit + 1)
+                ],
+                "query external turn page",
+            )?
+        } else {
+            load_json_list(
+                &conn,
+                "SELECT record_json FROM external_turns
+                 WHERE runtime_id = ?1 AND native_thread_id = ?2
+                 ORDER BY created_at DESC, request_id DESC LIMIT ?3",
+                params![
+                    query.runtime_id.0,
+                    query.native_thread_id,
+                    i64::from(limit + 1)
+                ],
+                "query external turn page",
+            )?
+        };
+        let has_more_before = items.len() > limit as usize;
+        items.truncate(limit as usize);
+        items.reverse();
+        Ok(rusty_crew_core_protocol::ExternalTurnPage {
+            items,
+            has_more_before,
+        })
     }
 
     pub fn list_nonterminal_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
@@ -2020,6 +2081,30 @@ impl CoordinationStore {
                 limit.clamp(1, 1_000)
             ],
             "query external runtime thread events",
+        )
+    }
+
+    pub fn query_external_runtime_turn_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_turn_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        let conn = self.conn()?;
+        load_json_list(
+            &conn,
+            "SELECT record_json FROM external_runtime_events
+             WHERE runtime_id = ?1 AND native_turn_id = ?2 AND sequence_id > ?3
+               AND kind IN ('item_lifecycle', 'turn_lifecycle', 'external_turn_steer_intent', 'external_turn_steer_input')
+             ORDER BY sequence_id LIMIT ?4",
+            params![
+                runtime_id.0,
+                native_turn_id,
+                after_sequence as i64,
+                limit.clamp(1, 512)
+            ],
+            "query external runtime turn events",
         )
     }
 
@@ -2550,7 +2635,89 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn sqlite_external_turn_pages_remain_bounded_and_stable_at_ten_thousand_turns() {
+        let path = temp_db_path("turn-page-10k");
+        let store = CoordinationStore::open_file(&path).unwrap();
+        store
+            .save_session(&session("agent-a", "session-a"))
+            .unwrap();
+        store
+            .put_external_runtime_registration(&runtime(), None)
+            .unwrap();
+        store.put_external_agent_binding(&binding(), None).unwrap();
+
+        let mut conn = store.conn().unwrap();
+        let tx = conn.transaction().unwrap();
+        for index in 0..10_000_u32 {
+            let mut record = turn();
+            record.request.request_id = ExternalTurnRequestId::new(format!("request-{index:05}"));
+            record.request.idempotency_key = format!("idempotency-{index:05}");
+            record.request.created_at = "2026-07-10T00:00:00Z".into();
+            record.native_turn_id = Some(format!("native-turn-{index:05}"));
+            tx.execute(
+                "INSERT INTO external_turns
+                    (request_id, idempotency_key, runtime_id, binding_id, session_id,
+                     native_thread_id, native_turn_id, phase, revision, created_at, updated_at, record_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    record.request.request_id.0,
+                    record.request.idempotency_key,
+                    record.runtime_id.0,
+                    record.request.binding_id.0,
+                    record.request.session_id.0,
+                    record.native_thread_id,
+                    record.native_turn_id,
+                    enum_json(&record.phase).unwrap(),
+                    record.revision as i64,
+                    record.request.created_at,
+                    record.updated_at,
+                    to_json_text(&record).unwrap(),
+                ],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        drop(conn);
+
+        let started = Instant::now();
+        let recent = store
+            .query_external_turn_page(&rusty_crew_core_protocol::ExternalTurnPageQuery {
+                runtime_id: ExternalRuntimeId::new("codex-local"),
+                native_thread_id: "native-thread-a".into(),
+                before: None,
+                limit: 50,
+            })
+            .unwrap();
+        let elapsed = started.elapsed();
+        assert_eq!(recent.items.len(), 50);
+        assert!(recent.has_more_before);
+        assert_eq!(recent.items[0].request.request_id.0, "request-09950");
+        assert_eq!(recent.items[49].request.request_id.0, "request-09999");
+        assert!(serde_json::to_vec(&recent).unwrap().len() < 256 * 1024);
+        assert!(elapsed.as_millis() < 250, "10k page query took {elapsed:?}");
+
+        let before = rusty_crew_core_protocol::ExternalTurnPageCursor {
+            created_at: recent.items[0].request.created_at.clone(),
+            request_id: recent.items[0].request.request_id.clone(),
+        };
+        let older = store
+            .query_external_turn_page(&rusty_crew_core_protocol::ExternalTurnPageQuery {
+                runtime_id: ExternalRuntimeId::new("codex-local"),
+                native_thread_id: "native-thread-a".into(),
+                before: Some(before),
+                limit: 50,
+            })
+            .unwrap();
+        assert_eq!(older.items[0].request.request_id.0, "request-09900");
+        assert_eq!(older.items[49].request.request_id.0, "request-09949");
+        assert!(older.items.iter().all(|item| !recent.items.contains(item)));
+
+        drop(store);
+        let _ = fs::remove_file(path);
+    }
 
     #[test]
     fn sqlite_external_runtime_lease_turn_and_restart_contract() {

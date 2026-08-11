@@ -4,6 +4,7 @@ import type { NativeBridgeModule } from "./public-api.js";
 type ExternalRuntimeTurnMethodName =
   | "getExternalTurn"
   | "listExternalTurnsForNativeThread"
+  | "queryExternalTurnPage"
   | "listActiveExternalTurns"
   | "expireExternalTurnDispatches"
   | "transitionExternalTurn";
@@ -26,6 +27,10 @@ export function createNativeBridgeExternalRuntimeTurnMethods(
       ) as Awaited<
         ReturnType<NativeBridgeModule["listExternalTurnsForNativeThread"]>
       >,
+    queryExternalTurnPage: async (input) =>
+      JSON.parse(
+        binding.queryExternalTurnPageJson(JSON.stringify(input)),
+      ) as Awaited<ReturnType<NativeBridgeModule["queryExternalTurnPage"]>>,
     listActiveExternalTurns: async () =>
       JSON.parse(binding.listActiveExternalTurnsJson()) as Awaited<
         ReturnType<NativeBridgeModule["listActiveExternalTurns"]>

@@ -640,15 +640,6 @@ impl CoreEngine {
         self.store.get_external_turn(request_id)
     }
 
-    pub fn list_external_turns_for_native_thread(
-        &self,
-        runtime_id: &ExternalRuntimeId,
-        native_thread_id: &str,
-    ) -> CoreResult<Vec<ExternalTurnCorrelation>> {
-        self.store
-            .list_external_turns_for_native_thread(runtime_id, native_thread_id)
-    }
-
     pub fn list_active_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
         self.store.list_nonterminal_external_turns()
     }
@@ -730,7 +721,17 @@ impl CoreEngine {
                 ),
             ));
         }
-        if binding.status != ExternalBindingStatus::Active {
+        let is_archived_replacement_retry = request.kind
+            == ExternalControlKind::ExecuteThreadCommand
+            && binding.status == ExternalBindingStatus::Archived
+            && matches!(
+                request
+                    .payload
+                    .get("command")
+                    .and_then(serde_json::Value::as_str),
+                Some("new" | "restart")
+            );
+        if binding.status != ExternalBindingStatus::Active && !is_archived_replacement_retry {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
                 "external_control_binding_inactive: external control requires an active binding",

@@ -1188,6 +1188,23 @@ export type ExternalTurnInputPart = {
   type: "machine_fact";
 };
 
+export type ExternalTurnPage = {
+  hasMoreBefore: boolean;
+  items: Array<ExternalTurnCorrelation>;
+};
+
+export type ExternalTurnPageCursor = {
+  createdAt: string;
+  requestId: string;
+};
+
+export type ExternalTurnPageQuery = {
+  before?: ExternalTurnPageCursor | null;
+  limit: number;
+  nativeThreadId: string;
+  runtimeId: string;
+};
+
 export type ExternalTurnPhase = "accepted" | "starting" | "active" | "waiting_interaction" | "completed" | "failed" | "interrupted" | "outcome_unknown";
 
 export type ExternalTurnTerminalError = {

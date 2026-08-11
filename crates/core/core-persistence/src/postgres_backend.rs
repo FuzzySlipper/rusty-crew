@@ -16647,6 +16647,20 @@ mod tests {
                 .unwrap(),
             vec![turn.clone()]
         );
+        assert_eq!(
+            store
+                .query_external_turn_page(&rusty_crew_core_protocol::ExternalTurnPageQuery {
+                    runtime_id: turn.runtime_id.clone(),
+                    native_thread_id: "native-thread".into(),
+                    before: None,
+                    limit: 50,
+                },)
+                .unwrap(),
+            rusty_crew_core_protocol::ExternalTurnPage {
+                items: vec![turn.clone()],
+                has_more_before: false,
+            }
+        );
         let mut starting_turn = turn.clone();
         starting_turn.phase = rusty_crew_core_protocol::ExternalTurnPhase::Starting;
         starting_turn.updated_at = "2026-07-10T00:00:01Z".into();

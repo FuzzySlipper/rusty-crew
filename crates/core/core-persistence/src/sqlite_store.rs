@@ -1003,6 +1003,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn query_external_turn_page(
+        &self,
+        query: &ExternalTurnPageQuery,
+    ) -> CoreResult<ExternalTurnPage> {
+        match self {
+            Self::Sqlite(store) => store.query_external_turn_page(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.query_external_turn_page(query),
+        }
+    }
+
     pub fn list_nonterminal_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
         match self {
             Self::Sqlite(store) => store.list_nonterminal_external_turns(),
@@ -1133,6 +1144,30 @@ impl CoreCoordinationStore {
             Self::Postgres(store) => store.query_external_runtime_thread_events(
                 runtime_id,
                 native_thread_id,
+                after_sequence,
+                limit,
+            ),
+        }
+    }
+
+    pub fn query_external_runtime_turn_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_turn_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        match self {
+            Self::Sqlite(store) => store.query_external_runtime_turn_events(
+                runtime_id,
+                native_turn_id,
+                after_sequence,
+                limit,
+            ),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.query_external_runtime_turn_events(
+                runtime_id,
+                native_turn_id,
                 after_sequence,
                 limit,
             ),

@@ -80,6 +80,7 @@ export const bridgeOperations = [
   {"name":"record_external_agent_session_creation_failure","surface":"stable","direction":"ts_to_rust","input":"controller + creation_id + expected_revision + reason + now","output":"core_protocol::ExternalAgentSessionCreationRecord","errors":"core_protocol::CoreError","summary":"Persist a recoverable native-start failure without losing deterministic session identity."},
   {"name":"get_external_turn","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalTurnRequestId","output":"option<core_protocol::ExternalTurnCorrelation>","errors":"core_protocol::CoreError","summary":"Read one Crew/native external turn correlation."},
   {"name":"list_external_turns_for_native_thread","surface":"stable","direction":"ts_to_rust","input":"runtime_id + native_thread_id","output":"vec<core_protocol::ExternalTurnCorrelation>","errors":"core_protocol::CoreError","summary":"Read durable Crew/native turn correlations for one native thread."},
+  {"name":"query_external_turn_page","surface":"stable","direction":"ts_to_rust","input":"core_protocol::ExternalTurnPageQuery","output":"core_protocol::ExternalTurnPage","errors":"core_protocol::CoreError","summary":"Read one bounded, immutable-creation-cursor page of external turns for a native thread."},
   {"name":"list_active_external_turns","surface":"stable","direction":"ts_to_rust","input":"unit","output":"vec<core_protocol::ExternalTurnCorrelation>","errors":"core_protocol::CoreError","summary":"List nonterminal external turns for controller reconciliation and fleet attention."},
   {"name":"expire_external_turn_dispatches","surface":"stable","direction":"ts_to_rust","input":"core_protocol::IsoTimestamp","output":"vec<core_protocol::ExternalTurnCorrelation>","errors":"core_protocol::CoreError","summary":"Terminalize accepted external turns whose input TTL elapsed before native dispatch."},
   {"name":"transition_external_turn","surface":"stable","direction":"ts_to_rust","input":"request_id + phase + native_turn_id + terminal_reason_code + terminal_error + now","output":"core_protocol::ExternalTurnCorrelation","errors":"core_protocol::CoreError","summary":"Apply a validated monotonic Crew/native external turn lifecycle transition."},
@@ -309,4 +310,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "ae902f21349deb9e1c57fe365de02140923a1e29b88542a97d3cfb52571f1c39" as const;
+export const bridgeWireShapeFingerprint = "70c1367366741bf395eda10276b42fe2f9f770202b3603b4ab5d9508b4a47f49" as const;

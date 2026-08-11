@@ -15,12 +15,12 @@ export interface RustBridgeValidationFixtureSummary {
   }>;
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 297;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 298;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 44;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
-const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 199;
+const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 200;
 const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 297;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 298;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 0;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
@@ -42,6 +42,7 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "list_curator_mutations",
   "list_model_providers",
   "list_external_turns_for_native_thread",
+  "query_external_turn_page",
   "list_service_credentials",
   "list_profile_registry_records",
   "list_session_activity_digests",

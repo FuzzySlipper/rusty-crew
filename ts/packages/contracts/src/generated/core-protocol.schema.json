@@ -5029,6 +5029,70 @@
         }
       ]
     },
+    "ExternalTurnPage": {
+      "properties": {
+        "hasMoreBefore": {
+          "type": "boolean"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/ExternalTurnCorrelation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "hasMoreBefore"
+      ],
+      "type": "object"
+    },
+    "ExternalTurnPageCursor": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "createdAt",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "ExternalTurnPageQuery": {
+      "properties": {
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalTurnPageCursor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nativeThreadId": {
+          "type": "string"
+        },
+        "runtimeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtimeId",
+        "nativeThreadId",
+        "limit"
+      ],
+      "type": "object"
+    },
     "ExternalTurnPhase": {
       "enum": [
         "accepted",
@@ -10141,6 +10205,15 @@
     "external_turn_correlation": {
       "$ref": "#/$defs/ExternalTurnCorrelation"
     },
+    "external_turn_page": {
+      "$ref": "#/$defs/ExternalTurnPage"
+    },
+    "external_turn_page_cursor": {
+      "$ref": "#/$defs/ExternalTurnPageCursor"
+    },
+    "external_turn_page_query": {
+      "$ref": "#/$defs/ExternalTurnPageQuery"
+    },
     "install_diplomat_binding_query": {
       "$ref": "#/$defs/InstallDiplomatBindingQuery"
     },
@@ -10473,6 +10546,9 @@
     "external_agent_session_creation_request",
     "external_agent_session_creation_record",
     "external_turn_correlation",
+    "external_turn_page_cursor",
+    "external_turn_page_query",
+    "external_turn_page",
     "external_control_request",
     "external_control_receipt",
     "external_interaction_record",

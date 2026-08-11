@@ -140,6 +140,7 @@ export declare class NativeBridgeBinding {
   recordExternalAgentSessionCreationFailureJson(inputJson: string): string
   getExternalTurnJson(requestId: string): string
   listExternalTurnsForNativeThreadJson(runtimeId: string, nativeThreadId: string): string
+  queryExternalTurnPageJson(inputJson: string): string
   listActiveExternalTurnsJson(): string
   expireExternalTurnDispatchesJson(now: string): string
   transitionExternalTurnJson(inputJson: string): string

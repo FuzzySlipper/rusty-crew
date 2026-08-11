@@ -8,7 +8,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 54;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 55;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -291,7 +291,41 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add durable Telegram install diplomat coordination state",
         apply: Some(apply_postgres_install_diplomat_state),
     },
+    PostgresSchemaMigration {
+        version: 55,
+        description: "index external turns by immutable creation cursor",
+        apply: Some(apply_postgres_external_turn_creation_cursor),
+    },
 ];
+
+fn apply_postgres_external_turn_creation_cursor(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    let external_turns_exists = tx
+        .query_opt(
+            "SELECT 1
+               FROM information_schema.tables
+              WHERE table_schema::text = $1
+                AND table_name = 'external_turns'",
+            &[&schema],
+        )
+        .map_err(|error| postgres_error("inspect PostgreSQL external turns table", error))?
+        .is_some();
+    if !external_turns_exists {
+        return Ok(());
+    }
+    tx.batch_execute(&format!(
+        "ALTER TABLE {schema}.external_turns ADD COLUMN IF NOT EXISTS created_at TEXT;
+         UPDATE {schema}.external_turns
+            SET created_at = record_json::jsonb #>> '{{request,createdAt}}'
+          WHERE created_at IS NULL;
+         ALTER TABLE {schema}.external_turns ALTER COLUMN created_at SET NOT NULL;
+         CREATE INDEX IF NOT EXISTS external_turns_creation_cursor_idx
+            ON {schema}.external_turns(runtime_id, native_thread_id, created_at, request_id);"
+    ))
+    .map_err(|error| postgres_error("add PostgreSQL external turn creation cursor", error))
+}
 
 fn apply_postgres_external_runtime_thread_cursor(
     tx: &mut Transaction<'_>,
@@ -1874,12 +1908,15 @@ fn apply_postgres_external_runtime(tx: &mut Transaction<'_>, schema: &str) -> Co
             binding_id TEXT NOT NULL REFERENCES {schema}.external_agent_bindings(binding_id),
             session_id TEXT NOT NULL REFERENCES {schema}.sessions(session_id),
             native_thread_id TEXT NOT NULL, native_turn_id TEXT, phase TEXT NOT NULL,
-            revision BIGINT NOT NULL, updated_at TEXT NOT NULL, record_json TEXT NOT NULL);
+            revision BIGINT NOT NULL, created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL, record_json TEXT NOT NULL);
          CREATE UNIQUE INDEX IF NOT EXISTS external_turns_native_turn_idx
             ON {schema}.external_turns(runtime_id, native_turn_id)
             WHERE native_turn_id IS NOT NULL;
          CREATE INDEX IF NOT EXISTS external_turns_native_thread_idx
             ON {schema}.external_turns(runtime_id, native_thread_id, updated_at);
+         CREATE INDEX IF NOT EXISTS external_turns_creation_cursor_idx
+            ON {schema}.external_turns(runtime_id, native_thread_id, created_at, request_id);
          CREATE INDEX IF NOT EXISTS external_turns_active_session_idx
             ON {schema}.external_turns(session_id, phase, updated_at);
          CREATE TABLE IF NOT EXISTS {schema}.external_control_receipts (

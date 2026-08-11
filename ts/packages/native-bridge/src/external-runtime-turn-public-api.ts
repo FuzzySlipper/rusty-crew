@@ -2,6 +2,8 @@ import type {
   ExternalControllerContext,
   ExternalTurnCorrelation,
   ExternalTurnPhase,
+  ExternalTurnPage,
+  ExternalTurnPageQuery,
 } from "@rusty-crew/contracts";
 
 export interface NativeExternalRuntimeTurnBridgeMethods {
@@ -12,6 +14,9 @@ export interface NativeExternalRuntimeTurnBridgeMethods {
     runtimeId: string,
     nativeThreadId: string,
   ): Promise<ExternalTurnCorrelation[]>;
+  queryExternalTurnPage(
+    input: ExternalTurnPageQuery,
+  ): Promise<ExternalTurnPage>;
   listActiveExternalTurns(): Promise<ExternalTurnCorrelation[]>;
   expireExternalTurnDispatches(now: string): Promise<ExternalTurnCorrelation[]>;
   transitionExternalTurn(input: {

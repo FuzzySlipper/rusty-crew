@@ -746,6 +746,7 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listExternalTurnsForNativeThread: unavailable(
       "list_external_turns_for_native_thread",
     ),
+    queryExternalTurnPage: unavailable("query_external_turn_page"),
     listActiveExternalTurns: unavailable("list_active_external_turns"),
     expireExternalTurnDispatches: unavailable(
       "expire_external_turn_dispatches",

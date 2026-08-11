@@ -783,6 +783,7 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         "get_external_turn",
         Option<protocol::ExternalTurnCorrelation>
     );
+    schema!("query_external_turn_page", protocol::ExternalTurnPage);
     schema!(
         "list_active_external_turns",
         Vec<protocol::ExternalTurnCorrelation>

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Rusty Crew External Agent Runtime API",
-    "version": "0.18.0",
+    "version": "0.19.0",
     "description": "Generated browser-safe contract for runtime-neutral external agent fleet, thread, event, control, interaction, delivery, and round operations."
   },
   "security": [{ "AdminBearer": [] }],
@@ -573,7 +573,13 @@
           }
         },
         "x-rusty-crew-capability-id": "external.runtimes.threads.read",
-        "x-rusty-crew-contract-detail": "wire"
+        "x-rusty-crew-contract-detail": "wire",
+        "x-rusty-crew-error-reason-codes": [
+          "external_thread_cursor_invalid",
+          "external_thread_cursor_stale",
+          "external_thread_cursor_out_of_range",
+          "external_thread_listing_limit_exceeded"
+        ]
       }
     },
     "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/archive": {
@@ -624,7 +630,17 @@
           }
         },
         "x-rusty-crew-capability-id": "external.runtimes.threads.archive",
-        "x-rusty-crew-contract-detail": "wire"
+        "x-rusty-crew-contract-detail": "wire",
+        "x-rusty-crew-error-reason-codes": [
+          "external_thread_not_found",
+          "external_thread_active",
+          "external_thread_interaction_pending",
+          "external_thread_context_unavailable",
+          "external_thread_listing_limit_exceeded",
+          "external_thread_binding_reconciliation_failed",
+          "external_thread_crew_session_reconciliation_failed",
+          "external_thread_native_delete_failed"
+        ]
       }
     },
     "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/delete": {
@@ -675,7 +691,17 @@
           }
         },
         "x-rusty-crew-capability-id": "external.runtimes.threads.delete",
-        "x-rusty-crew-contract-detail": "wire"
+        "x-rusty-crew-contract-detail": "wire",
+        "x-rusty-crew-error-reason-codes": [
+          "external_thread_not_found",
+          "external_thread_active",
+          "external_thread_interaction_pending",
+          "external_thread_context_unavailable",
+          "external_thread_listing_limit_exceeded",
+          "external_thread_binding_reconciliation_failed",
+          "external_thread_crew_session_reconciliation_failed",
+          "external_thread_native_delete_failed"
+        ]
       }
     },
     "/v1/external-runtimes/{runtime_id}/threads/{thread_id}/unarchive": {
@@ -726,7 +752,17 @@
           }
         },
         "x-rusty-crew-capability-id": "external.runtimes.threads.unarchive",
-        "x-rusty-crew-contract-detail": "wire"
+        "x-rusty-crew-contract-detail": "wire",
+        "x-rusty-crew-error-reason-codes": [
+          "external_thread_not_found",
+          "external_thread_active",
+          "external_thread_interaction_pending",
+          "external_thread_context_unavailable",
+          "external_thread_listing_limit_exceeded",
+          "external_thread_binding_reconciliation_failed",
+          "external_thread_crew_session_reconciliation_failed",
+          "external_thread_native_delete_failed"
+        ]
       }
     },
     "/v1/external-runtimes/{runtime_id}/events": {
@@ -4391,6 +4427,40 @@
             "type": "object"
           }
         ]
+      },
+      "ExternalTurnPage": {
+        "properties": {
+          "hasMoreBefore": { "type": "boolean" },
+          "items": {
+            "items": { "$ref": "#/components/schemas/ExternalTurnCorrelation" },
+            "type": "array"
+          }
+        },
+        "required": ["items", "hasMoreBefore"],
+        "type": "object"
+      },
+      "ExternalTurnPageCursor": {
+        "properties": {
+          "createdAt": { "type": "string" },
+          "requestId": { "type": "string" }
+        },
+        "required": ["createdAt", "requestId"],
+        "type": "object"
+      },
+      "ExternalTurnPageQuery": {
+        "properties": {
+          "before": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ExternalTurnPageCursor" },
+              { "type": "null" }
+            ]
+          },
+          "limit": { "format": "uint32", "minimum": 0, "type": "integer" },
+          "nativeThreadId": { "type": "string" },
+          "runtimeId": { "type": "string" }
+        },
+        "required": ["runtimeId", "nativeThreadId", "limit"],
+        "type": "object"
       },
       "ExternalTurnPhase": {
         "enum": [
@@ -8242,7 +8312,22 @@
         "required": ["threadId"],
         "properties": {
           "threadId": { "type": "string", "minLength": 1 },
-          "includeTurns": { "type": "boolean", "default": true }
+          "includeTurns": {
+            "type": "boolean",
+            "default": true,
+            "description": "When true, returns one bounded turn page. It never requests the complete native transcript."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 50
+          },
+          "beforeCursor": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
         },
         "additionalProperties": false
       },
@@ -8264,7 +8349,9 @@
             "items": {
               "$ref": "#/components/schemas/ExternalInputImageReference"
             }
-          }
+          },
+          "detailHandle": { "type": "string" },
+          "truncated": { "type": "boolean" }
         },
         "additionalProperties": false
       },
@@ -8325,7 +8412,8 @@
             "items": {
               "$ref": "#/components/schemas/ExternalThreadItemProjection"
             }
-          }
+          },
+          "itemsTruncated": { "type": "boolean" }
         },
         "additionalProperties": false
       },
@@ -8416,9 +8504,28 @@
       },
       "ExternalThreadReadResult": {
         "type": "object",
-        "required": ["thread"],
+        "required": ["thread", "turnPage"],
         "properties": {
-          "thread": { "$ref": "#/components/schemas/ExternalThreadProjection" }
+          "thread": { "$ref": "#/components/schemas/ExternalThreadProjection" },
+          "turnPage": { "$ref": "#/components/schemas/ExternalThreadTurnPage" }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadTurnPage": {
+        "type": "object",
+        "required": [
+          "limit",
+          "hasMoreBefore",
+          "beforeCursor",
+          "pageStartCursor",
+          "pageEndCursor"
+        ],
+        "properties": {
+          "limit": { "type": "integer", "minimum": 1, "maximum": 100 },
+          "hasMoreBefore": { "type": "boolean" },
+          "beforeCursor": { "type": ["string", "null"] },
+          "pageStartCursor": { "type": ["string", "null"] },
+          "pageEndCursor": { "type": ["string", "null"] }
         },
         "additionalProperties": false
       },
@@ -8446,7 +8553,8 @@
           "action",
           "outcome",
           "nativeArchived",
-          "bindings"
+          "bindings",
+          "crewSessions"
         ],
         "properties": {
           "runtimeId": { "type": "string" },
@@ -8462,7 +8570,23 @@
             "items": {
               "$ref": "#/components/schemas/ExternalThreadLifecycleBindingTransition"
             }
+          },
+          "crewSessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalThreadLifecycleSessionTransition"
+            }
           }
+        },
+        "additionalProperties": false
+      },
+      "ExternalThreadLifecycleSessionTransition": {
+        "type": "object",
+        "required": ["sessionId", "previousStatus", "currentStatus"],
+        "properties": {
+          "sessionId": { "type": "string" },
+          "previousStatus": { "type": "string" },
+          "currentStatus": { "type": "string" }
         },
         "additionalProperties": false
       },

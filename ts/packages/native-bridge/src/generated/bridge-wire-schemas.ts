@@ -23563,6 +23563,293 @@ export const bridgeWireSchemaArtifact = {
       "title": "ExternalTurnCorrelation",
       "type": "object"
     },
+    "rusty_crew_core_protocol::external_runtime::ExternalTurnPage": {
+      "properties": {
+        "hasMoreBefore": {
+          "type": "boolean"
+        },
+        "items": {
+          "items": {
+            "properties": {
+              "capacityLeaseId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "nativeThreadId": {
+                "type": "string"
+              },
+              "nativeTurnId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "phase": {
+                "enum": [
+                  "accepted",
+                  "starting",
+                  "active",
+                  "waiting_interaction",
+                  "completed",
+                  "failed",
+                  "interrupted",
+                  "outcome_unknown"
+                ],
+                "type": "string"
+              },
+              "request": {
+                "properties": {
+                  "bindingId": {
+                    "type": "string"
+                  },
+                  "collaborationMode": {
+                    "enum": [
+                      "plan",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "expiresAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "idempotencyKey": {
+                    "type": "string"
+                  },
+                  "input": {
+                    "items": {
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "type": {
+                              "const": "text",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "text"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "properties": {
+                            "type": {
+                              "const": "image",
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "url"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "type": {
+                              "const": "skill",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "name"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "properties": {
+                            "kind": {
+                              "type": "string"
+                            },
+                            "payload": true,
+                            "type": {
+                              "const": "machine_fact",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "kind",
+                            "payload"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "type": "array"
+                  },
+                  "provenance": {
+                    "properties": {
+                      "correlationId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "kind": {
+                        "enum": [
+                          "operator",
+                          "routed_agent_message",
+                          "scheduled_wake",
+                          "external_wait_result",
+                          "control"
+                        ],
+                        "type": "string"
+                      },
+                      "sourceId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  },
+                  "requestId": {
+                    "type": "string"
+                  },
+                  "runId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "requestId",
+                  "idempotencyKey",
+                  "sessionId",
+                  "bindingId",
+                  "input",
+                  "provenance",
+                  "createdAt"
+                ],
+                "type": "object"
+              },
+              "revision": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "runtimeId": {
+                "type": "string"
+              },
+              "taskRef": {
+                "properties": {
+                  "project_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "task_id": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "terminalError": {
+                "default": null,
+                "properties": {
+                  "additionalDetails": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "willRetry": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "message"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "terminalReasonCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "updatedAt": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "request",
+              "runtimeId",
+              "nativeThreadId",
+              "phase",
+              "revision",
+              "updatedAt"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "hasMoreBefore"
+      ],
+      "title": "ExternalTurnPage",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::external_runtime::NormalizedExternalRuntimeEvent": {
       "properties": {
         "createdAt": {
@@ -28621,6 +28908,7 @@ export const bridgeWireSchemaArtifact = {
     "query_data_bank_scopes": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::DataBankScopeRecord>",
     "query_data_bank_scopes_page": "rusty_crew_core_persistence::contracts::ExactPage<rusty_crew_core_persistence::contracts::DataBankScopeRecord>",
     "query_external_runtime_events": "alloc::vec::Vec<rusty_crew_core_protocol::external_runtime::NormalizedExternalRuntimeEvent>",
+    "query_external_turn_page": "rusty_crew_core_protocol::external_runtime::ExternalTurnPage",
     "query_lore_entries": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreRecord>",
     "query_message_slots": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::MessageSlotRecord>",
     "query_message_slots_page": "rusty_crew_core_persistence::contracts::ExactPage<rusty_crew_core_persistence::contracts::MessageSlotRecord>",

@@ -2273,7 +2273,7 @@ test("external commands use native catalogs and settings without creating turns"
     );
     assert.equal(replacement.previousNativeThreadId, threadId);
     assert.notEqual(replacement.nativeThreadId, threadId);
-    assert.equal(replacement.previousNativeThreadArchived, false);
+    assert.equal(replacement.previousNativeThreadArchived, true);
     assert.equal(replacement.settingsPreserved, true);
     assert.equal(replacement.settings.model, "gpt-5.4-mini");
     assert.equal(replacement.settings.effort, "medium");
@@ -2299,11 +2299,26 @@ test("external commands use native catalogs and settings without creating turns"
       predecessorBindingId: bindingId,
       predecessorSessionId: predecessorBinding.sessionId,
       predecessorNativeThreadId: threadId,
-      transitionId: restart.commandId,
+      transitionId: successorBinding.lineage?.transitionId,
       reasonCode: "external_command_new_session",
-      createdAt: predecessorBinding.updatedAt,
+      createdAt: successorBinding.lineage?.createdAt,
     });
-    assert.equal(fixture.transport.archivedThreadIds.has(threadId), false);
+    assert.match(
+      successorBinding.lineage?.createdAt ?? "",
+      /^\d{4}-\d{2}-\d{2}T/,
+    );
+    assert.match(
+      successorBinding.lineage?.transitionId ?? "",
+      /^thread-replacement:[a-f0-9]{32}$/,
+    );
+    assert.equal(predecessorBinding.status, "archived");
+    assert.equal(fixture.transport.archivedThreadIds.has(threadId), true);
+    assert.equal(
+      (await fixture.bridge.listSessions()).find(
+        (session) => session.sessionId === predecessorBinding.sessionId,
+      )?.status,
+      "archived",
+    );
     assert.equal((predecessorThread.turns as unknown[]).length, 1);
     const replacementNativeThread = fixture.transport.threads.find(
       (thread) => thread.id === replacement.nativeThreadId,
@@ -2315,13 +2330,18 @@ test("external commands use native catalogs and settings without creating turns"
       { limit: 10, archived: false },
     );
     assert.ok(
-      independentlyVisible.items.some((item) => item.threadId === threadId),
+      !independentlyVisible.items.some((item) => item.threadId === threadId),
     );
     assert.ok(
       independentlyVisible.items.some(
         (item) => item.threadId === replacement.nativeThreadId,
       ),
     );
+    const archivedVisible = await fixture.controller.listThreads(
+      fixture.runtimeId,
+      { limit: 10, archived: true },
+    );
+    assert.ok(archivedVisible.items.some((item) => item.threadId === threadId));
     const readablePredecessor = await fixture.controller.readThread(
       fixture.runtimeId,
       { threadId, includeTurns: true },
@@ -2938,6 +2958,7 @@ test("controller archives native history with bindings and restores history expl
     assert.equal(archived.outcome, "applied");
     assert.equal(archived.nativeArchived, true);
     assert.equal(archived.bindings[0]?.currentStatus, "archived");
+    assert.equal(archived.crewSessions[0]?.currentStatus, "archived");
     assert.equal(
       (await fixture.bridge.getExternalBinding(bindingId))?.status,
       "archived",
@@ -2979,6 +3000,171 @@ test("controller archives native history with bindings and restores history expl
       (error: unknown) =>
         error instanceof ExternalThreadLifecycleError &&
         error.reasonCode === "external_thread_not_found",
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("archive reconciliation survives partial orderings and controller restart", async () => {
+  const bridgeFailure = {
+    operation: "archive_session" as const,
+    message: "injected Crew archive failure",
+    remaining: 1,
+  };
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    bridgeFailure,
+  );
+  let reloaded: ServiceExternalRuntimeController | undefined;
+  try {
+    const first = await fixture.controller.createAgentSession({
+      idempotencyKey: "archive-partial-first",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const firstBinding = first.creation.binding;
+    await assert.rejects(
+      fixture.controller.archiveThread(
+        fixture.runtimeId,
+        first.thread.threadId,
+      ),
+      (error: unknown) =>
+        error instanceof ExternalThreadLifecycleError &&
+        error.reasonCode ===
+          "external_thread_crew_session_reconciliation_failed",
+    );
+    assert.equal(
+      (await fixture.bridge.getExternalBinding(firstBinding.bindingId))?.status,
+      "archived",
+    );
+    assert.equal(
+      (await fixture.bridge.listSessions()).find(
+        (session) => session.sessionId === firstBinding.sessionId,
+      )?.status,
+      "idle",
+    );
+    assert.equal(
+      fixture.transport.archivedThreadIds.has(first.thread.threadId),
+      true,
+    );
+
+    await fixture.controller.stop();
+    reloaded = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "archive-reconciliation-reloaded",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+    await reloaded.connect(fixture.runtimeId);
+    const reconciled = await reloaded.archiveThread(
+      fixture.runtimeId,
+      first.thread.threadId,
+    );
+    assert.equal(reconciled.outcome, "already_archived");
+    assert.equal(reconciled.crewSessions[0]?.previousStatus, "idle");
+    assert.equal(reconciled.crewSessions[0]?.currentStatus, "archived");
+
+    const second = await reloaded.createAgentSession({
+      idempotencyKey: "archive-partial-inverse",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    assert.ok(second.creation.binding.sessionId);
+    await fixture.bridge.archiveSession(
+      second.creation.binding.sessionId as SessionId,
+    );
+    assert.equal(
+      fixture.transport.archivedThreadIds.has(second.thread.threadId),
+      false,
+    );
+    const inverse = await reloaded.archiveThread(
+      fixture.runtimeId,
+      second.thread.threadId,
+    );
+    assert.equal(inverse.outcome, "applied");
+    assert.equal(inverse.nativeArchived, true);
+    assert.equal(inverse.bindings[0]?.currentStatus, "archived");
+    assert.equal(inverse.crewSessions[0]?.currentStatus, "archived");
+  } finally {
+    await reloaded?.stop().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
+test("new command retries an archived partial predecessor without duplicate successors", async () => {
+  const bridgeFailure = {
+    operation: "archive_session" as const,
+    message: "injected predecessor archive failure",
+    remaining: 1,
+  };
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    bridgeFailure,
+  );
+  try {
+    const predecessor = await fixture.controller.createAgentSession({
+      idempotencyKey: "new-partial-predecessor",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const predecessorBinding = predecessor.creation.binding;
+    const failed = await fixture.controller.executeCommand({
+      bindingId: predecessorBinding.bindingId,
+      commandInput: "/new",
+      idempotencyKey: "new-partial-attempt-1",
+    });
+    assert.equal(failed.status, "rejected");
+    assert.equal(failed.reasonCode, "external_command_restart_failed");
+    assert.equal(
+      (await fixture.bridge.getExternalBinding(predecessorBinding.bindingId))
+        ?.status,
+      "archived",
+    );
+    assert.equal(
+      (await fixture.bridge.listSessions()).filter(
+        (session) => session.profileId === fixture.profileId,
+      ).length,
+      1,
+    );
+
+    const retried = await fixture.controller.executeCommand({
+      bindingId: predecessorBinding.bindingId,
+      commandInput: "/new",
+      idempotencyKey: "new-partial-attempt-2",
+    });
+    assert.equal(retried.status, "applied", JSON.stringify(retried));
+    const successor = retried.result.threadReplacement;
+    assert.ok(successor);
+    assert.equal(successor.cwd, predecessorBinding.cwd);
+    assert.equal(successor.profileId, fixture.profileId);
+    assert.equal(successor.previousNativeThreadArchived, true);
+
+    const repeated = await fixture.controller.executeCommand({
+      bindingId: predecessorBinding.bindingId,
+      commandInput: "/new",
+      idempotencyKey: "new-partial-attempt-3",
+    });
+    assert.equal(repeated.status, "applied", JSON.stringify(repeated));
+    assert.equal(
+      repeated.result.threadReplacement?.bindingId,
+      successor.bindingId,
+    );
+    assert.equal(
+      (await fixture.bridge.listSessions()).filter(
+        (session) => session.profileId === fixture.profileId,
+      ).length,
+      2,
     );
   } finally {
     await fixture.cleanup();
@@ -3270,12 +3456,9 @@ test("thread read returns phase-neutral metadata before first message materializ
     assert.deepEqual(
       fixture.transport.sent
         .filter((message) => message.method === "thread/read")
-        .slice(-2)
+        .slice(-1)
         .map((message) => message.params),
-      [
-        { threadId: created.thread.threadId, includeTurns: true },
-        { threadId: created.thread.threadId, includeTurns: false },
-      ],
+      [{ threadId: created.thread.threadId, includeTurns: false }],
     );
   } finally {
     await fixture.cleanup();
@@ -4274,8 +4457,9 @@ async function externalCreationFixture(
   loseFirstStartResponse: boolean,
   startFailureMessage?: string,
   bridgeFailure?: {
-    operation: "mark_native_starting" | "complete";
+    operation: "mark_native_starting" | "complete" | "archive_session";
     message: string;
+    remaining?: number;
   },
   profilelessBindingReads = false,
   profileIdOverride = "creation-profile",
@@ -4314,6 +4498,16 @@ async function externalCreationFixture(
         property === "completeExternalAgentSessionCreation"
       ) {
         return async () => {
+          throw new Error(bridgeFailure.message);
+        };
+      }
+      if (
+        bridgeFailure?.operation === "archive_session" &&
+        property === "archiveSession" &&
+        (bridgeFailure.remaining ?? 1) > 0
+      ) {
+        return async () => {
+          bridgeFailure.remaining = (bridgeFailure.remaining ?? 1) - 1;
           throw new Error(bridgeFailure.message);
         };
       }

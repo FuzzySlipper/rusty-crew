@@ -10,6 +10,7 @@ import {
   EXTERNAL_RUNTIME_API_OPENAPI_PATH,
   EXTERNAL_RUNTIME_API_OPERATIONS,
   EXTERNAL_RUNTIME_API_PATHS,
+  EXTERNAL_THREAD_READ_API_REASON_CODES,
 } from "../src/external-runtime-api-contract.js";
 
 const contract = JSON.parse(
@@ -20,7 +21,7 @@ const contract = JSON.parse(
 ) as OpenApiDocument;
 
 assert.equal(contract.openapi, "3.1.0");
-assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.18.0");
+assert.equal(EXTERNAL_RUNTIME_API_CONTRACT_VERSION, "0.19.0");
 assert.equal(contract.info.version, EXTERNAL_RUNTIME_API_CONTRACT_VERSION);
 
 const capabilityIds = new Set(
@@ -75,12 +76,27 @@ assert.deepEqual(
   ["string", "null"],
 );
 assert.ok(schema("ExternalThreadTurnProjection").properties?.items);
+assert.ok(schema("ExternalThreadTurnProjection").properties?.itemsTruncated);
 assert.ok(schema("ExternalThreadTurnProjection").properties?.error);
 assert.deepEqual(
   propertySchema("ExternalThreadTurnProjection", "statusSource").enum,
   ["native", "crew_terminal"],
 );
 assert.ok(schema("ExternalThreadItemProjection").properties?.text);
+assert.ok(schema("ExternalThreadItemProjection").properties?.detailHandle);
+assert.ok(schema("ExternalThreadItemProjection").properties?.truncated);
+assert.deepEqual(schema("ExternalThreadReadResult").required, [
+  "thread",
+  "turnPage",
+]);
+assert.equal(propertySchema("ExternalThreadReadRequest", "limit").maximum, 100);
+assert.ok(schema("ExternalThreadReadRequest").properties?.beforeCursor);
+assert.deepEqual(
+  contract.paths[EXTERNAL_RUNTIME_API_PATHS.threadRead]?.post?.[
+    "x-rusty-crew-error-reason-codes"
+  ],
+  EXTERNAL_THREAD_READ_API_REASON_CODES,
+);
 assert.deepEqual(
   propertySchema("ExternalThreadItemProjection", "messagePhase").enum,
   ["commentary", "final_answer", "unknown"],

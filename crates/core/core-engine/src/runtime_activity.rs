@@ -1,6 +1,7 @@
 use super::*;
 use rusty_crew_core_protocol::{
-    ExternalRuntimeId, NormalizedExternalRuntimeEvent, RuntimeActivityLiveEvidence,
+    ExternalRuntimeId, ExternalTurnCorrelation, ExternalTurnPage, ExternalTurnPageQuery,
+    NormalizedExternalRuntimeEvent, RuntimeActivityLiveEvidence,
 };
 
 const MAX_ACTIVITY_TEXT_BYTES: usize = 512;
@@ -8,6 +9,34 @@ const MAX_ACTIVITY_PHASE_BYTES: usize = 128;
 const MAX_CENSUS_RECORDS: u32 = 5_000;
 
 impl CoreEngine {
+    pub fn list_external_turns_for_native_thread(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_thread_id: &str,
+    ) -> CoreResult<Vec<ExternalTurnCorrelation>> {
+        self.store
+            .list_external_turns_for_native_thread(runtime_id, native_thread_id)
+    }
+
+    pub fn query_external_turn_page(
+        &self,
+        query: &ExternalTurnPageQuery,
+    ) -> CoreResult<ExternalTurnPage> {
+        if query.native_thread_id.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "external turn page requires a native thread id",
+            ));
+        }
+        if query.limit == 0 || query.limit > 100 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "external turn page limit must be between 1 and 100",
+            ));
+        }
+        self.store.query_external_turn_page(query)
+    }
+
     pub fn query_external_runtime_thread_events(
         &self,
         runtime_id: &ExternalRuntimeId,
@@ -24,6 +53,27 @@ impl CoreEngine {
         self.store.query_external_runtime_thread_events(
             runtime_id,
             native_thread_id,
+            after_sequence,
+            limit,
+        )
+    }
+
+    pub fn query_external_runtime_turn_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_turn_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        if native_turn_id.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "native turn id must not be empty",
+            ));
+        }
+        self.store.query_external_runtime_turn_events(
+            runtime_id,
+            native_turn_id,
             after_sequence,
             limit,
         )

@@ -730,6 +730,15 @@ errors = "core_protocol::CoreError"
 summary = "Read durable Crew/native turn correlations for one native thread."
 
 [[operation]]
+name = "query_external_turn_page"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ExternalTurnPageQuery"
+output = "core_protocol::ExternalTurnPage"
+errors = "core_protocol::CoreError"
+summary = "Read one bounded, immutable-creation-cursor page of external turns for a native thread."
+
+[[operation]]
 name = "list_active_external_turns"
 surface = "stable"
 direction = "ts_to_rust"

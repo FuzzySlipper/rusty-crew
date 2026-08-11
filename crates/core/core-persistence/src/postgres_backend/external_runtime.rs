@@ -13,8 +13,8 @@ use rusty_crew_core_protocol::{
     ExternalInteractionStatus, ExternalRuntimeCertificationInvalidation,
     ExternalRuntimeCertificationRecord, ExternalRuntimeCertificationStatus,
     ExternalRuntimeEventInput, ExternalRuntimeId, ExternalRuntimeProbeEvidenceRecord,
-    ExternalRuntimeRegistration, ExternalTurnCorrelation, ExternalTurnRequestId,
-    NormalizedExternalRuntimeEvent,
+    ExternalRuntimeRegistration, ExternalTurnCorrelation, ExternalTurnPage, ExternalTurnPageQuery,
+    ExternalTurnRequestId, NormalizedExternalRuntimeEvent,
 };
 
 impl PostgresBackendStore {
@@ -852,8 +852,8 @@ impl PostgresBackendStore {
             &format!(
                 "INSERT INTO {schema}.external_turns
                     (request_id, idempotency_key, runtime_id, binding_id, session_id,
-                     native_thread_id, native_turn_id, phase, revision, updated_at, record_json)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+                     native_thread_id, native_turn_id, phase, revision, created_at, updated_at, record_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
             ),
             &[
                 &record.request.request_id.0,
@@ -865,6 +865,7 @@ impl PostgresBackendStore {
                 &record.native_turn_id,
                 &enum_json(&record.phase)?,
                 &(record.revision as i64),
+                &record.request.created_at,
                 &record.updated_at,
                 &to_json_text(record)?,
             ],
@@ -933,8 +934,8 @@ impl PostgresBackendStore {
             &format!(
                 "INSERT INTO {schema}.external_turns
                     (request_id, idempotency_key, runtime_id, binding_id, session_id,
-                     native_thread_id, native_turn_id, phase, revision, updated_at, record_json)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)"
+                     native_thread_id, native_turn_id, phase, revision, created_at, updated_at, record_json)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
             ),
             &[
                 &record.request.request_id.0,
@@ -946,6 +947,7 @@ impl PostgresBackendStore {
                 &record.native_turn_id,
                 &enum_json(&record.phase)?,
                 &(record.revision as i64),
+                &record.request.created_at,
                 &record.updated_at,
                 &to_json_text(record)?,
             ],
@@ -1062,6 +1064,53 @@ impl PostgresBackendStore {
             &[&runtime_id.0, &native_thread_id],
             "list PostgreSQL external turns for native thread",
         )
+    }
+
+    pub fn query_external_turn_page(
+        &self,
+        query: &ExternalTurnPageQuery,
+    ) -> CoreResult<ExternalTurnPage> {
+        let schema = self.quoted_schema();
+        let limit = query.limit.clamp(1, 100);
+        let fetch = i64::from(limit + 1);
+        let mut client = self.client()?;
+        let mut items = if let Some(before) = query.before.as_ref() {
+            load_list(
+                &mut *client,
+                &format!(
+                    "SELECT record_json FROM {schema}.external_turns
+                     WHERE runtime_id = $1 AND native_thread_id = $2
+                       AND (created_at < $3 OR (created_at = $3 AND request_id < $4))
+                     ORDER BY created_at DESC, request_id DESC LIMIT $5"
+                ),
+                &[
+                    &query.runtime_id.0,
+                    &query.native_thread_id,
+                    &before.created_at,
+                    &before.request_id.0,
+                    &fetch,
+                ],
+                "query PostgreSQL external turn page",
+            )?
+        } else {
+            load_list(
+                &mut *client,
+                &format!(
+                    "SELECT record_json FROM {schema}.external_turns
+                     WHERE runtime_id = $1 AND native_thread_id = $2
+                     ORDER BY created_at DESC, request_id DESC LIMIT $3"
+                ),
+                &[&query.runtime_id.0, &query.native_thread_id, &fetch],
+                "query PostgreSQL external turn page",
+            )?
+        };
+        let has_more_before = items.len() > limit as usize;
+        items.truncate(limit as usize);
+        items.reverse();
+        Ok(ExternalTurnPage {
+            items,
+            has_more_before,
+        })
     }
 
     pub fn list_nonterminal_external_turns(&self) -> CoreResult<Vec<ExternalTurnCorrelation>> {
@@ -1544,6 +1593,32 @@ impl PostgresBackendStore {
                 &(limit.clamp(1, 1_000) as i64),
             ],
             "query PostgreSQL external runtime thread events",
+        )
+    }
+
+    pub fn query_external_runtime_turn_events(
+        &self,
+        runtime_id: &ExternalRuntimeId,
+        native_turn_id: &str,
+        after_sequence: u64,
+        limit: u32,
+    ) -> CoreResult<Vec<NormalizedExternalRuntimeEvent>> {
+        let schema = self.quoted_schema();
+        load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_runtime_events
+                 WHERE runtime_id = $1 AND native_turn_id = $2 AND sequence_id > $3
+                   AND kind IN ('item_lifecycle', 'turn_lifecycle', 'external_turn_steer_intent', 'external_turn_steer_input')
+                 ORDER BY sequence_id LIMIT $4"
+            ),
+            &[
+                &runtime_id.0,
+                &native_turn_id,
+                &(after_sequence as i64),
+                &(limit.clamp(1, 512) as i64),
+            ],
+            "query PostgreSQL external runtime turn events",
         )
     }
 

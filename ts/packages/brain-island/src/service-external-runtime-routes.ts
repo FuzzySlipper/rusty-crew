@@ -637,13 +637,17 @@ export async function handleExternalRuntimeRequest(
           );
         }
         if (parts[4] === "read" && method === "POST") {
-          return successRoute(
-            requestId,
-            await context.controller.readThread(
-              runtimeId,
-              await context.readJsonBody(request),
-            ),
-          );
+          try {
+            return successRoute(
+              requestId,
+              await context.controller.readThread(
+                runtimeId,
+                await context.readJsonBody(request),
+              ),
+            );
+          } catch (error) {
+            return externalThreadLifecycleFailure(requestId, error);
+          }
         }
         if (parts.length === 6 && method === "POST") {
           try {
@@ -1245,10 +1249,16 @@ function externalThreadLifecycleFailure(
   const status =
     reasonCode === "external_thread_not_found"
       ? 404
-      : reasonCode === "external_thread_active" ||
-          reasonCode === "external_thread_interaction_pending"
-        ? 409
-        : 500;
+      : reasonCode === "external_thread_cursor_invalid" ||
+          reasonCode === "external_thread_listing_limit_exceeded"
+        ? 400
+        : reasonCode === "external_thread_active" ||
+            reasonCode === "external_thread_interaction_pending" ||
+            reasonCode === "external_thread_cursor_stale" ||
+            reasonCode === "external_thread_cursor_out_of_range" ||
+            reasonCode === "external_thread_crew_session_reconciliation_failed"
+          ? 409
+          : 500;
   return failure(status, requestId, {
     code:
       status === 404
@@ -1258,7 +1268,9 @@ function externalThreadLifecycleFailure(
           : "internal_error",
     reason_code: reasonCode,
     message,
-    retryable: status >= 500,
+    retryable:
+      status >= 500 ||
+      reasonCode === "external_thread_crew_session_reconciliation_failed",
   });
 }
 

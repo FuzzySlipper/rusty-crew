@@ -16,6 +16,7 @@ import type {
   ExternalRuntimeCompatibilityProbeReport,
   ExternalTurnCorrelation,
   NormalizedExternalRuntimeEvent,
+  SessionId,
 } from "@rusty-crew/contracts";
 import { EXTERNAL_BINDING_RESTORE_API_REASON_CODES } from "./external-runtime-api-contract.js";
 import {
@@ -70,6 +71,12 @@ const CONTROLLER_LEASE_MS = 30_000;
 const RAW_DETAIL_LIMIT = 256;
 const DEFAULT_RECOVERY_BASE_DELAY_MS = 5_000;
 const DEFAULT_RECOVERY_MAX_DELAY_MS = 60_000;
+const DEFAULT_EXTERNAL_THREAD_TURN_PAGE_LIMIT = 50;
+const MAX_EXTERNAL_THREAD_TURN_PAGE_LIMIT = 100;
+const MAX_EXTERNAL_THREAD_ITEMS_PER_TURN = 128;
+const MAX_EXTERNAL_THREAD_ITEM_TEXT_CHARS = 4_096;
+const MAX_EXTERNAL_THREAD_ITEM_SUMMARY_ENTRIES = 8;
+const MAX_EXTERNAL_THREAD_ITEM_SUMMARY_CHARS = 1_024;
 export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
   "external_agent_creation_idempotency_key_required",
   "external_agent_creation_idempotency_conflict",
@@ -237,7 +244,11 @@ export class ExternalThreadLifecycleError extends Error {
       | "external_thread_interaction_pending"
       | "external_thread_context_unavailable"
       | "external_thread_listing_limit_exceeded"
+      | "external_thread_cursor_invalid"
+      | "external_thread_cursor_stale"
+      | "external_thread_cursor_out_of_range"
       | "external_thread_binding_reconciliation_failed"
+      | "external_thread_crew_session_reconciliation_failed"
       | "external_thread_native_delete_failed",
     message: string,
   ) {
@@ -623,7 +634,16 @@ export class ServiceExternalRuntimeController {
     params: unknown,
   ): Promise<ExternalThreadReadResult> {
     const controlled = await this.#requireControlled(runtimeId);
-    const input = params as Parameters<CodexAppServerDriver["threadRead"]>[0];
+    const request = requireNativeRecord(params, "external thread read request");
+    const threadId = requireNativeString(request.threadId, "threadId");
+    const includeTurns = request.includeTurns !== false;
+    const limit = externalThreadPageLimit(request.limit);
+    const before = await this.#decodeAndValidateTurnCursor(
+      runtimeId,
+      threadId,
+      nativeString(request.beforeCursor),
+    );
+    const input = { threadId, includeTurns: false };
     const bindingsByThread = await this.#bindingsByThread(runtimeId);
     const expectedBinding = bindingsByThread.get(input.threadId);
     let result: Awaited<ReturnType<CodexAppServerDriver["threadRead"]>>;
@@ -631,10 +651,7 @@ export class ServiceExternalRuntimeController {
       result = await controlled.driver
         .threadRead(input)
         .catch(async (error: unknown) => {
-          if (
-            input.includeTurns !== false &&
-            isUnmaterializedThreadRead(error)
-          ) {
+          if (isUnmaterializedThreadRead(error)) {
             return controlled.driver.threadRead({
               ...input,
               includeTurns: false,
@@ -654,16 +671,227 @@ export class ServiceExternalRuntimeController {
           controlled,
           expectedBinding,
         ),
+        turnPage: emptyExternalThreadTurnPage(limit),
       };
     }
     const binding = bindingsByThread.get(result.thread.id);
-    const projected = await this.#projectExternalThread(
+    const metadataThread = {
+      ...requireNativeRecord(result.thread, "thread"),
+      turns: [],
+    };
+    let projected = await this.#projectExternalThread(
       controlled,
-      result.thread,
+      metadataThread,
       false,
       binding,
     );
-    return { thread: projected };
+    if (!includeTurns) {
+      return {
+        thread: { ...projected, turns: [] },
+        turnPage: emptyExternalThreadTurnPage(limit),
+      };
+    }
+    const page = await this.#bridge.queryExternalTurnPage({
+      runtimeId,
+      nativeThreadId: threadId,
+      ...(before === null ? {} : { before }),
+      limit,
+    });
+    const nativeTurns = Array.isArray(
+      requireNativeRecord(result.thread, "thread").turns,
+    )
+      ? (requireNativeRecord(result.thread, "thread").turns as unknown[])
+      : [];
+    if (
+      page.items.length === 0 &&
+      before === null &&
+      nativeTurns.length > 0 &&
+      nativeTurns.length <= limit
+    ) {
+      const compatible = await this.#projectExternalThread(
+        controlled,
+        result.thread,
+        false,
+        binding,
+      );
+      return {
+        thread: compatible,
+        turnPage: emptyExternalThreadTurnPage(limit),
+      };
+    }
+    const turns = await Promise.all(
+      page.items.map((correlation) =>
+        this.#projectExternalTurnFromDurableEvents(runtimeId, correlation),
+      ),
+    );
+    projected = { ...projected, turns };
+    const first = page.items.at(0);
+    const last = page.items.at(-1);
+    return {
+      thread: projected,
+      turnPage: {
+        limit,
+        hasMoreBefore: page.hasMoreBefore,
+        beforeCursor:
+          page.hasMoreBefore && first !== undefined
+            ? encodeExternalTurnCursor(runtimeId, threadId, first)
+            : null,
+        pageStartCursor:
+          first === undefined
+            ? null
+            : encodeExternalTurnCursor(runtimeId, threadId, first),
+        pageEndCursor:
+          last === undefined
+            ? null
+            : encodeExternalTurnCursor(runtimeId, threadId, last),
+      },
+    };
+  }
+
+  async #decodeAndValidateTurnCursor(
+    runtimeId: string,
+    threadId: string,
+    cursor: string | undefined,
+  ) {
+    if (cursor === undefined) return null;
+    let decoded: ExternalTurnCursorPayload;
+    try {
+      decoded = decodeExternalTurnCursor(cursor);
+    } catch (error) {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_cursor_invalid",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    if (decoded.runtimeId !== runtimeId || decoded.threadId !== threadId) {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_cursor_stale",
+        "turn cursor belongs to a different runtime or native thread",
+      );
+    }
+    const turn = await this.#bridge.getExternalTurn(decoded.requestId);
+    if (
+      turn === undefined ||
+      turn.runtimeId !== runtimeId ||
+      turn.nativeThreadId !== threadId ||
+      turn.request.createdAt !== decoded.createdAt
+    ) {
+      throw new ExternalThreadLifecycleError(
+        "external_thread_cursor_out_of_range",
+        "turn cursor no longer resolves within the selected native thread",
+      );
+    }
+    return { createdAt: decoded.createdAt, requestId: decoded.requestId };
+  }
+
+  async #projectExternalTurnFromDurableEvents(
+    runtimeId: string,
+    correlation: ExternalTurnCorrelation,
+  ): Promise<ExternalThreadTurnProjection> {
+    const events =
+      correlation.nativeTurnId === null
+        ? []
+        : await this.#bridge.queryExternalRuntimeEvents({
+            runtimeId,
+            nativeTurnId: correlation.nativeTurnId,
+            afterSequence: 0,
+            limit: MAX_EXTERNAL_THREAD_ITEMS_PER_TURN + 2,
+          });
+    const items = projectDurableExternalTurnItems(correlation, events);
+    const projectedItems = await this.#attachDurableExternalTurnInputImages(
+      items.items,
+      correlation,
+      events,
+    );
+    const startedAt = timestampSeconds(correlation.request.createdAt);
+    const completedAt =
+      correlation.phase === "accepted" ||
+      correlation.phase === "starting" ||
+      correlation.phase === "active" ||
+      correlation.phase === "waiting_interaction"
+        ? null
+        : timestampSeconds(correlation.updatedAt);
+    return {
+      turnId:
+        correlation.nativeTurnId ?? `pending:${correlation.request.requestId}`,
+      status: crewTurnStatus(correlation.phase),
+      statusSource: "crew_terminal",
+      terminalReasonCode: correlation.terminalReasonCode ?? null,
+      error: projectTerminalError(correlation.terminalError) ?? null,
+      startedAt,
+      completedAt,
+      durationMs:
+        completedAt === null
+          ? null
+          : Math.max(0, (completedAt - startedAt) * 1_000),
+      items: projectedItems,
+      ...(items.truncated ? { itemsTruncated: true } : {}),
+    };
+  }
+
+  async #attachDurableExternalTurnInputImages(
+    items: readonly ExternalThreadItemProjection[],
+    correlation: ExternalTurnCorrelation,
+    events: readonly NormalizedExternalRuntimeEvent[],
+  ): Promise<ExternalThreadItemProjection[]> {
+    const initialUrls = correlation.request.input.flatMap((part) =>
+      part.type === "image" ? [part.url] : [],
+    );
+    const steerInputs = events.filter(
+      (event) =>
+        event.kind === "external_turn_steer_input" && event.itemId != null,
+    );
+    if (initialUrls.length === 0 && steerInputs.length === 0) return [...items];
+    const attachments = await this.#querySessionAttachments(
+      correlation.request.sessionId,
+    );
+    const byUrl = new Map<string, ExternalInputImageReference>();
+    const byId = new Map<string, ExternalInputImageReference>();
+    for (const attachment of attachments) {
+      const storageUrl = nativeString(attachment.storage_url);
+      const attachmentId = nativeString(attachment.attachment_id);
+      const filename = nativeString(attachment.filename);
+      const mimeType = nativeString(attachment.mime_type);
+      const byteSize = nativeNumber(attachment.byte_size);
+      if (
+        storageUrl === undefined ||
+        attachmentId === undefined ||
+        filename === undefined ||
+        mimeType === undefined ||
+        byteSize === undefined
+      )
+        continue;
+      const metadata = isRecord(attachment.metadata_json)
+        ? attachment.metadata_json
+        : {};
+      const reference: ExternalInputImageReference = {
+        attachmentId,
+        filename,
+        mimeType,
+        byteSize,
+        sha256: nativeString(metadata.content_sha256) ?? null,
+        contentUrl: `/v1/chat/sessions/${encodeURIComponent(correlation.request.sessionId)}/attachments/${encodeURIComponent(attachmentId)}/content`,
+      };
+      byUrl.set(storageUrl, reference);
+      byId.set(attachmentId, reference);
+    }
+    return items.map((item, index) => {
+      const attachmentIds = steerInputs.find(
+        (event) => event.itemId === item.itemId,
+      )?.payload;
+      const steerIds =
+        isRecord(attachmentIds) &&
+        Array.isArray(attachmentIds.imageAttachmentIds)
+          ? attachmentIds.imageAttachmentIds.filter(
+              (value): value is string => typeof value === "string",
+            )
+          : [];
+      const inputImages =
+        index === 0
+          ? initialUrls.flatMap((url) => byUrl.get(url) ?? [])
+          : steerIds.flatMap((id) => byId.get(id) ?? []);
+      return inputImages.length === 0 ? item : { ...item, inputImages };
+    });
   }
 
   async updateBindingMetadata(input: {
@@ -785,32 +1013,51 @@ export class ServiceExternalRuntimeController {
         saved.push({ before: binding, after });
       }
     } catch (error) {
-      const compensationFailures: string[] = [];
-      for (const transition of saved.reverse()) {
-        await this.#bridge
-          .bindExternalAgent({
-            binding: {
-              ...transition.after,
-              status: transition.before.status,
-              updatedAt: this.#now().toISOString(),
-            },
-            expectedRevision: transition.after.revision,
-          })
-          .catch((compensationError: unknown) => {
-            compensationFailures.push(String(compensationError));
-          });
-      }
-      if (nativeArchiveApplied) {
-        await controlled.driver
-          .threadUnarchive({ threadId })
-          .catch((compensationError: unknown) => {
-            compensationFailures.push(String(compensationError));
-          });
-      }
       throw new ExternalThreadLifecycleError(
         "external_thread_binding_reconciliation_failed",
-        `binding reconciliation failed after native archive: ${String(error)}; compensation failures: ${compensationFailures.length === 0 ? "none" : compensationFailures.join("; ")}`,
+        `binding reconciliation is partial after native archive: ${String(error)}; retry archive to reconcile the remaining binding and Crew session state`,
       );
+    }
+
+    const crewSessions: Array<{
+      sessionId: string;
+      previousStatus: string;
+      currentStatus: string;
+    }> = [];
+    for (const sessionId of [
+      ...new Set(
+        bindings.flatMap((binding) =>
+          binding.sessionId == null ? [] : [binding.sessionId],
+        ),
+      ),
+    ].sort()) {
+      const before = (await this.#bridge.listSessions()).find(
+        (session) => session.sessionId === sessionId,
+      );
+      if (before === undefined) {
+        throw new ExternalThreadLifecycleError(
+          "external_thread_crew_session_reconciliation_failed",
+          `Crew session ${sessionId} could not be read after native and binding archive; retry archive to reconcile`,
+        );
+      }
+      let afterStatus: string = before.status;
+      if (before.status !== "archived") {
+        try {
+          afterStatus = (
+            await this.#bridge.archiveSession(sessionId as SessionId)
+          ).status;
+        } catch (error) {
+          throw new ExternalThreadLifecycleError(
+            "external_thread_crew_session_reconciliation_failed",
+            `native thread and binding are archived but Crew session ${sessionId} is not: ${String(error)}; retry archive to reconcile`,
+          );
+        }
+      }
+      crewSessions.push({
+        sessionId,
+        previousStatus: before.status,
+        currentStatus: afterStatus,
+      });
     }
 
     controlled.archivedThreadIds.add(threadId);
@@ -823,6 +1070,7 @@ export class ServiceExternalRuntimeController {
       true,
       bindings,
       new Map(saved.map(({ before, after }) => [before.bindingId, after])),
+      crewSessions,
     );
   }
 
@@ -955,7 +1203,7 @@ export class ServiceExternalRuntimeController {
         threadId,
         "unarchive",
         "already_active",
-        false,
+        true,
         bindings,
       );
     }
@@ -1013,7 +1261,10 @@ export class ServiceExternalRuntimeController {
     expectedBindingRevision?: number;
   }): Promise<ExternalRuntimeCommandExecutionResult> {
     const parsed = parseExternalRuntimeCommand(input.commandInput);
-    const binding = await this.#requireCommandBinding(input.bindingId);
+    const binding = await this.#requireCommandBinding(
+      input.bindingId,
+      parsed.command === "new" || parsed.command === "restart",
+    );
     const controlled = await this.#requireControlled(binding.runtimeId);
     const commandId = `external-command:${createHash("sha256")
       .update(`${binding.bindingId}\0${input.idempotencyKey}`)
@@ -3308,10 +3559,10 @@ export class ServiceExternalRuntimeController {
         currentBinding,
         controlId,
         "external_command_new_session",
-        false,
+        true,
       );
       return {
-        message: `Started a distinct Codex session for ${currentBinding.label ?? currentBinding.bindingId}; the predecessor remains readable.`,
+        message: `Archived the predecessor and started a distinct Codex session for ${currentBinding.label ?? currentBinding.bindingId}; archived history remains readable.`,
         result: {
           threadReplacement: {
             bindingId: replacement.binding.bindingId,
@@ -3344,7 +3595,7 @@ export class ServiceExternalRuntimeController {
   async #createDistinctThreadSuccessor(
     controlled: ControlledRuntime,
     predecessor: ExternalAgentBinding & { nativeThreadId: string },
-    transitionId: string,
+    _transitionId: string,
     reasonCode: string,
     archivePredecessor: boolean,
   ): Promise<{
@@ -3370,6 +3621,20 @@ export class ServiceExternalRuntimeController {
       controlled,
       predecessor,
     ).catch(() => undefined);
+    const transitionId = `thread-replacement:${createHash("sha256")
+      .update(
+        `${predecessor.bindingId}\0${predecessor.sessionId}\0${predecessor.nativeThreadId}\0${reasonCode}`,
+      )
+      .digest("hex")
+      .slice(0, 32)}`;
+    let previousNativeThreadArchived = false;
+    if (archivePredecessor) {
+      const archive = await this.archiveThread(
+        predecessor.runtimeId,
+        predecessor.nativeThreadId,
+      );
+      previousNativeThreadArchived = archive.nativeArchived;
+    }
     const created = await this.createAgentSession({
       idempotencyKey: `thread-lineage:${transitionId}`,
       runtimeId: predecessor.runtimeId,
@@ -3445,20 +3710,12 @@ export class ServiceExternalRuntimeController {
       predecessor,
       successor,
     );
-    let previousNativeThreadArchived = false;
-    if (archivePredecessor) {
-      const archive = await this.archiveThread(
-        predecessor.runtimeId,
-        predecessor.nativeThreadId,
-      );
-      previousNativeThreadArchived = archive.nativeArchived;
-    }
     await this.#bridge.recordExternalRuntimeEvent({
       controller: this.#controllerContext(controlled),
       event: {
         eventId: `thread-lineage:${transitionId}`,
         sessionId: successor.sessionId ?? undefined,
-        createdAt: this.#now().toISOString(),
+        createdAt: expectedLineage.createdAt,
         kind: "thread_lineage_replaced",
         runtimeId: successor.runtimeId,
         nativeThreadId,
@@ -4587,6 +4844,7 @@ export class ServiceExternalRuntimeController {
     nativeArchived: boolean,
     bindings: readonly ExternalAgentBinding[],
     saved = new Map<string, ExternalAgentBinding>(),
+    crewSessions: ExternalThreadLifecycleReceipt["crewSessions"] = [],
   ): ExternalThreadLifecycleReceipt {
     return {
       runtimeId,
@@ -4595,6 +4853,7 @@ export class ServiceExternalRuntimeController {
       outcome,
       nativeArchived,
       bindings: this.#bindingTransitions(bindings, saved),
+      crewSessions,
     };
   }
 
@@ -4668,9 +4927,13 @@ export class ServiceExternalRuntimeController {
 
   async #requireCommandBinding(
     bindingId: string,
+    allowArchivedReplacement = false,
   ): Promise<ExternalAgentBinding & { nativeThreadId: string }> {
     const binding = await this.#requireBinding(bindingId);
-    if (binding.status !== "active") {
+    if (
+      binding.status !== "active" &&
+      !(allowArchivedReplacement && binding.status === "archived")
+    ) {
       throw new ExternalRuntimeCommandError(
         "external_command_settings_unavailable",
         `external binding ${bindingId} is not active`,
@@ -4997,6 +5260,204 @@ function projectTerminalError(value: ExternalTurnCorrelation["terminalError"]) {
   return {
     ...diagnostic,
     willRetry: value.willRetry ?? null,
+  };
+}
+
+type ExternalTurnCursorPayload = {
+  readonly version: 1;
+  readonly runtimeId: string;
+  readonly threadId: string;
+  readonly createdAt: string;
+  readonly requestId: string;
+};
+
+function encodeExternalTurnCursor(
+  runtimeId: string,
+  threadId: string,
+  correlation: ExternalTurnCorrelation,
+): string {
+  const payload: ExternalTurnCursorPayload = {
+    version: 1,
+    runtimeId,
+    threadId,
+    createdAt: correlation.request.createdAt,
+    requestId: correlation.request.requestId,
+  };
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+}
+
+function decodeExternalTurnCursor(cursor: string): ExternalTurnCursorPayload {
+  if (cursor.length === 0 || cursor.length > 2_048) {
+    throw new Error("turn cursor must be a non-empty bounded token");
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("turn cursor is not valid base64url JSON");
+  }
+  if (!isRecord(value) || value.version !== 1) {
+    throw new Error("turn cursor version is unsupported");
+  }
+  const runtimeId = stringValue(value.runtimeId);
+  const threadId = stringValue(value.threadId);
+  const createdAt = stringValue(value.createdAt);
+  const requestId = stringValue(value.requestId);
+  if (
+    runtimeId === undefined ||
+    threadId === undefined ||
+    createdAt === undefined ||
+    requestId === undefined ||
+    !Number.isFinite(Date.parse(createdAt))
+  ) {
+    throw new Error("turn cursor payload is malformed");
+  }
+  return { version: 1, runtimeId, threadId, createdAt, requestId };
+}
+
+function externalThreadPageLimit(value: unknown): number {
+  if (value === undefined) return DEFAULT_EXTERNAL_THREAD_TURN_PAGE_LIMIT;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > MAX_EXTERNAL_THREAD_TURN_PAGE_LIMIT
+  ) {
+    throw new ExternalThreadLifecycleError(
+      "external_thread_listing_limit_exceeded",
+      `turn page limit must be between 1 and ${MAX_EXTERNAL_THREAD_TURN_PAGE_LIMIT}`,
+    );
+  }
+  return value;
+}
+
+function emptyExternalThreadTurnPage(limit: number) {
+  return {
+    limit,
+    hasMoreBefore: false,
+    beforeCursor: null,
+    pageStartCursor: null,
+    pageEndCursor: null,
+  } as const;
+}
+
+function crewTurnStatus(phase: ExternalTurnCorrelation["phase"]): string {
+  switch (phase) {
+    case "accepted":
+    case "starting":
+    case "active":
+    case "waiting_interaction":
+      return "inProgress";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "interrupted":
+      return "interrupted";
+    case "outcome_unknown":
+      return "outcomeUnknown";
+  }
+}
+
+function projectDurableExternalTurnItems(
+  correlation: ExternalTurnCorrelation,
+  events: readonly NormalizedExternalRuntimeEvent[],
+): { items: ExternalThreadItemProjection[]; truncated: boolean } {
+  const items: ExternalThreadItemProjection[] = [];
+  const inputText = correlation.request.input
+    .flatMap((part) => (part.type === "text" ? [part.text] : []))
+    .join("\n");
+  if (inputText.length > 0) {
+    const bounded = boundedExternalThreadText(inputText);
+    items.push({
+      itemId: `request:${correlation.request.requestId}`,
+      kind: "userMessage",
+      text: bounded.value,
+      ...(bounded.truncated ? { truncated: true } : {}),
+    });
+  }
+  const latestByItem = new Map<string, NormalizedExternalRuntimeEvent>();
+  for (const event of events) {
+    if (event.itemId == null) continue;
+    latestByItem.set(event.itemId, event);
+  }
+  const durableItems = [...latestByItem.values()]
+    .sort((left, right) => left.sequenceId - right.sequenceId)
+    .slice(0, MAX_EXTERNAL_THREAD_ITEMS_PER_TURN - items.length)
+    .map(projectDurableExternalThreadItem);
+  items.push(...durableItems);
+  return {
+    items,
+    truncated:
+      latestByItem.size > durableItems.length ||
+      events.length > MAX_EXTERNAL_THREAD_ITEMS_PER_TURN + 1,
+  };
+}
+
+function projectDurableExternalThreadItem(
+  event: NormalizedExternalRuntimeEvent,
+): ExternalThreadItemProjection {
+  const payload = isRecord(event.payload) ? event.payload : {};
+  const rawText = stringValue(payload.text) ?? stringValue(payload.output);
+  const text =
+    rawText === undefined ? undefined : boundedExternalThreadText(rawText);
+  const rawSummary = Array.isArray(payload.summary)
+    ? payload.summary.filter(
+        (entry): entry is string => typeof entry === "string",
+      )
+    : [];
+  const summary = rawSummary
+    .slice(0, MAX_EXTERNAL_THREAD_ITEM_SUMMARY_ENTRIES)
+    .map(
+      (entry) =>
+        boundedExternalThreadText(entry, MAX_EXTERNAL_THREAD_ITEM_SUMMARY_CHARS)
+          .value,
+    );
+  const kind =
+    event.kind === "external_turn_steer_input" ||
+    event.kind === "external_turn_steer_intent"
+      ? "userMessage"
+      : stringValue(payload.messagePhase) !== undefined
+        ? "agentMessage"
+        : stringValue(payload.command) !== undefined
+          ? "commandExecution"
+          : stringValue(payload.server) !== undefined
+            ? "mcpToolCall"
+            : stringValue(payload.tool) !== undefined
+              ? "dynamicToolCall"
+              : summary.length > 0
+                ? "reasoning"
+                : "item";
+  return {
+    itemId: event.itemId ?? event.eventId,
+    kind,
+    ...(stringValue(payload.status) === undefined
+      ? {}
+      : { status: stringValue(payload.status) }),
+    ...(text === undefined ? {} : { text: text.value }),
+    ...(summary.length === 0 ? {} : { summary }),
+    ...(kind === "agentMessage"
+      ? { messagePhase: projectAgentMessagePhase(payload.messagePhase) }
+      : {}),
+    ...(event.rawDetailRef == null ? {} : { detailHandle: event.rawDetailRef }),
+    ...(text?.truncated === true ||
+    rawSummary.length > summary.length ||
+    rawSummary.some(
+      (entry) => entry.length > MAX_EXTERNAL_THREAD_ITEM_SUMMARY_CHARS,
+    )
+      ? { truncated: true }
+      : {}),
+  };
+}
+
+function boundedExternalThreadText(
+  value: string,
+  limit = MAX_EXTERNAL_THREAD_ITEM_TEXT_CHARS,
+): { value: string; truncated: boolean } {
+  if (value.length <= limit) return { value, truncated: false };
+  return {
+    value: `${value.slice(0, limit - 15)}...[truncated]`,
+    truncated: true,
   };
 }
 

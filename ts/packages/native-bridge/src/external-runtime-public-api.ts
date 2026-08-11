@@ -118,6 +118,7 @@ export interface NativeExternalRuntimeBridgeMethods
   queryExternalRuntimeEvents(input: {
     runtimeId: string;
     nativeThreadId?: string;
+    nativeTurnId?: string;
     afterSequence: number;
     limit: number;
     tail?: boolean;
