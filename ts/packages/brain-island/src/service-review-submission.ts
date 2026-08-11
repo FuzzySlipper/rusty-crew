@@ -1445,7 +1445,7 @@ async function dispatchReviewer(
       record.dispatchDeliveryId === undefined ||
         record.dispatchDeliveryId === null
         ? undefined
-        : record.revision,
+        : record.dispatchDeliveryId,
     );
     const deliveryId = `review-delivery:${attemptIdentity}`;
     const existing = await context.bridge.getAgentMessageDelivery(deliveryId);
@@ -1500,14 +1500,16 @@ async function dispatchReviewer(
 export function reviewerDispatchIdentity(
   submissionIdentity: string,
   resolution: AgentRouteResolution,
-  recoveryRevision?: number,
+  recoveryOfDeliveryId?: string,
 ): string {
   const routeRevision = resolution.route?.revision ?? 0;
   const bindingRevision = resolution.resolvedTarget?.bindingRevision ?? 0;
   const base = `${submissionIdentity}:route-${routeRevision}:binding-${bindingRevision}`;
-  return recoveryRevision === undefined
-    ? base
-    : `${base}:recovery-${recoveryRevision}`;
+  if (recoveryOfDeliveryId === undefined) return base;
+  const recoveryGeneration = createHash("sha256")
+    .update(recoveryOfDeliveryId)
+    .digest("hex");
+  return `${submissionIdentity}:recovery-${recoveryGeneration}`;
 }
 
 async function reconcileDispatchedReviewer(

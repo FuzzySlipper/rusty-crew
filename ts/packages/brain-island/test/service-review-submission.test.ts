@@ -150,8 +150,20 @@ test("review dispatch identity changes only with resolved route authority", () =
     "review-1:route-4:binding-14",
   );
   assert.equal(
-    reviewerDispatchIdentity("review-1", resolution, 9),
-    "review-1:route-3:binding-14:recovery-9",
+    reviewerDispatchIdentity(
+      "review-1",
+      resolution,
+      "review-delivery:original",
+    ),
+    "review-1:recovery-390f042ab9e80e4e71441196a4a0ed205a2a1104991a355b31d0dfd9e4593a2b",
+  );
+  assert.equal(
+    reviewerDispatchIdentity(
+      "review-1",
+      { ...resolution, route: { ...resolution.route!, revision: 99 } },
+      "review-delivery:original",
+    ),
+    "review-1:recovery-390f042ab9e80e4e71441196a4a0ed205a2a1104991a355b31d0dfd9e4593a2b",
   );
 });
 
@@ -251,8 +263,107 @@ test("completed reviewer turn is redispatched once with a new durable identity",
     "reviewer_dispatched",
   ]);
   assert.equal(deliveredIds.length, 1);
-  assert.match(deliveredIds[0]!, /:recovery-6$/);
+  assert.match(deliveredIds[0]!, /:recovery-[0-9a-f]{64}$/);
   assert.notEqual(deliveredIds[0], "review-delivery:original");
+});
+
+test("ambiguous accepted recovery resumes one stable delivery after revision advances", async () => {
+  let durable = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "external-review",
+      idempotencyKey: "ambiguous-recovery",
+    }),
+    submissionId: `review-submission:${"b".repeat(64)}`,
+    phase: "reviewer_dispatch_pending" as const,
+    reviewerSessionId: "reviewer-session",
+    dispatchMessageId: "review-message:original",
+    dispatchDeliveryId: "review-delivery:original",
+    revision: 6,
+  } as ReviewSubmissionRecord;
+  let storedDelivery: Record<string, unknown> | undefined;
+  let applyAttempts = 0;
+  let resolutionRevision = 4;
+  const deliveredIds: string[] = [];
+  const lookedUpIds: string[] = [];
+  const transitionTypes: string[] = [];
+  const context = {
+    bridge: {
+      listReviewSubmissions: async () => [durable],
+      resolveAgentAddress: async () => ({
+        address: "@reviewer",
+        routable: true,
+        route: { revision: resolutionRevision++ },
+        resolvedTarget: {
+          bindingRevision: 5,
+          sessionId: "reviewer-session",
+        },
+      }),
+      getAgentMessageDelivery: async (deliveryId: string) => {
+        lookedUpIds.push(deliveryId);
+        return storedDelivery;
+      },
+      deliverAgentMessage: async (request: {
+        deliveryId: string;
+        messageId: string;
+      }) => {
+        deliveredIds.push(request.deliveryId);
+        storedDelivery = {
+          status: "accepted",
+          revision: 1,
+          request: { ...request, toSessionId: "reviewer-session" },
+        };
+        return storedDelivery;
+      },
+      transitionReviewSubmission: async (request: {
+        transition: {
+          type: string;
+          reviewerSessionId?: string;
+          dispatchMessageId?: string;
+          dispatchDeliveryId?: string;
+        };
+      }) => {
+        transitionTypes.push(request.transition.type);
+        durable = {
+          ...durable,
+          phase:
+            request.transition.type === "reviewer_dispatched"
+              ? "reviewer_dispatched"
+              : durable.phase,
+          reviewerSessionId:
+            request.transition.reviewerSessionId ?? durable.reviewerSessionId,
+          dispatchMessageId:
+            request.transition.dispatchMessageId ?? durable.dispatchMessageId,
+          dispatchDeliveryId:
+            request.transition.dispatchDeliveryId ?? durable.dispatchDeliveryId,
+          revision: durable.revision + 1,
+        } as ReviewSubmissionRecord;
+        return durable;
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-10T12:00:00.000Z",
+    applyCoordinationDelivery: async (receipt: never) => {
+      applyAttempts += 1;
+      if (applyAttempts === 1) {
+        throw new Error("ambiguous post-accept delivery failure");
+      }
+      return receipt;
+    },
+  };
+
+  await reconcileReviewSubmissions(context);
+  assert.equal(durable.phase, "reviewer_dispatch_pending");
+  assert.equal(durable.revision, 7);
+  await reconcileReviewSubmissions(context);
+
+  assert.equal(durable.phase, "reviewer_dispatched");
+  assert.deepEqual(transitionTypes, ["adapter_failed", "reviewer_dispatched"]);
+  assert.equal(deliveredIds.length, 1);
+  assert.deepEqual(lookedUpIds, [deliveredIds[0], deliveredIds[0]]);
+  assert.equal(applyAttempts, 2);
+  assert.equal(durable.dispatchDeliveryId, deliveredIds[0]);
 });
 
 test("stale accepted reviewer turn with no native claim returns to dispatch pending", async () => {
