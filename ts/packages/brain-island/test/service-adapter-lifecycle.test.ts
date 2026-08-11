@@ -6,6 +6,7 @@ import type {
   NativeInstallDiplomatBindingRecord,
 } from "@rusty-crew/native-bridge";
 import {
+  projectTelegramDiplomatWakeReplies,
   startTelegramConnector,
   telegramBotTokenFromServiceCredentialSecret,
   type ServiceAdapterLifecycleContext,
@@ -118,6 +119,7 @@ test("Telegram connector rejects malformed JSON envelopes without exposing input
 test("routed Telegram diplomat ingress delivers once without generic channel bindings", async () => {
   let connectorInput: TelegramConnectorFactoryInput | undefined;
   let deliveryCount = 0;
+  const outbound: Array<Record<string, unknown>> = [];
   const bridge = {
     getServiceCredentialSecret: async () =>
       JSON.stringify({ kind: "api_key", version: 1, value: "bot-token" }),
@@ -159,7 +161,9 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
         start: async () => undefined,
         stop: () => undefined,
         pollOnce: async () => undefined,
-        sendOutbound: async () => undefined,
+        sendOutbound: async (message: Record<string, unknown>) => {
+          outbound.push(message);
+        },
         diagnostics: () => ({ bindingCount: 1 }),
       } as never;
     },
@@ -212,6 +216,7 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
     denConversationMembershipsByBindingId: new Map(),
     dynamicDenChannelBindings: new Map(),
     channelProjectionFailures: [],
+    telegramDiplomatPendingReplies: new Map(),
     now: () => now,
     isStopping: () => false,
     recordEvent: () => undefined,
@@ -229,4 +234,35 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
   const result = await connectorInput.onInbound(inboundMessage);
   assert.equal(result.status, "routed");
   assert.equal(deliveryCount, 1);
+  const report = {
+    sessionId: "session-1",
+    wakeId: "wake-1",
+    status: "completed",
+    summary: "completed",
+    observedEvents: [
+      {
+        type: "brain_event_observed",
+        sessionId: "session-1",
+        wakeId: "wake-1",
+        event: { type: "text_delta", text: "Service " },
+      },
+      {
+        type: "brain_event_observed",
+        sessionId: "session-1",
+        wakeId: "wake-1",
+        event: { type: "text_delta", text: "is healthy." },
+      },
+    ],
+  } as never;
+  await projectTelegramDiplomatWakeReplies(context, [report]);
+  await projectTelegramDiplomatWakeReplies(context, [report]);
+  assert.equal(outbound.length, 1);
+  assert.equal(outbound[0]?.body, "Service is healthy.");
+  assert.equal(outbound[0]?.bindingId, "binding-1");
+  assert.equal(outbound[0]?.replyToExternalMessageId, "message-1");
+  assert.equal(outbound[0]?.correlationId, "telegram-correlation-1");
+  assert.equal(
+    outbound[0]?.idempotencyKey,
+    "telegram-diplomat-reply:telegram:-1001:message-1",
+  );
 });

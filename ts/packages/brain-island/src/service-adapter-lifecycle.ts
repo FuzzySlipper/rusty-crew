@@ -8,6 +8,7 @@ import type {
   ChannelSubscriptionStatus,
   CoreEvent,
   NormalizedChannelInboundMessage,
+  NormalizedChannelOutboundMessage,
   ProfileId,
   SessionId,
   SubscriptionHandle,
@@ -50,6 +51,13 @@ import type {
 } from "./service-adapter-ports.js";
 import type { RustyCrewServiceConfig } from "./service-config.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
+import type { ServiceWakeDispatchReport } from "./service-wake-dispatch.js";
+
+export interface TelegramDiplomatPendingReply {
+  readonly sessionId: SessionId;
+  readonly message: NormalizedChannelOutboundMessage;
+  body?: string;
+}
 
 export interface AdapterLifecycleServiceEvent {
   source: string;
@@ -87,6 +95,10 @@ export interface ServiceAdapterLifecycleContext {
     ChannelAdapterBindingDiagnostics
   >;
   readonly channelProjectionFailures: ChannelProjectionFailureRecord[];
+  readonly telegramDiplomatPendingReplies: Map<
+    SessionId,
+    TelegramDiplomatPendingReply[]
+  >;
   now(): string;
   isStopping(): boolean;
   recordEvent(event: AdapterLifecycleServiceEvent): void;
@@ -556,6 +568,50 @@ export async function startTelegramConnector(
             createdAt: message.receivedAt,
             expiresAt: message.expiresAt,
           });
+          const replyBinding = telegramBindings.find(
+            (binding) => binding.bindingId === route.bindingId,
+          );
+          const replySessionId = route.sessionId as SessionId | undefined;
+          if (
+            receipt.status === "accepted" &&
+            diplomatBinding !== undefined &&
+            replyBinding !== undefined &&
+            replySessionId !== undefined
+          ) {
+            enqueueTelegramDiplomatReply(context, {
+              sessionId: replySessionId,
+              message: {
+                kind: "channel_outbound_message.v1",
+                adapterId: replyBinding.adapterId,
+                bindingId: replyBinding.bindingId,
+                runtime: {
+                  agentId: replyBinding.agentId,
+                  sessionId: replySessionId,
+                  profileId: replyBinding.profileId,
+                },
+                providerRefs: {
+                  provider: "telegram",
+                  externalChannelId: message.providerRefs.externalChannelId,
+                  ...(message.providerRefs.externalThreadId === undefined
+                    ? {}
+                    : {
+                        externalThreadId: message.providerRefs.externalThreadId,
+                      }),
+                },
+                body: "",
+                ...(message.providerRefs.externalMessageId === undefined
+                  ? {}
+                  : {
+                      replyToExternalMessageId:
+                        message.providerRefs.externalMessageId,
+                    }),
+                correlationId: route.correlationId,
+                idempotencyKey: `telegram-diplomat-reply:${message.idempotencyKey}`,
+                visibility: "conversation",
+                deliveryPolicy: "must_ack",
+              },
+            });
+          }
           return {
             accepted: receipt.status === "accepted",
             sequence: receipt.sequence ?? 0,
@@ -577,6 +633,83 @@ export async function startTelegramConnector(
     eventType: "telegram_connector_started",
     summary: `Telegram connector started with ${connector.diagnostics().bindingCount} active binding(s).`,
   });
+}
+
+function enqueueTelegramDiplomatReply(
+  context: ServiceAdapterLifecycleContext,
+  pending: TelegramDiplomatPendingReply,
+): void {
+  const replies = context.telegramDiplomatPendingReplies.get(pending.sessionId);
+  if (replies === undefined) {
+    context.telegramDiplomatPendingReplies.set(pending.sessionId, [pending]);
+  } else {
+    replies.push(pending);
+  }
+}
+
+export async function projectTelegramDiplomatWakeReplies(
+  context: ServiceAdapterLifecycleContext,
+  reports: readonly ServiceWakeDispatchReport[],
+): Promise<void> {
+  const connector = context.telegramConnector;
+  if (connector === undefined) return;
+  for (const report of reports) {
+    const pending = context.telegramDiplomatPendingReplies.get(
+      report.sessionId,
+    );
+    const reply = pending?.find((candidate) => candidate.body === undefined);
+    if (reply === undefined || report.status !== "completed") continue;
+    const body = assistantTextFromWakeReport(report);
+    if (body === undefined) continue;
+    reply.body = body;
+  }
+
+  for (const [sessionId, pending] of context.telegramDiplomatPendingReplies) {
+    while (pending.length > 0) {
+      const reply = pending[0];
+      if (reply?.body === undefined) break;
+      try {
+        await connector.sendOutbound({ ...reply.message, body: reply.body });
+        pending.shift();
+        context.recordEvent({
+          source: "telegram",
+          eventType: "telegram_diplomat_reply_sent",
+          summary: "Completed install-diplomat response projected to Telegram.",
+        });
+      } catch (error) {
+        recordChannelProjectionFailure(
+          context,
+          reply.message.bindingId,
+          "message",
+          error instanceof Error ? error.message : "Telegram reply failed",
+        );
+        break;
+      }
+    }
+    if (pending.length === 0) {
+      context.telegramDiplomatPendingReplies.delete(sessionId);
+    }
+  }
+}
+
+export function assistantTextFromWakeReport(
+  report: ServiceWakeDispatchReport,
+): string | undefined {
+  const text = (report.observedEvents ?? [])
+    .flatMap((event) =>
+      event.type === "brain_event_observed" && event.event.type === "text_delta"
+        ? [event.event.text]
+        : [],
+    )
+    .filter((part) => part.length > 0)
+    .reduce((merged, part) => {
+      if (!merged) return part;
+      if (part.startsWith(merged)) return part;
+      if (merged.endsWith(part)) return merged;
+      return `${merged}${part}`;
+    }, "")
+    .trim();
+  return text.length === 0 ? undefined : text;
 }
 
 export function telegramDiplomatRouteResolution(

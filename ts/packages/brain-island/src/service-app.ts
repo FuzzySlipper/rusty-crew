@@ -189,6 +189,7 @@ import {
   ensureDenConversationChannels as ensureDenConversationChannelsFromModule,
   recordDynamicDenDeliveryChannel as recordDynamicDenDeliveryChannelFromModule,
   restartTelegramConnector as restartTelegramConnectorFromModule,
+  projectTelegramDiplomatWakeReplies,
   startDenObservationProjection as startDenObservationProjectionFromModule,
   startTelegramConnector as startTelegramConnectorFromModule,
   stopTelegramConnector as stopTelegramConnectorFromModule,
@@ -494,6 +495,7 @@ interface ServiceState {
   >;
   readonly openAiOauthPendingLogins: Map<string, OpenAiOauthPendingLogin>;
   readonly channelProjectionFailures: ChannelProjectionFailureRecord[];
+  readonly telegramDiplomatPendingReplies: ServiceAdapterLifecycleContext["telegramDiplomatPendingReplies"];
   profileChannelWakePolicies: Map<string, ChannelWakePolicy>;
   mcpManager: McpSurfaceManagerPort;
   readonly wakeSubscription: SubscriptionHandle;
@@ -766,6 +768,7 @@ function adapterLifecycleContext(
       state.denConversationMembershipsByBindingId,
     dynamicDenChannelBindings: state.dynamicDenChannelBindings,
     channelProjectionFailures: state.channelProjectionFailures,
+    telegramDiplomatPendingReplies: state.telegramDiplomatPendingReplies,
     now: state.now,
     isStopping: () => state.stopping,
     recordEvent: (event) => recordServiceEvent(state, event),
@@ -1152,6 +1155,7 @@ export async function createRustyCrewServiceApp(
       dynamicDenChannelBindings: new Map(),
       openAiOauthPendingLogins: new Map(),
       channelProjectionFailures: [],
+      telegramDiplomatPendingReplies: new Map(),
       profileChannelWakePolicies,
       curator,
       backgroundReview: createServiceBackgroundReviewRuntime(runtimeConfig),
@@ -1247,10 +1251,16 @@ export async function createRustyCrewServiceApp(
             schedulerBackgroundContext(state),
             error,
           ),
-        drainAndDispatchWakes: () =>
-          drainAndDispatchWakesFromModule(
+        drainAndDispatchWakes: async () => {
+          const reports = await drainAndDispatchWakesFromModule(
             wakeEventDrainContext(state, "background"),
-          ),
+          );
+          await projectTelegramDiplomatWakeReplies(
+            adapterLifecycleContext(state),
+            reports,
+          );
+          return reports;
+        },
         heartbeatDenRuntimeInstances: () => heartbeatDenRuntimeInstances(state),
         pollDenDeliveryIntents: () => pollDenDeliveryIntents(state),
         drainTelegramOutboundMessages: () =>
