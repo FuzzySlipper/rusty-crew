@@ -233,7 +233,13 @@ impl CoreEngine {
                 gate_status,
                 terminal_reason,
             } => {
-                require_review_phase(&record, ReviewSubmissionPhase::GatePending)?;
+                let checkless_handoff = record.phase == ReviewSubmissionPhase::DenHandoffRecorded
+                    && record.required_checks.is_empty()
+                    && gate_status == "passed"
+                    && terminal_reason == "no_required_checks";
+                if !checkless_handoff {
+                    require_review_phase(&record, ReviewSubmissionPhase::GatePending)?;
+                }
                 if !matches!(
                     gate_status.as_str(),
                     "passed" | "failed" | "timed_out" | "superseded"
@@ -623,7 +629,8 @@ fn validate_review_submission_request(request: &ReviewSubmissionRequest) -> Core
         || !valid_repository
         || !crate::github_gate::valid_full_github_sha(&request.commit_sha)
         || request.git_ref.trim().is_empty()
-        || request.required_checks.is_empty()
+        || (request.required_checks.is_empty()
+            && !matches!(&request.caller, AgentCoordinationCaller::ExternalCli { .. }))
         || request
             .required_checks
             .iter()

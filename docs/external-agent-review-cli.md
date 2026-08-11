@@ -16,10 +16,10 @@ check is intentional: it prevents a debug review from silently going to the
 long-lived service, or a production review from being sent to the disposable
 service.
 
-| Deployment | Default URL | Role | Storage |
-| --- | --- | --- | --- |
-| Long-lived service | `http://127.0.0.1:9347` | `production` | PostgreSQL |
-| Disposable test service | `http://127.0.0.1:9348` | `debug` | SQLite |
+| Deployment              | Default URL             | Role         | Storage    |
+| ----------------------- | ----------------------- | ------------ | ---------- |
+| Long-lived service      | `http://127.0.0.1:9347` | `production` | PostgreSQL |
+| Disposable test service | `http://127.0.0.1:9348` | `debug`      | SQLite     |
 
 LAN and reverse-proxy URLs are fine, but the role flag is still required. The
 CLI does not infer a deployment from a port, hostname, or a mutable profile.
@@ -115,6 +115,30 @@ An identical task/SHA/client/idempotency submission is idempotent. Reusing the
 same idempotency key with different review material is rejected. A gate failure
 settles the task back to `in_progress` and does not dispatch `@reviewer`.
 
+Repositories without a GitHub check-run contract use explicit checkless mode:
+
+```bash
+rusty-crew-review submit \
+  --service-url http://127.0.0.1:9347 \
+  --deployment-role production \
+  --project-id den-services \
+  --task 6797 \
+  --repository FuzzySlipper/den-services \
+  --sha 0123456789abcdef0123456789abcdef01234567 \
+  --ref main \
+  --no-checks \
+  --base-sha fedcba9876543210fedcba9876543210fedcba98 \
+  --summary-file review-summary.md \
+  --client-id external-codex \
+  --idempotency-key task-6797-01234567
+```
+
+`--no-checks` skips only GitHub gate registration. Crew still creates the
+exact-SHA Den round, durably dispatches `@reviewer`, reconciles restarts, and
+requires terminal Crew plus Den readback. The flag is mutually exclusive with
+`--check`; omitting both is a usage error. Prefer a checked-in repository
+contract so external agents do not guess which mode applies.
+
 ## Status And Waiting
 
 Every submit response includes a `submissionId`. Read it later with an
@@ -175,15 +199,15 @@ review finished.
 
 Exit codes:
 
-| Code | Meaning |
-| --- | --- |
-| `0` | Accepted, or terminal `looks_good` review |
-| `2` | Still pending, including an explicit wait timeout |
-| `3` | GitHub gate failed, timed out, or was superseded by gate policy; inspect `gateStatus` and `terminalReason` |
-| `4` | Reviewer requested changes or the reply path was terminal |
-| `5` | This submission was superseded by a newer SHA for the task |
-| `64` | CLI usage or input error |
-| `70` | Service, authentication, or API error |
+| Code | Meaning                                                                                                    |
+| ---- | ---------------------------------------------------------------------------------------------------------- |
+| `0`  | Accepted, or terminal `looks_good` review                                                                  |
+| `2`  | Still pending, including an explicit wait timeout                                                          |
+| `3`  | GitHub gate failed, timed out, or was superseded by gate policy; inspect `gateStatus` and `terminalReason` |
+| `4`  | Reviewer requested changes or the reply path was terminal                                                  |
+| `5`  | This submission was superseded by a newer SHA for the task                                                 |
+| `64` | CLI usage or input error                                                                                   |
+| `70` | Service, authentication, or API error                                                                      |
 
 ## HTTP Contract
 

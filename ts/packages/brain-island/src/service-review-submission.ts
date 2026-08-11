@@ -408,7 +408,6 @@ function validateExternalReviewInput(
     input.repository.trim() === "" ||
     input.commitSha.trim() === "" ||
     input.ref.trim() === "" ||
-    input.requiredChecks.length === 0 ||
     input.requiredChecks.some((check) => check.trim() === "") ||
     input.reviewSummaryMd.trim() === "" ||
     input.reviewSummaryMd.length > 64 * 1024 ||
@@ -1321,6 +1320,19 @@ async function advanceDenHandoff(
         transition: { type: "den_handoff_recorded", reviewRoundId },
         now: context.now(),
       });
+    }
+    if (record.requiredChecks.length === 0) {
+      record = await context.bridge.transitionReviewSubmission({
+        submissionId: record.submissionId,
+        expectedRevision: record.revision,
+        transition: {
+          type: "gate_terminal",
+          gateStatus: "passed",
+          terminalReason: "no_required_checks",
+        },
+        now: context.now(),
+      });
+      return accepted(record);
     }
     const gate = await denCall(context, binding, "watch_github_checks", {
       task_id: Number(record.taskId),

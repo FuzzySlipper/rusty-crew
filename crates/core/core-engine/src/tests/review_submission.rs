@@ -374,6 +374,76 @@ fn external_cli_review_is_sessionless_and_gate_terminal_event_advances_it() {
 }
 
 #[test]
+fn external_cli_checkless_review_advances_directly_after_den_handoff() {
+    let engine = test_engine();
+    let mut record = engine
+        .begin_review_submission(ReviewSubmissionRequest {
+            caller: AgentCoordinationCaller::ExternalCli {
+                client_id: "unmanaged-codex".to_string(),
+                idempotency_key: "review-6797-checkless".to_string(),
+            },
+            project_id: ProjectId::new("den-services"),
+            task_id: TaskId::new("6797"),
+            repository: "FuzzySlipper/den-services".to_string(),
+            commit_sha: exact_sha('f'),
+            git_ref: "main".to_string(),
+            required_checks: Vec::new(),
+            base_commit: Some(exact_sha('0')),
+            review_summary_md: "Submitted without a GitHub gate.".to_string(),
+            reviewer: "@reviewer".to_string(),
+            now: "2026-08-11T05:00:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::DenHandoffRecorded {
+                review_round_id: 679701,
+            },
+            now: "2026-08-11T05:01:00Z".to_string(),
+        })
+        .unwrap();
+    record = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: record.submission_id.clone(),
+            expected_revision: record.revision,
+            transition: ReviewSubmissionTransition::GateTerminal {
+                gate_status: "passed".to_string(),
+                terminal_reason: "no_required_checks".to_string(),
+            },
+            now: "2026-08-11T05:02:00Z".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(record.phase, ReviewSubmissionPhase::ReviewerDispatchPending);
+    assert_eq!(record.gate_id, None);
+    assert_eq!(record.gate_status.as_deref(), Some("passed"));
+    assert_eq!(
+        record.terminal_reason.as_deref(),
+        Some("no_required_checks")
+    );
+}
+
+#[test]
+fn managed_brain_submission_still_requires_declared_checks() {
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "review-check-required-session",
+            "review-check-required-agent",
+            "review-check-required-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let mut input = request(&session.session_id, 6798, 'a');
+    input.required_checks.clear();
+
+    let error = engine.begin_review_submission(input).unwrap_err();
+    assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+}
+
+#[test]
 fn submitted_workflow_is_restart_pending_and_can_fill_initial_base_commit() {
     let data_dir = unique_data_dir("review-submission-early-restart");
     let engine = test_engine_with_data_dir(data_dir.clone());

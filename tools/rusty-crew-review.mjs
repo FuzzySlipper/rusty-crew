@@ -67,8 +67,17 @@ const main = async () => {
 async function submit(client, options, deploymentRole) {
   const summary = readSummary(options);
   const checks = options.values.check;
-  if (checks.length === 0) {
-    throw new CliError("submit requires at least one --check", EXIT.USAGE);
+  if (checks.length > 0 && options.noChecks) {
+    throw new CliError(
+      "submit accepts either --check or --no-checks, not both",
+      EXIT.USAGE,
+    );
+  }
+  if (checks.length === 0 && !options.noChecks) {
+    throw new CliError(
+      "submit requires at least one --check or explicit --no-checks",
+      EXIT.USAGE,
+    );
   }
   const data = await client.request("POST", "/v1/admin/review-submissions", {
     projectId: requiredOption(options, "project-id"),
@@ -233,6 +242,7 @@ function parseArgs(argv) {
     json: false,
     help: false,
     wait: false,
+    noChecks: false,
   };
   const valueOptions = new Set([
     "service-url",
@@ -270,6 +280,10 @@ function parseArgs(argv) {
     }
     if (arg === "--wait") {
       options.wait = true;
+      continue;
+    }
+    if (arg === "--no-checks") {
+      options.noChecks = true;
       continue;
     }
     const name = arg.slice(2);
@@ -372,6 +386,9 @@ function printData(data, json) {
 }
 
 function printUsage() {
+  process.stdout.write(
+    "Submit requires one or more --check NAME arguments, or explicit --no-checks.\n\n",
+  );
   process.stdout.write(
     `Usage:\n  rusty-crew-review submit --service-url URL --deployment-role production|debug \\\n    --project-id PROJECT --task ID --repository OWNER/REPO --sha SHA --ref REF \\\n    --check NAME --base-sha SHA --summary TEXT|--summary-file PATH \\\n    --client-id ID --idempotency-key KEY [--wait] [--json]\n\n  rusty-crew-review status --service-url URL --deployment-role production|debug \\\n    --submission-id ID [--wait] [--json]\n\n  rusty-crew-review recover --service-url URL --deployment-role production|debug \\\n    --submission-id ID --expected-revision REVISION [--wait] [--json]\n\nEnvironment:\n  RUSTY_CREW_ADMIN_TOKEN  Bearer token for the selected service (when enabled).\n\nExit codes:\n  0 success/accepted, 2 pending, 3 GitHub gate failed, 4 changes requested,\n  5 superseded, 64 usage error, 70 service error.\n`,
   );

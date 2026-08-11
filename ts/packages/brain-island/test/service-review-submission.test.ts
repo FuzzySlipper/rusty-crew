@@ -987,6 +987,61 @@ test("external review receipt preserves the caller-supplied project scope", asyn
   assert.equal(receipt.phase, "gate_pending");
 });
 
+test("checkless external review advances from Den handoff without registering a gate", async () => {
+  const pending = {
+    ...scopedSubmissionRecord("den-services", {
+      type: "external_cli",
+      clientId: "checkless-test",
+      idempotencyKey: "checkless-test-6797",
+    }),
+    requiredChecks: [],
+    phase: "den_handoff_recorded",
+    gateId: undefined,
+    reviewRoundId: 679701,
+    revision: 2,
+  } as ReviewSubmissionRecord;
+  const transitions: Array<Record<string, unknown>> = [];
+  const denCalls: string[] = [];
+
+  await reconcileReviewSubmissions({
+    bridge: {
+      listReviewSubmissions: async () => [pending],
+      transitionReviewSubmission: async (request: Record<string, unknown>) => {
+        transitions.push(request);
+        return {
+          ...pending,
+          phase: "reviewer_dispatch_pending",
+          gateStatus: "passed",
+          terminalReason: "no_required_checks",
+          revision: pending.revision + 1,
+        } as ReviewSubmissionRecord;
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-11T05:00:00.000Z",
+    callDenTool: async (_authority: unknown, toolName: string) => {
+      denCalls.push(toolName);
+      throw new Error(`unexpected Den tool ${toolName}`);
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  });
+
+  assert.deepEqual(denCalls, []);
+  assert.deepEqual(transitions, [
+    {
+      submissionId: pending.submissionId,
+      expectedRevision: pending.revision,
+      transition: {
+        type: "gate_terminal",
+        gateStatus: "passed",
+        terminalReason: "no_required_checks",
+      },
+      now: "2026-08-11T05:00:00.000Z",
+    },
+  ]);
+});
+
 test("external review admission stops before durable dispatch when service authority is invalid", async () => {
   let began = false;
   const context = reviewScopeContext(() => {
@@ -1415,6 +1470,23 @@ test("external review submission parser does not expose a reviewer override", ()
   assert.equal(request.taskId, 6644);
   assert.equal(request.clientId, "external-agent");
   assert.equal("reviewer" in request, false);
+});
+
+test("external review submission parser accepts an explicit checkless payload", () => {
+  const request = parseExternalReviewSubmissionRequest({
+    projectId: "den-services",
+    taskId: 6797,
+    repository: "FuzzySlipper/den-services",
+    commitSha: "a".repeat(40),
+    ref: "main",
+    requiredChecks: [],
+    baseCommit: "0".repeat(40),
+    reviewSummaryMd: "Ready for managed review without a GitHub gate.",
+    clientId: "external-agent",
+    idempotencyKey: "6797-a",
+    expectedDeploymentRole: "production",
+  });
+  assert.deepEqual(request.requiredChecks, []);
 });
 
 test("external recovery parser requires optimistic concurrency", () => {
