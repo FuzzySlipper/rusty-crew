@@ -350,10 +350,13 @@ export async function startTelegramConnector(
   context: ServiceAdapterLifecycleContext,
 ): Promise<void> {
   if (!context.config.telegram.enabled) return;
+  const storedSecret = await context.bridge.getServiceCredentialSecret(
+    context.config.telegram.credentialId,
+  );
   const token =
-    (await context.bridge.getServiceCredentialSecret(
-      context.config.telegram.credentialId,
-    )) ?? context.config.telegram.botToken;
+    storedSecret === undefined
+      ? context.config.telegram.botToken
+      : telegramBotTokenFromServiceCredentialSecret(storedSecret);
   if (!token) {
     context.recordEvent({
       source: "telegram",
@@ -554,6 +557,42 @@ export async function startTelegramConnector(
     eventType: "telegram_connector_started",
     summary: `Telegram connector started with ${connector.diagnostics().bindingCount} active binding(s).`,
   });
+}
+
+export function telegramBotTokenFromServiceCredentialSecret(
+  secret: string,
+): string {
+  const trimmed = secret.trim();
+  if (!trimmed.startsWith("{")) {
+    return trimmed;
+  }
+
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(trimmed) as unknown;
+  } catch {
+    throw new Error("Telegram service credential secret envelope is invalid");
+  }
+  if (
+    envelope === null ||
+    typeof envelope !== "object" ||
+    Array.isArray(envelope)
+  ) {
+    throw new Error("Telegram service credential secret envelope is invalid");
+  }
+
+  const record = envelope as Record<string, unknown>;
+  if (
+    record.kind !== "api_key" ||
+    record.version !== 1 ||
+    typeof record.value !== "string" ||
+    !record.value.trim()
+  ) {
+    throw new Error(
+      "Telegram service credential must contain a version 1 API-key secret",
+    );
+  }
+  return record.value.trim();
 }
 
 function telegramInboundModelBody(
