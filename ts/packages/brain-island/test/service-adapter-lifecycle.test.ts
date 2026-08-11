@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { NormalizedChannelInboundMessage } from "@rusty-crew/contracts";
+import type { ServiceWakeDispatchReport } from "../src/service-wake-dispatch.js";
 import type {
   NativeBridgeModule,
   NativeInstallDiplomatBindingRecord,
@@ -146,7 +147,15 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
       assert.equal(request.toAddress, "agent-1");
       assert.equal(request.correlationId, "telegram-correlation-1");
       assert.equal(request.inputKind, "operator");
-      return { status: "accepted", sequence: 1 };
+      return {
+        status: "accepted",
+        sequence: 1,
+        activation: {
+          type: "direct_brain_wake_requested",
+          sessionId: "session-1",
+          wakeId: "wake-1",
+        },
+      };
     },
   } as unknown as NativeBridgeModule;
   const adapterFactories = {
@@ -217,6 +226,7 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
     dynamicDenChannelBindings: new Map(),
     channelProjectionFailures: [],
     telegramDiplomatPendingReplies: new Map(),
+    telegramDiplomatReplyProjectionRunning: false,
     now: () => now,
     isStopping: () => false,
     recordEvent: () => undefined,
@@ -253,8 +263,11 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
         event: { type: "text_delta", text: "is healthy." },
       },
     ],
-  } as never;
-  await projectTelegramDiplomatWakeReplies(context, [report]);
+  } as unknown as ServiceWakeDispatchReport;
+  await Promise.all([
+    projectTelegramDiplomatWakeReplies(context, [report]),
+    projectTelegramDiplomatWakeReplies(context, [report]),
+  ]);
   await projectTelegramDiplomatWakeReplies(context, [report]);
   assert.equal(outbound.length, 1);
   assert.equal(outbound[0]?.body, "Service is healthy.");
@@ -265,4 +278,29 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
     outbound[0]?.idempotencyKey,
     "telegram-diplomat-reply:telegram:-1001:message-1",
   );
+
+  const nextInbound = {
+    ...inboundMessage,
+    providerRefs: {
+      ...inboundMessage.providerRefs,
+      externalMessageId: "message-2",
+    },
+    idempotencyKey: "telegram:-1001:message-2",
+  };
+  await connectorInput.onInbound(nextInbound);
+  await projectTelegramDiplomatWakeReplies(context, [
+    {
+      ...report,
+      wakeId: "wake-2",
+      observedEvents: [
+        ...(report.observedEvents ?? []),
+        {
+          type: "logical_turn_lifecycle_observed",
+          lifecycle: { kind: "cancelled" },
+        },
+      ],
+    } as never,
+  ]);
+  assert.equal(outbound.length, 1);
+  assert.equal(context.telegramDiplomatPendingReplies.size, 0);
 });

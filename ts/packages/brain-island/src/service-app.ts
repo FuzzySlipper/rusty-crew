@@ -496,6 +496,7 @@ interface ServiceState {
   readonly openAiOauthPendingLogins: Map<string, OpenAiOauthPendingLogin>;
   readonly channelProjectionFailures: ChannelProjectionFailureRecord[];
   readonly telegramDiplomatPendingReplies: ServiceAdapterLifecycleContext["telegramDiplomatPendingReplies"];
+  telegramDiplomatReplyProjectionRunning: boolean;
   profileChannelWakePolicies: Map<string, ChannelWakePolicy>;
   mcpManager: McpSurfaceManagerPort;
   readonly wakeSubscription: SubscriptionHandle;
@@ -769,6 +770,12 @@ function adapterLifecycleContext(
     dynamicDenChannelBindings: state.dynamicDenChannelBindings,
     channelProjectionFailures: state.channelProjectionFailures,
     telegramDiplomatPendingReplies: state.telegramDiplomatPendingReplies,
+    get telegramDiplomatReplyProjectionRunning() {
+      return state.telegramDiplomatReplyProjectionRunning;
+    },
+    set telegramDiplomatReplyProjectionRunning(running) {
+      state.telegramDiplomatReplyProjectionRunning = running;
+    },
     now: state.now,
     isStopping: () => state.stopping,
     recordEvent: (event) => recordServiceEvent(state, event),
@@ -1156,6 +1163,7 @@ export async function createRustyCrewServiceApp(
       openAiOauthPendingLogins: new Map(),
       channelProjectionFailures: [],
       telegramDiplomatPendingReplies: new Map(),
+      telegramDiplomatReplyProjectionRunning: false,
       profileChannelWakePolicies,
       curator,
       backgroundReview: createServiceBackgroundReviewRuntime(runtimeConfig),
