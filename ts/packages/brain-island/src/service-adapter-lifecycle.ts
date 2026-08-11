@@ -100,6 +100,7 @@ export interface ServiceAdapterLifecycleContext {
     SessionId,
     TelegramDiplomatPendingReply[]
   >;
+  readonly telegramDiplomatPendingWakeReports: ServiceWakeDispatchReport[];
   telegramDiplomatReplyProjectionRunning: boolean;
   now(): string;
   isStopping(): boolean;
@@ -688,38 +689,40 @@ export async function projectTelegramDiplomatWakeReplies(
   reports: readonly ServiceWakeDispatchReport[],
 ): Promise<void> {
   const connector = context.telegramConnector;
-  if (connector === undefined || context.telegramDiplomatReplyProjectionRunning)
-    return;
+  if (connector === undefined) return;
+  context.telegramDiplomatPendingWakeReports.push(...reports);
+  if (context.telegramDiplomatReplyProjectionRunning) return;
   context.telegramDiplomatReplyProjectionRunning = true;
   try {
-    for (const report of reports) {
-      if (wakeReportWasCancelledOrFailed(report)) {
-        context.telegramDiplomatPendingReplies.delete(report.sessionId);
-        continue;
+    while (true) {
+      while (context.telegramDiplomatPendingWakeReports.length > 0) {
+        const report = context.telegramDiplomatPendingWakeReports.shift();
+        if (report === undefined) continue;
+        if (wakeReportWasCancelledOrFailed(report)) {
+          context.telegramDiplomatPendingReplies.delete(report.sessionId);
+          continue;
+        }
+        const pending = context.telegramDiplomatPendingReplies.get(
+          report.sessionId,
+        );
+        const reply = pending?.find(
+          (candidate) => candidate.body === undefined,
+        );
+        if (reply === undefined || report.status !== "completed") continue;
+        const body = assistantTextFromWakeReport(report);
+        if (body === undefined) continue;
+        reply.body = body;
       }
-      const pending = context.telegramDiplomatPendingReplies.get(
-        report.sessionId,
-      );
-      const reply = pending?.find((candidate) => candidate.body === undefined);
-      if (reply === undefined || report.status !== "completed") continue;
-      const body = assistantTextFromWakeReport(report);
-      if (body === undefined) continue;
-      reply.body = body;
-    }
 
-    for (const [sessionId, pending] of context.telegramDiplomatPendingReplies) {
-      while (pending.length > 0) {
+      let sent = false;
+      for (const [
+        sessionId,
+        pending,
+      ] of context.telegramDiplomatPendingReplies) {
         const reply = pending[0];
-        if (reply?.body === undefined) break;
+        if (reply?.body === undefined) continue;
         try {
           await connector.sendOutbound({ ...reply.message, body: reply.body });
-          pending.shift();
-          context.recordEvent({
-            source: "telegram",
-            eventType: "telegram_diplomat_reply_sent",
-            summary:
-              "Completed install-diplomat response projected to Telegram.",
-          });
         } catch (error) {
           recordChannelProjectionFailure(
             context,
@@ -727,15 +730,41 @@ export async function projectTelegramDiplomatWakeReplies(
             "message",
             error instanceof Error ? error.message : "Telegram reply failed",
           );
-          break;
+          return;
         }
+        pending.shift();
+        sent = true;
+        context.recordEvent({
+          source: "telegram",
+          eventType: "telegram_diplomat_reply_sent",
+          summary: "Completed install-diplomat response projected to Telegram.",
+        });
+        if (pending.length === 0) {
+          context.telegramDiplomatPendingReplies.delete(sessionId);
+        }
+        break;
       }
-      if (pending.length === 0) {
-        context.telegramDiplomatPendingReplies.delete(sessionId);
-      }
+      if (!sent && context.telegramDiplomatPendingWakeReports.length === 0)
+        break;
     }
   } finally {
     context.telegramDiplomatReplyProjectionRunning = false;
+    if (context.telegramDiplomatPendingWakeReports.length > 0) {
+      queueMicrotask(() => {
+        void projectTelegramDiplomatWakeReplies(context, []).catch(
+          (error: unknown) => {
+            context.recordEvent({
+              source: "telegram",
+              eventType: "telegram_diplomat_reply_projection_failed",
+              summary:
+                error instanceof Error
+                  ? error.message
+                  : "Telegram diplomat reply projection failed",
+            });
+          },
+        );
+      });
+    }
   }
 }
 

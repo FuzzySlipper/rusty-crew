@@ -134,6 +134,9 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
   let connectorInput: TelegramConnectorFactoryInput | undefined;
   let deliveryCount = 0;
   const outbound: Array<Record<string, unknown>> = [];
+  let holdNextOutbound = false;
+  let releaseHeldOutbound: (() => void) | undefined;
+  let heldOutboundStarted: (() => void) | undefined;
   const bridge = {
     getServiceCredentialSecret: async () =>
       JSON.stringify({ kind: "api_key", version: 1, value: "bot-token" }),
@@ -184,6 +187,13 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
         stop: () => undefined,
         pollOnce: async () => undefined,
         sendOutbound: async (message: Record<string, unknown>) => {
+          if (holdNextOutbound) {
+            holdNextOutbound = false;
+            heldOutboundStarted?.();
+            await new Promise<void>((resolve) => {
+              releaseHeldOutbound = resolve;
+            });
+          }
           outbound.push(message);
         },
         diagnostics: () => ({ bindingCount: 1 }),
@@ -239,6 +249,7 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
     dynamicDenChannelBindings: new Map(),
     channelProjectionFailures: [],
     telegramDiplomatPendingReplies: new Map(),
+    telegramDiplomatPendingWakeReports: [],
     telegramDiplomatReplyProjectionRunning: false,
     now: () => now,
     isStopping: () => false,
@@ -343,4 +354,64 @@ test("routed Telegram diplomat ingress delivers once without generic channel bin
   ]);
   assert.equal(outbound.length, 1);
   assert.equal(context.telegramDiplomatPendingReplies.size, 0);
+
+  const thirdInbound = {
+    ...inboundMessage,
+    providerRefs: {
+      ...inboundMessage.providerRefs,
+      externalMessageId: "message-3",
+    },
+    idempotencyKey: "telegram:-1001:message-3",
+  };
+  const fourthInbound = {
+    ...inboundMessage,
+    providerRefs: {
+      ...inboundMessage.providerRefs,
+      externalMessageId: "message-4",
+    },
+    idempotencyKey: "telegram:-1001:message-4",
+  };
+  await connectorInput.onInbound(thirdInbound);
+  await connectorInput.onInbound(fourthInbound);
+  holdNextOutbound = true;
+  const heldStarted = new Promise<void>((resolve) => {
+    heldOutboundStarted = resolve;
+  });
+  const firstProjection = projectTelegramDiplomatWakeReplies(context, [
+    {
+      ...report,
+      wakeId: "wake-3",
+      observedEvents: [
+        {
+          type: "brain_event_observed",
+          sessionId: "session-1",
+          wakeId: "wake-3",
+          event: { type: "text_delta", text: "First final reply." },
+        },
+      ],
+    } as never,
+  ]);
+  await heldStarted;
+  const secondProjection = projectTelegramDiplomatWakeReplies(context, [
+    {
+      ...report,
+      wakeId: "wake-4",
+      observedEvents: [
+        {
+          type: "brain_event_observed",
+          sessionId: "session-1",
+          wakeId: "wake-4",
+          event: { type: "text_delta", text: "Second final reply." },
+        },
+      ],
+    } as never,
+  ]);
+  releaseHeldOutbound?.();
+  await Promise.all([firstProjection, secondProjection]);
+  assert.deepEqual(
+    outbound.slice(1).map((message) => message.body),
+    ["First final reply.", "Second final reply."],
+  );
+  assert.equal(context.telegramDiplomatPendingReplies.size, 0);
+  assert.equal(context.telegramDiplomatPendingWakeReports.length, 0);
 });
