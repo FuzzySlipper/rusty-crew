@@ -172,6 +172,10 @@ Human output includes the
 submission id, selected deployment, exact SHA, phase, gate state, verdict, and
 durable adapter/terminal reasons when present.
 
+For a context-light global scan of gate-passed tasks that appear to have missed
+managed reviewer delivery, use `rusty-crew-review stale`. See
+[`stale-review-discovery.md`](./stale-review-discovery.md).
+
 If a managed submission remains in `reviewer_dispatched` after its attached
 reviewer turn has ended, first read its current revision and then use the
 revision-fenced recovery command:

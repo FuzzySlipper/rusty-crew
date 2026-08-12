@@ -819,6 +819,17 @@
         "public": true
       },
       {
+        "id": "review.operator.stale_tasks.read",
+        "method": "GET",
+        "path_template": "/v1/admin/review-operator/stale-review-tasks",
+        "description": "List only stale gate-passed Den review tasks without a matching Crew managed submission.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics", "governance"],
+        "public": true
+      },
+      {
         "id": "review.operator.prompt_reviewer",
         "method": "POST",
         "path_template": "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer",
@@ -3384,6 +3395,13 @@
         "capability_id": "review.operator.pipeline.read",
         "method": "GET",
         "path_template": "/v1/admin/review-operator/pipeline",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.operator.stale_tasks.read",
+        "method": "GET",
+        "path_template": "/v1/admin/review-operator/stale-review-tasks",
         "route_id": "admin.diagnostics",
         "auth_phase": "after_auth"
       },

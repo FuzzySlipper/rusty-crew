@@ -56,6 +56,107 @@ export interface ReviewPipelineItem {
   stage: string;
 }
 
+export interface StaleReviewTask {
+  projectId: string;
+  taskId: number;
+}
+
+export async function staleReviewTasks(input: {
+  bridge: Pick<NativeBridgeModule, "listReviewSubmissions">;
+  runtimeConfig: Pick<RustyCrewRuntimeConfig, "mcpServers">;
+  mcpConfig: RustyCrewMcpConfig;
+  authority: RustyCrewReviewDenAuthorityConfig | undefined;
+  deploymentRole: RustyCrewDeploymentRole;
+  projectIds: readonly string[];
+  staleMs: number;
+  now: string;
+  callDenTool?: (
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<unknown>;
+}): Promise<StaleReviewTask[]> {
+  const authority = serviceReviewDenAuthority(input.authority);
+  if (authority === undefined) {
+    throw new Error(
+      "Dedicated service review Den authority is not configured.",
+    );
+  }
+  const callDenTool =
+    input.callDenTool ??
+    ((name: string, args: Record<string, unknown>) =>
+      callReviewDenTool({
+        authority,
+        runtimeConfig: input.runtimeConfig,
+        mcpConfig: input.mcpConfig,
+        name,
+        args,
+      }));
+  const projectIds =
+    input.projectIds.length > 0
+      ? uniqueSortedStrings(input.projectIds)
+      : await listNormalProjectIds(callDenTool);
+  const nowMs = Date.parse(input.now);
+  if (!Number.isFinite(nowMs)) throw new Error("invalid stale-review clock");
+
+  const matches = (
+    await Promise.all(
+      projectIds.map(async (projectId) => {
+        const denItems = await listEntireDenPipeline(callDenTool, projectId);
+        const candidates = await Promise.all(
+          denItems.map(async (item) => {
+            if (!isRecord(item.task) || item.task.status !== "review") {
+              return undefined;
+            }
+            const taskId = numericValue(item.task.id);
+            const round = recordOrNull(item.latest_round);
+            const gate = recordOrNull(item.latest_gate);
+            if (
+              taskId === undefined ||
+              round === null ||
+              gate === null ||
+              gate.status !== "passed" ||
+              nonEmptyString(round.verdict) !== undefined
+            ) {
+              return undefined;
+            }
+            const headCommit = nonEmptyString(round.head_commit);
+            const gateCommit = nonEmptyString(gate.commit_sha);
+            if (headCommit === undefined || gateCommit !== headCommit) {
+              return undefined;
+            }
+            const activityMs = latestActivityMs(item.task, round, gate);
+            if (
+              activityMs === undefined ||
+              nowMs - activityMs < input.staleMs
+            ) {
+              return undefined;
+            }
+            if (
+              await hasMatchingManagedSubmission(
+                input.bridge,
+                projectId,
+                taskId,
+                headCommit,
+              )
+            ) {
+              return undefined;
+            }
+            return { projectId, taskId } satisfies StaleReviewTask;
+          }),
+        );
+        return candidates.filter(
+          (candidate): candidate is StaleReviewTask => candidate !== undefined,
+        );
+      }),
+    )
+  ).flat();
+  return matches.sort(
+    (left, right) =>
+      left.projectId.localeCompare(right.projectId) ||
+      left.taskId - right.taskId,
+  );
+}
+
 export function reviewOperatorConfigReadback(input: {
   deploymentRole: RustyCrewDeploymentRole;
   authority: RustyCrewReviewDenAuthorityConfig | undefined;
@@ -272,27 +373,162 @@ async function callReviewPipelineTool(input: {
   limit: number;
   offset: number;
 }): Promise<unknown> {
+  return callReviewDenTool({
+    ...input,
+    name: "list_review_pipeline",
+    args: {
+      project_id: input.projectId,
+      limit: input.limit,
+      offset: input.offset,
+    },
+  });
+}
+
+async function callReviewDenTool(input: {
+  authority: NonNullable<ReturnType<typeof serviceReviewDenAuthority>>;
+  runtimeConfig: Pick<RustyCrewRuntimeConfig, "mcpServers">;
+  mcpConfig: RustyCrewMcpConfig;
+  name: string;
+  args: Record<string, unknown>;
+}): Promise<unknown> {
   const result = await callConfiguredMcpTool({
     binding: input.authority.binding,
     config: buildServiceMcpEndpointConfig({
       mcpConfig: input.mcpConfig,
       mcpServers: input.runtimeConfig.mcpServers,
     }),
-    toolName: "list_review_pipeline",
-    arguments: {
-      project_id: input.projectId,
-      limit: input.limit,
-      offset: input.offset,
-    },
+    toolName: input.name,
+    arguments: input.args,
     ...(input.authority.config.bearerToken === undefined
       ? {}
       : { bearerToken: input.authority.config.bearerToken }),
     clientName: input.authority.auditIdentity,
   });
   if (result.isError) {
-    throw new Error("Den list_review_pipeline returned an error");
+    throw new Error(`Den ${input.name} returned an error`);
   }
   return result.details;
+}
+
+async function listNormalProjectIds(
+  callDenTool: (
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<unknown>,
+): Promise<string[]> {
+  const payload = mcpResultRecord(await callDenTool("list_projects", {}));
+  return uniqueSortedStrings(
+    arrayValue(payload.items).flatMap((item) => {
+      if (!isRecord(item)) return [];
+      const id = nonEmptyString(item.id);
+      return id === undefined ? [] : [id];
+    }),
+  );
+}
+
+async function listEntireDenPipeline(
+  callDenTool: (
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<unknown>,
+  projectId: string,
+): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = [];
+  const seenOffsets = new Set<number>();
+  let offset = 0;
+  for (;;) {
+    if (seenOffsets.has(offset)) {
+      throw new Error(`Den review pipeline cursor repeated for ${projectId}`);
+    }
+    seenOffsets.add(offset);
+    const page = mcpResultRecord(
+      await callDenTool("list_review_pipeline", {
+        project_id: projectId,
+        limit: 100,
+        offset,
+      }),
+    );
+    items.push(...arrayValue(page.items).filter(isRecord));
+    const nextOffset = numericValue(page.next_offset);
+    if (nextOffset === undefined) return items;
+    offset = nextOffset;
+  }
+}
+
+async function hasMatchingManagedSubmission(
+  bridge: Pick<NativeBridgeModule, "listReviewSubmissions">,
+  projectId: string,
+  taskId: number,
+  headCommit: string,
+): Promise<boolean> {
+  let offset = 0;
+  for (;;) {
+    const page = await bridge.listReviewSubmissions({
+      projectId,
+      taskId: String(taskId),
+      pendingOnly: false,
+      limit: 100,
+      offset,
+    });
+    if (page.some((submission) => submission.commitSha === headCommit)) {
+      return true;
+    }
+    if (page.length < 100) return false;
+    offset += page.length;
+  }
+}
+
+function latestActivityMs(
+  task: Record<string, unknown>,
+  round: Record<string, unknown>,
+  gate: Record<string, unknown>,
+): number | undefined {
+  const timestamps = [
+    task.updated_at,
+    round.requested_at,
+    gate.completed_at,
+    gate.updated_at,
+    gate.last_checked_at,
+  ].flatMap((value) => {
+    if (typeof value !== "string") return [];
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? [parsed] : [];
+  });
+  return timestamps.length === 0 ? undefined : Math.max(...timestamps);
+}
+
+function uniqueSortedStrings(values: readonly string[]): string[] {
+  return [
+    ...new Set(values.map((value) => value.trim()).filter(Boolean)),
+  ].sort();
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function mcpResultRecord(value: unknown): Record<string, unknown> {
+  if (isRecord(value) && isRecord(value.structuredContent)) {
+    return value.structuredContent;
+  }
+  if (
+    isRecord(value) &&
+    (Array.isArray(value.items) || value.items === undefined)
+  ) {
+    return value;
+  }
+  if (isRecord(value) && Array.isArray(value.content)) {
+    for (const part of value.content) {
+      if (!isRecord(part) || typeof part.text !== "string") continue;
+      try {
+        const parsed: unknown = JSON.parse(part.text);
+        if (isRecord(parsed)) return parsed;
+      } catch {
+        // Keep looking for a structured result.
+      }
+    }
+  }
+  throw new Error("Den returned an invalid structured result");
 }
 
 function reviewPipelinePageRecord(value: unknown): Record<string, unknown> {

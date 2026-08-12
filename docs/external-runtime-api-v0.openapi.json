@@ -1843,6 +1843,63 @@
         "x-rusty-crew-contract-detail": "wire"
       }
     },
+    "/v1/admin/review-operator/stale-review-tasks": {
+      "get": {
+        "operationId": "readStaleReviewTasks",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "staleMs",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0 }
+          },
+          {
+            "name": "expectedDeploymentRole",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["production", "debug"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/StaleReviewTaskList"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.stale_tasks.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
     "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer": {
       "post": {
         "operationId": "promptReviewerForTask",
@@ -7703,6 +7760,19 @@
         },
         "additionalProperties": false
       },
+      "StaleReviewTask": {
+        "type": "object",
+        "required": ["projectId", "taskId"],
+        "properties": {
+          "projectId": { "type": "string" },
+          "taskId": { "type": "integer" }
+        },
+        "additionalProperties": false
+      },
+      "StaleReviewTaskList": {
+        "type": "array",
+        "items": { "$ref": "#/components/schemas/StaleReviewTask" }
+      },
       "ReviewOperatorPromptWrite": {
         "type": "object",
         "properties": {
@@ -9060,7 +9130,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 37,
+    "operation_count": 38,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

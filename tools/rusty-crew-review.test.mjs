@@ -174,6 +174,79 @@ test("review CLI reads bounded recovery diagnostics", async () => {
   );
 });
 
+test("review CLI prints only deterministic stale task handles", async () => {
+  let observedUrl;
+  const server = createServer((request, response) => {
+    observedUrl = request.url;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        ok: true,
+        data: [
+          { projectId: "alpha", taskId: 12 },
+          { projectId: "beta", taskId: 34 },
+        ],
+      }),
+    );
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  const result = await run([
+    "stale",
+    "--service-url",
+    `http://127.0.0.1:${address.port}`,
+    "--deployment-role",
+    "production",
+    "--project",
+    "beta",
+    "--project",
+    "alpha",
+    "--stale-ms",
+    "60000",
+  ]);
+  server.close();
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout, "alpha#12\nbeta#34\n");
+  assert.equal(
+    observedUrl,
+    "/v1/admin/review-operator/stale-review-tasks?expectedDeploymentRole=production&staleMs=60000&projectId=beta&projectId=alpha",
+  );
+});
+
+test("review CLI prints no default output for an empty stale task list", async () => {
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ok: true, data: [] }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  const serviceUrl = `http://127.0.0.1:${address.port}`;
+  const plain = await run([
+    "stale",
+    "--service-url",
+    serviceUrl,
+    "--deployment-role",
+    "debug",
+  ]);
+  const json = await run([
+    "stale",
+    "--service-url",
+    serviceUrl,
+    "--deployment-role",
+    "debug",
+    "--json",
+  ]);
+  server.close();
+
+  assert.equal(plain.code, 0, plain.stderr);
+  assert.equal(plain.stdout, "");
+  assert.equal(json.code, 0, json.stderr);
+  assert.equal(json.stdout, "[]\n");
+});
+
 function run(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [cli, ...args], {

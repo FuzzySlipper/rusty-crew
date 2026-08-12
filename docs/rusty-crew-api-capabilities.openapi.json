@@ -2653,6 +2653,24 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/review-operator/stale-review-tasks": {
+      "get": {
+        "operationId": "reviewOperatorStaleTasksRead",
+        "summary": "List only stale gate-passed Den review tasks without a matching Crew managed submission.",
+        "tags": ["service", "diagnostics", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.stale_tasks.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer": {
       "post": {
         "operationId": "reviewOperatorPromptReviewer",
@@ -6169,7 +6187,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 250,
+    "capability_count": 251,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

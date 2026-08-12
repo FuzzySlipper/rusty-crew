@@ -113,6 +113,7 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   round: "/v1/agent-rounds/{round_id}",
   reviewOperatorConfig: "/v1/admin/review-operator/config",
   reviewOperatorPipeline: "/v1/admin/review-operator/pipeline",
+  reviewOperatorStaleTasks: "/v1/admin/review-operator/stale-review-tasks",
   reviewOperatorPrompt:
     "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer",
 } as const;
@@ -735,6 +736,22 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     ],
   ),
   operation(
+    "review.operator.stale_tasks.read",
+    "readStaleReviewTasks",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.reviewOperatorStaleTasks,
+    "StaleReviewTaskList",
+    undefined,
+    [
+      { name: "projectId", schema: { type: "string", minLength: 1 } },
+      { name: "staleMs", schema: { type: "integer", minimum: 0 } },
+      {
+        name: "expectedDeploymentRole",
+        schema: { type: "string", enum: ["production", "debug"] },
+      },
+    ],
+  ),
+  operation(
     "review.operator.prompt_reviewer",
     "promptReviewerForTask",
     "post",
@@ -1066,6 +1083,19 @@ function routeSchemas(): Record<string, JsonSchema> {
         },
       },
       additionalProperties: false,
+    },
+    StaleReviewTask: {
+      type: "object",
+      required: ["projectId", "taskId"],
+      properties: {
+        projectId: { type: "string" },
+        taskId: { type: "integer" },
+      },
+      additionalProperties: false,
+    },
+    StaleReviewTaskList: {
+      type: "array",
+      items: { $ref: "#/components/schemas/StaleReviewTask" },
     },
     ReviewOperatorPromptWrite: {
       type: "object",

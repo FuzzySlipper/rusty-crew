@@ -32,10 +32,11 @@ const main = async () => {
     command !== "status" &&
     command !== "recover" &&
     command !== "reconcile" &&
-    command !== "diagnostics"
+    command !== "diagnostics" &&
+    command !== "stale"
   ) {
     throw new CliError(
-      "command must be submit, status, recover, reconcile, or diagnostics",
+      "command must be submit, status, recover, reconcile, diagnostics, or stale",
       EXIT.USAGE,
     );
   }
@@ -47,6 +48,9 @@ const main = async () => {
       EXIT.USAGE,
     );
   }
+  if (command === "stale" && options.wait) {
+    throw new CliError("stale does not accept --wait", EXIT.USAGE);
+  }
   const client = createApiClient(serviceUrl, options);
   const data =
     command === "submit"
@@ -57,8 +61,11 @@ const main = async () => {
           ? await reconcile(client, options, deploymentRole)
           : command === "diagnostics"
             ? await diagnostics(client, deploymentRole)
-            : await readStatus(client, options, deploymentRole);
-  printData(data, options.json);
+            : command === "stale"
+              ? await staleReviewTasks(client, options, deploymentRole)
+              : await readStatus(client, options, deploymentRole);
+  if (command === "stale") printStaleReviewTasks(data, options.json);
+  else printData(data, options.json);
   if (options.wait && command !== "diagnostics") {
     const final = await waitForTerminal(
       client,
@@ -163,6 +170,43 @@ async function diagnostics(client, deploymentRole) {
   return client.request(
     "GET",
     `/v1/admin/diagnostics/review-submission-recovery?${query}`,
+  );
+}
+
+async function staleReviewTasks(client, options, deploymentRole) {
+  const staleMs = integerOption(options, "stale-ms", 300_000, 0);
+  const query = new URLSearchParams({
+    expectedDeploymentRole: deploymentRole,
+    staleMs: String(staleMs),
+  });
+  for (const projectId of options.values.project) {
+    if (!projectId.trim()) {
+      throw new CliError("--project requires a non-empty value", EXIT.USAGE);
+    }
+    query.append("projectId", projectId.trim());
+  }
+  const data = await client.request(
+    "GET",
+    `/v1/admin/review-operator/stale-review-tasks?${query}`,
+  );
+  if (!Array.isArray(data)) {
+    throw new CliError("service returned an invalid stale task list");
+  }
+  const items = data.map((item) => {
+    if (
+      typeof item?.projectId !== "string" ||
+      item.projectId.trim() === "" ||
+      !Number.isSafeInteger(item?.taskId) ||
+      item.taskId <= 0
+    ) {
+      throw new CliError("service returned an invalid stale task item");
+    }
+    return { projectId: item.projectId.trim(), taskId: item.taskId };
+  });
+  return items.sort(
+    (left, right) =>
+      left.projectId.localeCompare(right.projectId) ||
+      left.taskId - right.taskId,
   );
 }
 
@@ -278,7 +322,7 @@ function createApiClient(serviceUrl, options) {
 function parseArgs(argv) {
   const options = {
     positionals: [],
-    values: { check: [] },
+    values: { check: [], project: [] },
     json: false,
     help: false,
     wait: false,
@@ -303,6 +347,8 @@ function parseArgs(argv) {
     "expected-revision",
     "poll-ms",
     "timeout-ms",
+    "project",
+    "stale-ms",
   ]);
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -334,8 +380,9 @@ function parseArgs(argv) {
     if (value === undefined || value.startsWith("--")) {
       throw new CliError(`option --${name} requires a value`, EXIT.USAGE);
     }
-    if (name === "check") options.values.check.push(value);
-    else options.values[name] = value;
+    if (name === "check" || name === "project") {
+      options.values[name].push(value);
+    } else options.values[name] = value;
   }
   if (options.values["service-role"] !== undefined) {
     throw new CliError(
@@ -439,9 +486,22 @@ function printData(data, json) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+function printStaleReviewTasks(items, json) {
+  if (json) {
+    process.stdout.write(`${JSON.stringify(items)}\n`);
+    return;
+  }
+  for (const item of items) {
+    process.stdout.write(`${item.projectId}#${item.taskId}\n`);
+  }
+}
+
 function printUsage() {
   process.stdout.write(
     "Submit requires one or more --check NAME arguments, or explicit --no-checks.\n\n",
+  );
+  process.stdout.write(
+    "Stale discovery: rusty-crew-review stale --service-url URL --deployment-role production|debug [--project PROJECT] [--stale-ms MILLISECONDS] [--json]\n\n",
   );
   process.stdout.write(
     `Usage:\n  rusty-crew-review submit --service-url URL --deployment-role production|debug \\\n    --project-id PROJECT --task ID --repository OWNER/REPO --sha SHA --ref REF \\\n    --check NAME --base-sha SHA --summary TEXT|--summary-file PATH \\\n    --client-id ID --idempotency-key KEY [--wait] [--json]\n\n  rusty-crew-review status --service-url URL --deployment-role production|debug \\\n    --submission-id ID [--wait] [--json]\n\n  rusty-crew-review recover --service-url URL --deployment-role production|debug \\\n    --submission-id ID --expected-revision REVISION [--wait] [--json]\n\n  rusty-crew-review reconcile --service-url URL --deployment-role production|debug \\\n    --submission-id ID --expected-revision REVISION [--wait] [--json]\n\n  rusty-crew-review diagnostics --service-url URL --deployment-role production|debug [--json]\n\nEnvironment:\n  RUSTY_CREW_ADMIN_TOKEN  Bearer token for the selected service (when enabled).\n\nExit codes:\n  0 success/accepted, 2 pending, 3 GitHub gate failed, 4 changes requested,\n  5 superseded, 64 usage error, 70 service error.\n`,

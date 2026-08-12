@@ -5,6 +5,7 @@ import {
   composedReviewPipeline,
   managedSubmissionStage,
   reviewOperatorConfigReadback,
+  staleReviewTasks,
 } from "../src/service-review-operator.js";
 import { handleReviewOperatorRequest } from "../src/service-review-operator-routes.js";
 import { reviewConfig } from "../src/service-config.js";
@@ -247,6 +248,142 @@ test("managed pipeline stages preserve every operator-visible transition", () =>
   assert.equal(stage("reply_terminal"), "reply_terminal");
   assert.equal(stage("review_terminal"), "review_terminal");
   assert.equal(stage("superseded"), "superseded");
+});
+
+test("stale review discovery returns only old gate-passed unsubmitted work", async () => {
+  const old = "2026-08-12T00:00:00.000Z";
+  const recent = "2026-08-12T00:59:00.000Z";
+  const round = (taskId: number, extra: Record<string, unknown> = {}) => ({
+    id: taskId + 100,
+    task_id: taskId,
+    head_commit: `head-${taskId}`,
+    requested_at: old,
+    ...extra,
+  });
+  const gate = (taskId: number, extra: Record<string, unknown> = {}) => ({
+    id: taskId + 200,
+    task_id: taskId,
+    commit_sha: `head-${taskId}`,
+    status: "passed",
+    completed_at: old,
+    updated_at: old,
+    ...extra,
+  });
+  const item = (
+    projectId: string,
+    taskId: number,
+    extra: Record<string, unknown> = {},
+  ) => ({
+    task: {
+      id: taskId,
+      project_id: projectId,
+      status: "review",
+      updated_at: old,
+    },
+    latest_round: round(taskId),
+    latest_gate: gate(taskId),
+    ...extra,
+  });
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const result = await staleReviewTasks({
+    bridge: {
+      listReviewSubmissions: async (query) =>
+        query?.taskId === "7"
+          ? [
+              {
+                submissionId: "active-7",
+                projectId: "alpha",
+                taskId: "7",
+                commitSha: "head-7",
+                phase: "reviewer_dispatched",
+              } as ReviewSubmissionRecord,
+            ]
+          : query?.taskId === "1"
+            ? [
+                {
+                  submissionId: "historical-1",
+                  projectId: "alpha",
+                  taskId: "1",
+                  commitSha: "older-head",
+                  phase: "review_terminal",
+                } as ReviewSubmissionRecord,
+              ]
+            : [],
+    },
+    runtimeConfig: { mcpServers: [] },
+    mcpConfig: { requestTimeoutMs: 1_000, servers: [] },
+    authority,
+    deploymentRole: "production",
+    projectIds: [],
+    staleMs: 300_000,
+    now: "2026-08-12T01:00:00.000Z",
+    callDenTool: async (name, args) => {
+      calls.push({ name, args });
+      if (name === "list_projects") {
+        return { items: [{ id: "beta" }, { id: "alpha" }] };
+      }
+      assert.equal(name, "list_review_pipeline");
+      if (args.project_id === "beta") {
+        return { items: [item("beta", 9)] };
+      }
+      if (args.offset === 0) {
+        return {
+          items: [
+            item("alpha", 1),
+            item("alpha", 2, {
+              latest_gate: gate(2, { updated_at: recent }),
+            }),
+            item("alpha", 3, {
+              latest_gate: gate(3, { status: "pending" }),
+            }),
+            item("alpha", 4, {
+              latest_gate: gate(4, { status: "failed" }),
+            }),
+          ],
+          next_offset: 4,
+        };
+      }
+      assert.equal(args.offset, 4);
+      return {
+        items: [
+          item("alpha", 5, {
+            latest_round: round(5, { verdict: "looks_good" }),
+          }),
+          item("alpha", 6, { latest_gate: null }),
+          item("alpha", 7),
+          item("alpha", 8, {
+            latest_gate: gate(8, { commit_sha: "wrong-head" }),
+          }),
+        ],
+      };
+    },
+  });
+
+  assert.deepEqual(result, [
+    { projectId: "alpha", taskId: 1 },
+    { projectId: "beta", taskId: 9 },
+  ]);
+  assert.equal(calls[0]?.name, "list_projects");
+  assert.ok(calls.some((call) => call.args.offset === 4));
+});
+
+test("stale review discovery honors explicit project filters", async () => {
+  const result = await staleReviewTasks({
+    bridge: { listReviewSubmissions: async () => [] },
+    runtimeConfig: { mcpServers: [] },
+    mcpConfig: { requestTimeoutMs: 1_000, servers: [] },
+    authority,
+    deploymentRole: "production",
+    projectIds: ["beta", "beta"],
+    staleMs: 0,
+    now: "2026-08-12T01:00:00.000Z",
+    callDenTool: async (name, args) => {
+      assert.equal(name, "list_review_pipeline");
+      assert.equal(args.project_id, "beta");
+      return { items: [] };
+    },
+  });
+  assert.deepEqual(result, []);
 });
 
 test("composed pipeline pages Den-only tasks and Crew submissions once", async () => {
@@ -549,6 +686,52 @@ test("manual reviewer route returns receipt-backed exact command", async () => {
     (result.body as { data: { command: string; target: string } }).data.target,
     "@reviewer",
   );
+});
+
+test("stale review route accepts repeatable projects and a stale duration", async () => {
+  let observed: unknown;
+  const result = await handleReviewOperatorRequest(
+    {
+      method: "GET",
+      url: new URL(
+        "http://crew/v1/admin/review-operator/stale-review-tasks?projectId=beta&projectId=alpha&staleMs=60000&expectedDeploymentRole=production",
+      ),
+      requestId: "stale-review-tasks",
+    },
+    {
+      deploymentRole: "production",
+      authority: () => authority,
+      diagnostics: () => diagnostics,
+      refreshDiagnostics: async () => diagnostics,
+      resolveReviewer: async () => reviewerRoute,
+      readRuntimeConfigFile: async () => ({ value: {} }),
+      writeRuntimeConfigFile: async () => undefined,
+      applyRuntimeConfigFromDisk: async () => ({}),
+      withRuntimeConfigMutation: (mutation) => mutation(),
+      pipeline: async () => ({
+        projectId: "alpha",
+        deploymentRole: "production",
+        limit: 50,
+        offset: 0,
+        items: [],
+      }),
+      staleTasks: async (input) => {
+        observed = input;
+        return [{ projectId: "alpha", taskId: 42 }];
+      },
+      promptReviewer: async () => ({ status: "accepted" }) as never,
+    },
+  );
+  if ("kind" in result || typeof result.body === "string") {
+    throw new Error("expected JSON admin route result");
+  }
+  assert.deepEqual(observed, {
+    projectIds: ["beta", "alpha"],
+    staleMs: 60_000,
+  });
+  assert.deepEqual((result.body as { data: unknown }).data, [
+    { projectId: "alpha", taskId: 42 },
+  ]);
 });
 
 test("config write rejects browser-supplied credentials", async () => {

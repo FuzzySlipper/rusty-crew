@@ -12,6 +12,7 @@ import {
   composedReviewPipeline,
   reviewOperatorConfigRevision,
   reviewOperatorConfigReadback,
+  type StaleReviewTask,
 } from "./service-review-operator.js";
 import {
   failure,
@@ -38,6 +39,10 @@ export interface ReviewOperatorRouteContext {
     limit: number;
     offset: number;
   }): ReturnType<typeof composedReviewPipeline>;
+  staleTasks?(input: {
+    projectIds: readonly string[];
+    staleMs: number;
+  }): Promise<StaleReviewTask[]>;
   promptReviewer(input: {
     taskId: number;
     ttlMs: number;
@@ -165,6 +170,25 @@ export async function handleReviewOperatorRequest(
       );
     }
 
+    if (input.url.pathname === `${PREFIX}/stale-review-tasks`) {
+      if (input.method !== "GET") return methodNotAllowed(input.requestId);
+      const projectIds = input.url.searchParams
+        .getAll("projectId")
+        .map((value) => value.trim())
+        .filter(Boolean);
+      const staleMs = boundedInteger(
+        input.url.searchParams.get("staleMs"),
+        300_000,
+        0,
+        Number.MAX_SAFE_INTEGER,
+        "staleMs",
+      );
+      return successRoute(
+        input.requestId,
+        await requiredStaleTasks(context)({ projectIds, staleMs }),
+      );
+    }
+
     const taskMatch = input.url.pathname.match(
       /^\/v1\/admin\/review-operator\/tasks\/(\d+)\/prompt-reviewer$/,
     );
@@ -225,6 +249,15 @@ export async function handleReviewOperatorRequest(
       retryable: false,
     });
   }
+}
+
+function requiredStaleTasks(
+  context: ReviewOperatorRouteContext,
+): NonNullable<ReviewOperatorRouteContext["staleTasks"]> {
+  if (context.staleTasks === undefined) {
+    throw new Error("stale review task query is unavailable");
+  }
+  return context.staleTasks;
 }
 
 class ReviewOperatorConflictError extends Error {

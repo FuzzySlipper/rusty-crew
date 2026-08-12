@@ -439,7 +439,10 @@ import {
   handleReviewOperatorRequest,
   isReviewOperatorRoute,
 } from "./service-review-operator-routes.js";
-import { composedReviewPipeline } from "./service-review-operator.js";
+import {
+  composedReviewPipeline,
+  staleReviewTasks,
+} from "./service-review-operator.js";
 import { runManualContextCompaction } from "./manual-compaction.js";
 
 export {
@@ -6219,6 +6222,16 @@ function reviewOperatorRouteContext(state: ServiceState) {
         mcpConfig: state.config.mcp,
         authority: state.reviewDenAuthority,
         deploymentRole: state.config.deploymentRole,
+        ...input,
+      }),
+    staleTasks: (input: { projectIds: readonly string[]; staleMs: number }) =>
+      staleReviewTasks({
+        bridge: state.bridge,
+        runtimeConfig: state.runtimeConfig,
+        mcpConfig: state.config.mcp,
+        authority: state.reviewDenAuthority,
+        deploymentRole: state.config.deploymentRole,
+        now: state.now(),
         ...input,
       }),
     promptReviewer: async (input: {

@@ -1045,6 +1045,14 @@ export const API_CAPABILITIES = [
     "admin",
     ["service", "diagnostics", "governance"],
   ),
+  readCapability(
+    "review.operator.stale_tasks.read",
+    "GET",
+    "/v1/admin/review-operator/stale-review-tasks",
+    "List only stale gate-passed Den review tasks without a matching Crew managed submission.",
+    "admin",
+    ["service", "diagnostics", "governance"],
+  ),
   writeCapability(
     "review.operator.prompt_reviewer",
     "POST",
