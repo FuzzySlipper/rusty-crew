@@ -116,10 +116,11 @@ import {
   createServiceBrowserResources,
   type ServiceBrowserResources,
 } from "./service-browser-resources.js";
-import type {
-  RustyCrewMcpServerConfig,
-  RustyCrewServiceConfig,
-  RustyCrewStorageConfig,
+import {
+  reviewConfig,
+  type RustyCrewMcpServerConfig,
+  type RustyCrewServiceConfig,
+  type RustyCrewStorageConfig,
 } from "./service-config.js";
 import { planRuntimeGraphWithRust } from "./runtime-config-validation.js";
 import {
@@ -189,6 +190,7 @@ export interface ServiceRuntimeEnvelope {
   storage?: RustyCrewStorageConfig;
   denObservation?: RustyCrewDenObservationConfig;
   mcpServers?: RustyCrewMcpServerConfig[];
+  reviewDenAuthority?: ReturnType<typeof reviewConfig>;
   imageGeneration?: ImageGenerationConfig;
 }
 
@@ -427,6 +429,7 @@ interface RuntimeGraphAuthoredSource {
   runtimeConfig: Record<string, unknown>;
   denObservation: RustyCrewDenObservationConfig;
   mcpServers: RustyCrewMcpServerConfig[];
+  reviewDenAuthority?: ReturnType<typeof reviewConfig>;
   imageGeneration: ImageGenerationConfig;
 }
 
@@ -462,6 +465,7 @@ function runtimeGraphAuthoredSource(
       parsed.mcpServers,
       serviceConfig.mcp.servers,
     ).map((item, index) => configuredMcpServer(item, index)),
+    reviewDenAuthority: reviewConfig(parsed, serviceConfig.reviewDenAuthority),
     imageGeneration: imageGenerationConfigFromUnknown(parsed.imageGeneration),
   };
 }
@@ -712,6 +716,7 @@ function runtimeConfigFromGraphPlan(
     },
     denObservation: source.denObservation,
     mcpServers: source.mcpServers,
+    reviewDenAuthority: source.reviewDenAuthority,
     imageGeneration: source.imageGeneration,
     brains: effective.brains.map((brain) => ({
       implementationId: brain.implementationId as BrainImplementationId,
@@ -800,6 +805,7 @@ function runtimeGraphSourceFromEffective(
     storage: runtimeConfig.storage,
     denObservation: runtimeConfig.denObservation,
     mcpServers: runtimeConfig.mcpServers,
+    reviewDenAuthority: runtimeConfig.reviewDenAuthority,
     imageGeneration: runtimeConfig.imageGeneration,
     brains: runtimeConfig.brains,
     sessions: runtimeConfig.sessions,

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type {
   AdapterId,
@@ -342,6 +343,7 @@ import {
   type RustyCrewServiceConfig,
   type RustyCrewServiceEnv,
   type RustyCrewServiceLock,
+  type RustyCrewReviewDenAuthorityConfig,
   type RustyCrewStorageConfig,
 } from "./service-config.js";
 import {
@@ -433,6 +435,11 @@ import {
   validateServiceReviewDenAuthority,
   type ReviewDenAuthorityDiagnostics,
 } from "./service-review-den-authority.js";
+import {
+  handleReviewOperatorRequest,
+  isReviewOperatorRoute,
+} from "./service-review-operator-routes.js";
+import { composedReviewPipeline } from "./service-review-operator.js";
 import { runManualContextCompaction } from "./manual-compaction.js";
 
 export {
@@ -465,6 +472,7 @@ export interface RustyCrewServiceApp {
 
 interface ServiceState {
   readonly config: RustyCrewServiceConfig;
+  reviewDenAuthority: RustyCrewReviewDenAuthorityConfig | undefined;
   reviewDenAuthorityDiagnostics: ReviewDenAuthorityDiagnostics;
   readonly bridge: NativeBridgeModule;
   readonly engine: EngineHandle;
@@ -1141,6 +1149,7 @@ export async function createRustyCrewServiceApp(
 
     const state: ServiceState = {
       config,
+      reviewDenAuthority: runtimeConfig.reviewDenAuthority ?? undefined,
       reviewDenAuthorityDiagnostics: {
         serverName: "den",
         status: "unconfigured",
@@ -1427,6 +1436,21 @@ async function handleHttpRequest(
   }
 
   const route = matchServiceApiRoute(url.pathname, "after_auth");
+
+  if (isReviewOperatorRoute(url.pathname)) {
+    const method = (request.method ?? "GET").toUpperCase();
+    return handleReviewOperatorRequest(
+      {
+        method,
+        url,
+        requestId: requestId(request),
+        body: ["POST", "PUT", "PATCH"].includes(method)
+          ? await readJsonBody(request)
+          : undefined,
+      },
+      reviewOperatorRouteContext(state),
+    );
+  }
 
   if (url.pathname === "/v1/admin/diagnostics/review-submissions") {
     if ((request.method ?? "GET").toUpperCase() !== "GET") {
@@ -3893,6 +3917,7 @@ async function applyServiceRuntimeConfigFromDisk(
   });
   const previousMcpManager = state.mcpManager;
   state.runtimeConfig = nextRuntimeConfig;
+  state.reviewDenAuthority = nextRuntimeConfig.reviewDenAuthority ?? undefined;
   state.profileChannelWakePolicies = nextProfileChannelWakePolicies;
   state.runtimeConfigApplyResult = nextApplyResult;
   state.curator.runtimeConfig = nextRuntimeConfig;
@@ -6136,7 +6161,12 @@ function reviewSubmissionContext(
   return {
     bridge: state.bridge,
     runtimeConfig: state.runtimeConfig,
-    serviceConfig: state.config,
+    serviceConfig: {
+      ...state.config,
+      ...(state.reviewDenAuthority === undefined
+        ? { reviewDenAuthority: undefined }
+        : { reviewDenAuthority: state.reviewDenAuthority }),
+    },
     now: state.now,
     validateServiceDenAuthority: () =>
       refreshReviewDenAuthorityDiagnostics(state),
@@ -6149,12 +6179,79 @@ async function refreshReviewDenAuthorityDiagnostics(
   state: ServiceState,
 ): Promise<ReviewDenAuthorityDiagnostics> {
   const diagnostics = await validateServiceReviewDenAuthority({
-    authority: state.config.reviewDenAuthority,
+    authority: state.reviewDenAuthority,
     mcpConfig: state.config.mcp,
+    mcpServers: state.runtimeConfig.mcpServers,
     now: state.now,
   });
   state.reviewDenAuthorityDiagnostics = diagnostics;
   return diagnostics;
+}
+
+function reviewOperatorRouteContext(state: ServiceState) {
+  return {
+    deploymentRole: state.config.deploymentRole,
+    authority: () => state.reviewDenAuthority,
+    diagnostics: () => state.reviewDenAuthorityDiagnostics,
+    refreshDiagnostics: () => refreshReviewDenAuthorityDiagnostics(state),
+    readRuntimeConfigFile: () =>
+      readRuntimeConfigFileForMutationFromModule(
+        profileAdminMutationContext(state),
+      ),
+    writeRuntimeConfigFile: (value: Record<string, unknown>) =>
+      writeJsonFileAtomicFromModule(
+        state.config.paths.serviceConfigFile,
+        value,
+      ),
+    applyRuntimeConfigFromDisk: () =>
+      applyServiceRuntimeConfigFromDisk(state, {
+        createMissingSessions: false,
+        eventType: "review_den_authority_updated",
+        summaryPrefix: "Review Den authority updated",
+      }),
+    withRuntimeConfigMutation: <T>(mutation: () => Promise<T>) =>
+      withAsyncMutationQueue(state.runtimeConfigMutationQueue, mutation),
+    pipeline: (input: { projectId: string; limit: number; offset: number }) =>
+      composedReviewPipeline({
+        bridge: state.bridge,
+        runtimeConfig: state.runtimeConfig,
+        mcpConfig: state.config.mcp,
+        authority: state.reviewDenAuthority,
+        deploymentRole: state.config.deploymentRole,
+        ...input,
+      }),
+    promptReviewer: async (input: {
+      taskId: number;
+      ttlMs: number;
+      correlationId?: string;
+      idempotencyKey?: string;
+    }) => {
+      const createdAt = state.now();
+      const nonce = input.idempotencyKey ?? randomUUID();
+      const initialReceipt = await state.bridge.deliverAgentMessage({
+        caller: {
+          type: "system",
+          senderAgentId:
+            `rusty-view-review-operator-${state.config.deploymentRole}` as AgentId,
+        },
+        deliveryId: `review-operator-delivery:${nonce}`,
+        idempotencyKey: input.idempotencyKey ?? `review-operator:${nonce}`,
+        messageId: `review-operator-message:${nonce}`,
+        toAddress: "@reviewer",
+        inputKind: "routed_agent_message",
+        body: `review ${input.taskId}`,
+        ...(input.correlationId === undefined
+          ? {}
+          : { correlationId: input.correlationId }),
+        requireWake: true,
+        createdAt,
+        expiresAt: new Date(Date.parse(createdAt) + input.ttlMs).toISOString(),
+      });
+      return state.externalRuntimeController.applyCoordinationDelivery(
+        initialReceipt,
+      );
+    },
+  };
 }
 
 function externalReviewApiFailure(

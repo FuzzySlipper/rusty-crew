@@ -786,6 +786,50 @@
         "public": true
       },
       {
+        "id": "review.operator.config.read",
+        "method": "GET",
+        "path_template": "/v1/admin/review-operator/config",
+        "description": "Read browser-safe Den review authority configuration and health without exposing credentials.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "config", "diagnostics"],
+        "public": true
+      },
+      {
+        "id": "review.operator.config.write",
+        "method": "PATCH",
+        "path_template": "/v1/admin/review-operator/config",
+        "description": "Atomically update non-secret Den review authority configuration and reload it.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "config", "governance"],
+        "public": true
+      },
+      {
+        "id": "review.operator.pipeline.read",
+        "method": "GET",
+        "path_template": "/v1/admin/review-operator/pipeline",
+        "description": "Read a bounded projection of Den review state composed with Crew managed-delivery state.",
+        "auth": "admin",
+        "mutation": "read",
+        "stability": "stable",
+        "tags": ["service", "diagnostics", "governance"],
+        "public": true
+      },
+      {
+        "id": "review.operator.prompt_reviewer",
+        "method": "POST",
+        "path_template": "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer",
+        "description": "Send exactly review task_id to @reviewer through generic receipt-backed Crew messaging.",
+        "auth": "admin",
+        "mutation": "write",
+        "stability": "experimental",
+        "tags": ["service", "delegation", "governance"],
+        "public": true
+      },
+      {
         "id": "review.submissions.external.create",
         "method": "POST",
         "path_template": "/v1/admin/review-submissions",
@@ -3319,6 +3363,34 @@
         "capability_id": "review.submissions.diagnostics.recovery",
         "method": "GET",
         "path_template": "/v1/admin/diagnostics/review-submission-recovery",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.operator.config.read",
+        "method": "GET",
+        "path_template": "/v1/admin/review-operator/config",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.operator.config.write",
+        "method": "PATCH",
+        "path_template": "/v1/admin/review-operator/config",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.operator.pipeline.read",
+        "method": "GET",
+        "path_template": "/v1/admin/review-operator/pipeline",
+        "route_id": "admin.diagnostics",
+        "auth_phase": "after_auth"
+      },
+      {
+        "capability_id": "review.operator.prompt_reviewer",
+        "method": "POST",
+        "path_template": "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer",
         "route_id": "admin.diagnostics",
         "auth_phase": "after_auth"
       },

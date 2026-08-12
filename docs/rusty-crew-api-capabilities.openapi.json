@@ -2601,6 +2601,84 @@
         "x-rusty-crew-contract-detail": "capability"
       }
     },
+    "/v1/admin/review-operator/config": {
+      "get": {
+        "operationId": "reviewOperatorConfigRead",
+        "summary": "Read browser-safe Den review authority configuration and health without exposing credentials.",
+        "tags": ["service", "config", "diagnostics"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.config.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      },
+      "patch": {
+        "operationId": "reviewOperatorConfigWrite",
+        "summary": "Atomically update non-secret Den review authority configuration and reload it.",
+        "tags": ["service", "config", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.config.write",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/review-operator/pipeline": {
+      "get": {
+        "operationId": "reviewOperatorPipelineRead",
+        "summary": "Read a bounded projection of Den review state composed with Crew managed-delivery state.",
+        "tags": ["service", "diagnostics", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.pipeline.read",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "read",
+        "x-rusty-crew-stability": "stable",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
+    "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer": {
+      "post": {
+        "operationId": "reviewOperatorPromptReviewer",
+        "summary": "Send exactly review task_id to @reviewer through generic receipt-backed Crew messaging.",
+        "tags": ["service", "delegation", "governance"],
+        "security": [{ "AdminBearer": [] }],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "Capability metadata only; status codes and wire body are owned by the operation-specific contract"
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.prompt_reviewer",
+        "x-rusty-crew-auth": "admin",
+        "x-rusty-crew-mutation": "write",
+        "x-rusty-crew-stability": "experimental",
+        "x-rusty-crew-contract-detail": "capability"
+      }
+    },
     "/v1/admin/review-submissions": {
       "post": {
         "operationId": "reviewSubmissionsExternalCreate",
@@ -6091,7 +6169,7 @@
     "source": "ts/packages/brain-island/src/api-command-registry.ts",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "capability_count": 246,
+    "capability_count": 250,
     "detailed_operation_ids": [
       "admin.capabilities",
       "chat.commands.autocomplete",

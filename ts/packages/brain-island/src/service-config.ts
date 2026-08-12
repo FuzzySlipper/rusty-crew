@@ -1000,7 +1000,7 @@ function loadReviewDenAuthorityConfig(
   };
 }
 
-function validateReviewDenAuthorityConfig(
+export function validateReviewDenAuthorityConfig(
   config: RustyCrewReviewDenAuthorityConfig | undefined,
 ): void {
   if (config === undefined) return;
@@ -1014,6 +1014,44 @@ function validateReviewDenAuthorityConfig(
     config.endpointRef,
     "RUSTY_CREW_REVIEW_DEN_ENDPOINT_REF must be config://mcp/den or a valid HTTP(S) URL",
   );
+}
+
+export function reviewConfig(
+  parsed: Record<string, unknown>,
+  fallback: RustyCrewReviewDenAuthorityConfig | undefined,
+): RustyCrewReviewDenAuthorityConfig | null | undefined {
+  const value = parsed.reviewDenAuthority;
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("reviewDenAuthority must be an object or null");
+  }
+  const record = value as Record<string, unknown>;
+  const authorityId = normalizeOptionalValue(record.authorityId);
+  const endpointRef = normalizeOptionalValue(record.endpointRef);
+  if (authorityId === undefined || endpointRef === undefined) {
+    throw new Error(
+      "reviewDenAuthority authorityId and endpointRef are required",
+    );
+  }
+  const config: RustyCrewReviewDenAuthorityConfig = {
+    authorityId,
+    endpointRef,
+    serverName: "den",
+    toolProfileKey: "direct",
+    auditIdentity:
+      normalizeOptionalValue(record.auditIdentity) ??
+      "rusty-crew-review-service",
+    ...(fallback?.bearerToken === undefined
+      ? {}
+      : { bearerToken: fallback.bearerToken }),
+  };
+  validateReviewDenAuthorityConfig(config);
+  return config;
+}
+
+function normalizeOptionalValue(value: unknown): string | undefined {
+  return typeof value === "string" ? normalizeOptional(value) : undefined;
 }
 
 function validateHttpUrl(value: string, message: string): void {

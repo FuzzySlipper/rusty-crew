@@ -5,12 +5,14 @@ import {
   listConfiguredMcpTools,
   type ServiceMcpEndpointConfig,
   type ServiceMcpEndpointIdentity,
+  type ServiceMcpServerEndpointConfig,
 } from "./service-mcp-tools.js";
 
 export const REVIEW_DEN_REQUIRED_TOOLS = [
   "finalize_review",
   "get_task",
   "get_github_check_gate",
+  "list_review_pipeline",
   "list_review_rounds",
   "request_review",
   "update_task",
@@ -65,6 +67,7 @@ export function serviceReviewDenAuthority(
 export async function validateServiceReviewDenAuthority(input: {
   authority: RustyCrewReviewDenAuthorityConfig | undefined;
   mcpConfig?: ServiceMcpEndpointConfig;
+  mcpServers?: readonly ServiceMcpServerEndpointConfig[];
   now(): string;
   listTools?: () => Promise<unknown[]>;
 }): Promise<ReviewDenAuthorityDiagnostics> {
@@ -86,6 +89,7 @@ export async function validateServiceReviewDenAuthority(input: {
         binding: authority.binding,
         config: buildServiceMcpEndpointConfig({
           mcpConfig: input.mcpConfig,
+          mcpServers: input.mcpServers,
         }),
         ...(authority.config.bearerToken === undefined
           ? {}

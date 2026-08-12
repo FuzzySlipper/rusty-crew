@@ -1689,6 +1689,206 @@
         "x-rusty-crew-capability-id": "agent.rounds.read",
         "x-rusty-crew-contract-detail": "wire"
       }
+    },
+    "/v1/admin/review-operator/config": {
+      "get": {
+        "operationId": "readReviewOperatorConfig",
+        "tags": ["external-runtime"],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ReviewOperatorConfigReadback"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.config.read",
+        "x-rusty-crew-contract-detail": "wire"
+      },
+      "patch": {
+        "operationId": "writeReviewOperatorConfig",
+        "tags": ["external-runtime"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewOperatorConfigWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ReviewOperatorConfigMutationResult"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.config.write",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/admin/review-operator/pipeline": {
+      "get": {
+        "operationId": "readReviewOperatorPipeline",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100 }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "minimum": 0 }
+          },
+          {
+            "name": "expectedDeploymentRole",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["production", "debug"] }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ReviewOperatorPipelinePage"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.pipeline.read",
+        "x-rusty-crew-contract-detail": "wire"
+      }
+    },
+    "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer": {
+      "post": {
+        "operationId": "promptReviewerForTask",
+        "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewOperatorPromptWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful typed response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["ok", "data", "meta"],
+                  "properties": {
+                    "ok": { "const": true },
+                    "data": {
+                      "$ref": "#/components/schemas/ReviewOperatorPromptReceipt"
+                    },
+                    "meta": { "$ref": "#/components/schemas/ApiMeta" }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rusty Crew API error envelope",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApiErrorEnvelope" }
+              }
+            }
+          }
+        },
+        "x-rusty-crew-capability-id": "review.operator.prompt_reviewer",
+        "x-rusty-crew-contract-detail": "wire"
+      }
     }
   },
   "components": {
@@ -7336,6 +7536,148 @@
         "required": ["member_id"],
         "type": "object"
       },
+      "ReviewOperatorConfigReadback": {
+        "type": "object",
+        "required": [
+          "deploymentRole",
+          "serverName",
+          "toolProfileKey",
+          "credential",
+          "diagnostics"
+        ],
+        "properties": {
+          "deploymentRole": {
+            "type": "string",
+            "enum": ["production", "debug"]
+          },
+          "authorityId": { "type": "string" },
+          "endpointRef": { "type": "string" },
+          "serverName": { "const": "den" },
+          "toolProfileKey": { "const": "direct" },
+          "auditIdentity": { "type": "string" },
+          "credential": {
+            "type": "object",
+            "required": ["present", "source"],
+            "properties": {
+              "present": { "type": "boolean" },
+              "source": {
+                "type": "string",
+                "enum": ["service_environment", "none"]
+              }
+            },
+            "additionalProperties": false
+          },
+          "diagnostics": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": false
+      },
+      "ReviewOperatorConfigWrite": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "authorityId": { "type": "string", "minLength": 1 },
+          "endpointRef": { "type": "string", "minLength": 1 },
+          "auditIdentity": { "type": "string", "minLength": 1 },
+          "expectedDeploymentRole": {
+            "type": "string",
+            "enum": ["production", "debug"]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReviewOperatorConfigMutationResult": {
+        "type": "object",
+        "required": ["status", "config", "applyResult"],
+        "properties": {
+          "status": { "const": "updated" },
+          "config": {
+            "$ref": "#/components/schemas/ReviewOperatorConfigReadback"
+          },
+          "applyResult": { "type": "object", "additionalProperties": true }
+        },
+        "additionalProperties": false
+      },
+      "ReviewOperatorPipelineItem": {
+        "type": "object",
+        "required": [
+          "stableId",
+          "projectId",
+          "taskId",
+          "latestRound",
+          "latestGate",
+          "stage"
+        ],
+        "properties": {
+          "stableId": { "type": "string" },
+          "projectId": { "type": "string" },
+          "taskId": { "type": "integer" },
+          "task": { "type": "object", "additionalProperties": true },
+          "latestRound": {
+            "type": ["object", "null"],
+            "additionalProperties": true
+          },
+          "latestGate": {
+            "type": ["object", "null"],
+            "additionalProperties": true
+          },
+          "submission": {
+            "$ref": "#/components/schemas/ReviewSubmissionRecord"
+          },
+          "stage": { "type": "string" }
+        },
+        "additionalProperties": false
+      },
+      "ReviewOperatorPipelinePage": {
+        "type": "object",
+        "required": ["projectId", "deploymentRole", "limit", "offset", "items"],
+        "properties": {
+          "projectId": { "type": "string" },
+          "deploymentRole": {
+            "type": "string",
+            "enum": ["production", "debug"]
+          },
+          "limit": { "type": "integer" },
+          "offset": { "type": "integer" },
+          "nextOffset": { "type": "integer" },
+          "denNextOffset": { "type": "integer" },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewOperatorPipelineItem"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReviewOperatorPromptWrite": {
+        "type": "object",
+        "properties": {
+          "ttlMs": { "type": "integer", "minimum": 1000, "maximum": 900000 },
+          "correlationId": { "type": "string" },
+          "idempotencyKey": { "type": "string" },
+          "expectedDeploymentRole": {
+            "type": "string",
+            "enum": ["production", "debug"]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReviewOperatorPromptReceipt": {
+        "type": "object",
+        "required": ["deploymentRole", "command", "target", "receipt"],
+        "properties": {
+          "deploymentRole": {
+            "type": "string",
+            "enum": ["production", "debug"]
+          },
+          "command": { "type": "string" },
+          "target": { "const": "@reviewer" },
+          "receipt": {
+            "$ref": "#/components/schemas/AgentMessageDeliveryReceipt"
+          }
+        },
+        "additionalProperties": false
+      },
       "ExternalRuntimeCertificationList": {
         "type": "object",
         "required": ["certifications"],
@@ -8664,7 +9006,7 @@
     "rust_protocol_source": "ts/packages/contracts/src/generated/core-protocol.schema.json",
     "generator": "ts/packages/brain-island/src/generate-api-capability-artifact.ts",
     "regeneration_command": "npm run codegen:api-capabilities",
-    "operation_count": 33,
+    "operation_count": 37,
     "native_payload_policy": "bounded_raw_detail_only"
   }
 }

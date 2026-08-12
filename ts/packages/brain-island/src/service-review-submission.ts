@@ -1965,9 +1965,7 @@ async function denCall(
     binding: binding.binding,
     config: buildServiceMcpEndpointConfig({
       mcpConfig: context.serviceConfig.mcp,
-      ...(binding.kind === "submitter_binding"
-        ? { mcpServers: context.runtimeConfig.mcpServers }
-        : {}),
+      mcpServers: context.runtimeConfig.mcpServers,
     }),
     toolName,
     arguments: args,

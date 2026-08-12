@@ -111,6 +111,10 @@ export const EXTERNAL_RUNTIME_API_PATHS = {
   turn: "/v1/external-turns/{request_id}",
   delivery: "/v1/agent-deliveries/{delivery_id}",
   round: "/v1/agent-rounds/{round_id}",
+  reviewOperatorConfig: "/v1/admin/review-operator/config",
+  reviewOperatorPipeline: "/v1/admin/review-operator/pipeline",
+  reviewOperatorPrompt:
+    "/v1/admin/review-operator/tasks/{task_id}/prompt-reviewer",
 } as const;
 
 export interface ExternalThreadItemProjection {
@@ -382,7 +386,7 @@ type JsonSchema = Record<string, unknown> | boolean;
 interface OperationContract {
   readonly capabilityId: string;
   readonly operationId: string;
-  readonly method: "get" | "post";
+  readonly method: "get" | "patch" | "post";
   readonly path: string;
   readonly responseSchema?: string;
   readonly requestSchema?: string;
@@ -687,6 +691,50 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     EXTERNAL_RUNTIME_API_PATHS.round,
     "AgentCorrelatedRound",
   ),
+  operation(
+    "review.operator.config.read",
+    "readReviewOperatorConfig",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.reviewOperatorConfig,
+    "ReviewOperatorConfigReadback",
+  ),
+  operation(
+    "review.operator.config.write",
+    "writeReviewOperatorConfig",
+    "patch",
+    EXTERNAL_RUNTIME_API_PATHS.reviewOperatorConfig,
+    "ReviewOperatorConfigMutationResult",
+    "ReviewOperatorConfigWrite",
+  ),
+  operation(
+    "review.operator.pipeline.read",
+    "readReviewOperatorPipeline",
+    "get",
+    EXTERNAL_RUNTIME_API_PATHS.reviewOperatorPipeline,
+    "ReviewOperatorPipelinePage",
+    undefined,
+    [
+      {
+        name: "projectId",
+        schema: { type: "string", minLength: 1 },
+        required: true,
+      },
+      { name: "limit", schema: { type: "integer", minimum: 1, maximum: 100 } },
+      { name: "offset", schema: { type: "integer", minimum: 0 } },
+      {
+        name: "expectedDeploymentRole",
+        schema: { type: "string", enum: ["production", "debug"] },
+      },
+    ],
+  ),
+  operation(
+    "review.operator.prompt_reviewer",
+    "promptReviewerForTask",
+    "post",
+    EXTERNAL_RUNTIME_API_PATHS.reviewOperatorPrompt,
+    "ReviewOperatorPromptReceipt",
+    "ReviewOperatorPromptWrite",
+  ),
 ] as const satisfies readonly OperationContract[];
 
 export function externalRuntimeApiOpenApiDocument(input: {
@@ -740,7 +788,7 @@ export function externalRuntimeApiOpenApiDocument(input: {
 function operation(
   capabilityId: string,
   operationId: string,
-  method: "get" | "post",
+  method: "get" | "patch" | "post",
   path: string,
   responseSchema?: string,
   requestSchema?: string,
@@ -885,6 +933,122 @@ function routeSchemas(): Record<string, JsonSchema> {
   const nullableString = { type: ["string", "null"] };
   const nullableInteger = { type: ["integer", "null"] };
   return {
+    ReviewOperatorConfigReadback: {
+      type: "object",
+      required: [
+        "deploymentRole",
+        "serverName",
+        "toolProfileKey",
+        "credential",
+        "diagnostics",
+      ],
+      properties: {
+        deploymentRole: { type: "string", enum: ["production", "debug"] },
+        authorityId: { type: "string" },
+        endpointRef: { type: "string" },
+        serverName: { const: "den" },
+        toolProfileKey: { const: "direct" },
+        auditIdentity: { type: "string" },
+        credential: {
+          type: "object",
+          required: ["present", "source"],
+          properties: {
+            present: { type: "boolean" },
+            source: { type: "string", enum: ["service_environment", "none"] },
+          },
+          additionalProperties: false,
+        },
+        diagnostics: { type: "object", additionalProperties: true },
+      },
+      additionalProperties: false,
+    },
+    ReviewOperatorConfigWrite: {
+      type: "object",
+      properties: {
+        enabled: { type: "boolean" },
+        authorityId: { type: "string", minLength: 1 },
+        endpointRef: { type: "string", minLength: 1 },
+        auditIdentity: { type: "string", minLength: 1 },
+        expectedDeploymentRole: {
+          type: "string",
+          enum: ["production", "debug"],
+        },
+      },
+      additionalProperties: false,
+    },
+    ReviewOperatorConfigMutationResult: {
+      type: "object",
+      required: ["status", "config", "applyResult"],
+      properties: {
+        status: { const: "updated" },
+        config: { $ref: "#/components/schemas/ReviewOperatorConfigReadback" },
+        applyResult: { type: "object", additionalProperties: true },
+      },
+      additionalProperties: false,
+    },
+    ReviewOperatorPipelineItem: {
+      type: "object",
+      required: [
+        "stableId",
+        "projectId",
+        "taskId",
+        "latestRound",
+        "latestGate",
+        "stage",
+      ],
+      properties: {
+        stableId: { type: "string" },
+        projectId: { type: "string" },
+        taskId: { type: "integer" },
+        task: { type: "object", additionalProperties: true },
+        latestRound: { type: ["object", "null"], additionalProperties: true },
+        latestGate: { type: ["object", "null"], additionalProperties: true },
+        submission: { $ref: "#/components/schemas/ReviewSubmissionRecord" },
+        stage: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    ReviewOperatorPipelinePage: {
+      type: "object",
+      required: ["projectId", "deploymentRole", "limit", "offset", "items"],
+      properties: {
+        projectId: { type: "string" },
+        deploymentRole: { type: "string", enum: ["production", "debug"] },
+        limit: { type: "integer" },
+        offset: { type: "integer" },
+        nextOffset: { type: "integer" },
+        denNextOffset: { type: "integer" },
+        items: {
+          type: "array",
+          items: { $ref: "#/components/schemas/ReviewOperatorPipelineItem" },
+        },
+      },
+      additionalProperties: false,
+    },
+    ReviewOperatorPromptWrite: {
+      type: "object",
+      properties: {
+        ttlMs: { type: "integer", minimum: 1000, maximum: 900000 },
+        correlationId: { type: "string" },
+        idempotencyKey: { type: "string" },
+        expectedDeploymentRole: {
+          type: "string",
+          enum: ["production", "debug"],
+        },
+      },
+      additionalProperties: false,
+    },
+    ReviewOperatorPromptReceipt: {
+      type: "object",
+      required: ["deploymentRole", "command", "target", "receipt"],
+      properties: {
+        deploymentRole: { type: "string", enum: ["production", "debug"] },
+        command: { type: "string" },
+        target: { const: "@reviewer" },
+        receipt: { $ref: "#/components/schemas/AgentMessageDeliveryReceipt" },
+      },
+      additionalProperties: false,
+    },
     ExternalRuntimeCertificationList: {
       type: "object",
       required: ["certifications"],
