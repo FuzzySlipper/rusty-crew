@@ -961,7 +961,9 @@ function routeSchemas(): Record<string, JsonSchema> {
           },
           additionalProperties: false,
         },
-        diagnostics: { type: "object", additionalProperties: true },
+        diagnostics: {
+          $ref: "#/components/schemas/ReviewDenAuthorityDiagnostics",
+        },
         reviewerRoute: {
           $ref: "#/components/schemas/AgentRouteResolution",
         },
@@ -983,6 +985,31 @@ function routeSchemas(): Record<string, JsonSchema> {
       },
       additionalProperties: false,
       required: ["expectedConfigRevision"],
+    },
+    ReviewDenAuthorityDiagnostics: {
+      type: "object",
+      required: [
+        "serverName",
+        "status",
+        "requiredTools",
+        "missingTools",
+        "checkedAt",
+        "message",
+      ],
+      properties: {
+        authorityId: { type: "string" },
+        auditIdentity: { type: "string" },
+        serverName: { const: "den" },
+        status: {
+          type: "string",
+          enum: ["ready", "unconfigured", "unavailable", "missing_tools"],
+        },
+        requiredTools: { type: "array", items: { type: "string" } },
+        missingTools: { type: "array", items: { type: "string" } },
+        checkedAt: { type: "string" },
+        message: { type: "string" },
+      },
+      additionalProperties: false,
     },
     ReviewOperatorConfigMutationResult: {
       type: "object",
