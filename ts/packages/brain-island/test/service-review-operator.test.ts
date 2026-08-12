@@ -300,6 +300,76 @@ test("composed pipeline pages Den-only tasks and Crew submissions once", async (
   assert.deepEqual(seen, ["s1", "den-task:rusty-view:7003", "s2"]);
 });
 
+test("limit-one pipeline drains Den and Crew without dropping either authority", async () => {
+  const collect = async (
+    denTaskIds: number[],
+    submissions: ReviewSubmissionRecord[],
+  ): Promise<string[]> => {
+    const seen: string[] = [];
+    let offset = 0;
+    for (let pageNumber = 0; pageNumber < 10; pageNumber += 1) {
+      const page = await composedReviewPipeline({
+        bridge: {
+          listReviewSubmissions: async (query) => {
+            if (query?.taskId !== undefined && query.taskId !== null) {
+              return submissions.filter(
+                (submission) => submission.taskId === query.taskId,
+              );
+            }
+            const pageOffset = query?.offset ?? 0;
+            const pageLimit = query?.limit ?? submissions.length;
+            return submissions.slice(pageOffset, pageOffset + pageLimit);
+          },
+        },
+        runtimeConfig: { mcpServers: [] },
+        mcpConfig: { requestTimeoutMs: 1_000, servers: [] },
+        authority,
+        deploymentRole: "production",
+        projectId: "rusty-view",
+        limit: 1,
+        offset,
+        callDenTool: async (_name, args) => {
+          const denOffset = args.offset as number;
+          const taskId = denTaskIds[denOffset];
+          return {
+            items:
+              taskId === undefined
+                ? []
+                : [{ task: { id: taskId, status: "review" } }],
+            ...(denOffset + 1 < denTaskIds.length
+              ? { next_offset: denOffset + 1 }
+              : {}),
+          };
+        },
+      });
+      assert.ok(page.items.length <= 1);
+      seen.push(...page.items.map((item) => item.stableId));
+      if (page.nextOffset === undefined) return seen;
+      offset = page.nextOffset;
+    }
+    throw new Error("limit-one pipeline did not terminate");
+  };
+  const crew = ["s1", "s2"].map(
+    (submissionId, index) =>
+      ({
+        submissionId,
+        projectId: "rusty-view",
+        taskId: String(7101 + index),
+        phase: "replied",
+      }) as ReviewSubmissionRecord,
+  );
+
+  assert.deepEqual(await collect([], crew), ["s1", "s2"]);
+  assert.deepEqual(await collect([7201, 7202], []), [
+    "den-task:rusty-view:7201",
+    "den-task:rusty-view:7202",
+  ]);
+  assert.deepEqual(await collect([7301], crew.slice(0, 1)), [
+    "den-task:rusty-view:7301",
+    "s1",
+  ]);
+});
+
 test("concurrent config writes serialize revision validation", async () => {
   let activeAuthority = authority;
   let file: Record<string, unknown> = {};

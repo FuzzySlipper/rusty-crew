@@ -117,32 +117,39 @@ export async function composedReviewPipeline(input: {
     args: Record<string, unknown>,
   ) => Promise<unknown>;
 }): Promise<ReviewPipelinePage> {
-  const denCapacity = Math.ceil(input.limit / 2);
-  const crewCapacity = input.limit - denCapacity;
   const { denOffset, crewOffset } = decodePipelineOffset(input.offset);
   const denExhausted = denOffset === PIPELINE_OFFSET_EXHAUSTED;
   const crewExhausted = crewOffset === PIPELINE_OFFSET_EXHAUSTED;
+  const denCapacity =
+    input.limit === 1 ? (denExhausted ? 0 : 1) : Math.ceil(input.limit / 2);
+  const crewCapacity =
+    input.limit === 1
+      ? denExhausted && !crewExhausted
+        ? 1
+        : 0
+      : input.limit - denCapacity;
   const authority = serviceReviewDenAuthority(input.authority);
   if (authority === undefined) {
     throw new Error(
       "Dedicated service review Den authority is not configured.",
     );
   }
-  const denPayload = denExhausted
-    ? { items: [] }
-    : await (input.callDenTool?.("list_review_pipeline", {
-        project_id: input.projectId,
-        limit: denCapacity,
-        offset: denOffset,
-      }) ??
-        callReviewPipelineTool({
-          authority,
-          runtimeConfig: input.runtimeConfig,
-          mcpConfig: input.mcpConfig,
-          projectId: input.projectId,
+  const denPayload =
+    denExhausted || denCapacity === 0
+      ? { items: [] }
+      : await (input.callDenTool?.("list_review_pipeline", {
+          project_id: input.projectId,
           limit: denCapacity,
           offset: denOffset,
-        }));
+        }) ??
+          callReviewPipelineTool({
+            authority,
+            runtimeConfig: input.runtimeConfig,
+            mcpConfig: input.mcpConfig,
+            projectId: input.projectId,
+            limit: denCapacity,
+            offset: denOffset,
+          }));
   const denPage = reviewPipelinePageRecord(denPayload);
   const denItems = arrayValue(denPage.items);
   const crewPage =
@@ -208,12 +215,16 @@ export async function composedReviewPipeline(input: {
   const crewHasNext = crewPage.length > crewCapacity;
   const nextDenOffset = denExhausted
     ? PIPELINE_OFFSET_EXHAUSTED
-    : (denNextOffset ?? PIPELINE_OFFSET_EXHAUSTED);
+    : denCapacity === 0
+      ? denOffset
+      : (denNextOffset ?? PIPELINE_OFFSET_EXHAUSTED);
   const nextCrewOffset = crewExhausted
     ? PIPELINE_OFFSET_EXHAUSTED
-    : crewHasNext
-      ? crewOffset + crewCapacity
-      : PIPELINE_OFFSET_EXHAUSTED;
+    : crewCapacity === 0
+      ? crewOffset
+      : crewHasNext
+        ? crewOffset + crewCapacity
+        : PIPELINE_OFFSET_EXHAUSTED;
   const hasNext =
     nextDenOffset !== PIPELINE_OFFSET_EXHAUSTED ||
     nextCrewOffset !== PIPELINE_OFFSET_EXHAUSTED;
