@@ -8,7 +8,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 56;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 57;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -299,6 +299,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
     PostgresSchemaMigration {
         version: 56,
         description: "order external turns by backend-owned creation ordinal",
+        apply: Some(apply_postgres_external_turn_creation_ordinal),
+    },
+    PostgresSchemaMigration {
+        version: 57,
+        description: "repair missing external turn creation ordinal",
         apply: Some(apply_postgres_external_turn_creation_ordinal),
     },
 ];
@@ -2510,6 +2515,53 @@ mod tests {
             current_postgres_schema_version(&mut client, &schema).unwrap(),
             POSTGRES_SCHEMA_VERSION
         );
+        client
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_version_57_repairs_recorded_ordinal_schema_drift() {
+        let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
+            .or_else(|_| std::env::var("RUSTY_CREW_TEST_DATABASE_URL"))
+            .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
+            .expect("PostgreSQL test database URL");
+        let schema = format!(
+            "rusty_crew_ordinal_repair_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let mut client = Client::connect(&database_url, NoTls).unwrap();
+        prepare_postgres_migration_metadata(&mut client, &schema).unwrap();
+        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+        client
+            .batch_execute(&format!(
+                "DELETE FROM {schema}.schema_migrations WHERE version = 57;
+                 ALTER TABLE {schema}.external_turns DROP COLUMN creation_ordinal;
+                 DROP SEQUENCE IF EXISTS {schema}.external_turn_creation_ordinal_seq;"
+            ))
+            .unwrap();
+
+        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+
+        assert_eq!(
+            current_postgres_schema_version(&mut client, &schema).unwrap(),
+            POSTGRES_SCHEMA_VERSION
+        );
+        assert!(client
+            .query_opt(
+                "SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = $1
+                    AND table_name = 'external_turns'
+                    AND column_name = 'creation_ordinal'",
+                &[&schema],
+            )
+            .unwrap()
+            .is_some());
         client
             .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
             .unwrap();
