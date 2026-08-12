@@ -1360,6 +1360,16 @@ test("immediate-steer images retain ordered durable readback after controller re
       includeTurns: true,
     });
     assert.deepEqual(
+      afterRestart.thread.turns[0]?.items.slice(1, 3).map((item) => ({
+        kind: item.kind,
+        text: item.text,
+      })),
+      [
+        { kind: "userMessage", text: "steer text" },
+        { kind: "userMessage", text: "steer images" },
+      ],
+    );
+    assert.deepEqual(
       afterRestart.thread.turns[0]?.items[2]?.inputImages?.map(
         (image) => image.attachmentId,
       ),

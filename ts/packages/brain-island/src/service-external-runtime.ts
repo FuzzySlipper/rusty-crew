@@ -5595,6 +5595,10 @@ function durableExternalThreadItemText(
   snapshotText: string | undefined,
   deltaText: string,
 ): string | undefined {
+  if (kind === "userMessage") {
+    const text = stringValue(payload.text);
+    if (text !== undefined) return text;
+  }
   if (kind === "commandExecution") {
     const value = [stringValue(payload.command), stringValue(payload.output)]
       .filter((entry): entry is string => entry !== undefined)
