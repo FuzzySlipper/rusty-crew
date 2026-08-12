@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ReviewSubmissionRecord } from "@rusty-crew/contracts";
 import {
   composedReviewPipeline,
+  managedSubmissionStage,
   reviewOperatorConfigReadback,
 } from "../src/service-review-operator.js";
 import { handleReviewOperatorRequest } from "../src/service-review-operator-routes.js";
@@ -128,6 +129,41 @@ test("composed pipeline preserves Den state and Crew retry diagnostics", async (
   assert.equal(page.items[0]?.latestGate?.status, "passed");
   assert.equal(page.items[1]?.stableId, "den-task:rusty-view:6855");
   assert.equal(page.items[1]?.stage, "den_reviewable_not_submitted");
+});
+
+test("managed pipeline stages preserve every operator-visible transition", () => {
+  const stage = (
+    phase: ReviewSubmissionRecord["phase"],
+    extra: Partial<ReviewSubmissionRecord> = {},
+  ) =>
+    managedSubmissionStage({
+      submissionId: `review-submission:${phase}`,
+      projectId: "rusty-view",
+      taskId: "6854",
+      phase,
+      ...extra,
+    } as ReviewSubmissionRecord);
+
+  assert.equal(stage("submitted"), "managed_submission_accepted");
+  assert.equal(stage("den_handoff_recorded"), "managed_submission_accepted");
+  assert.equal(stage("gate_pending"), "github_gate_pending");
+  assert.equal(
+    stage("gate_failed", { gateStatus: "timed_out" }),
+    "github_gate_timed_out",
+  );
+  assert.equal(stage("reviewer_dispatch_pending"), "reviewer_delivery_queued");
+  assert.equal(
+    stage("reviewer_dispatch_pending", { reviewerDispatchAttempts: 2 }),
+    "reviewer_delivery_retrying",
+  );
+  assert.equal(stage("reviewer_dispatched"), "reviewer_dispatched");
+  assert.equal(stage("den_finalization_pending"), "den_finalization_pending");
+  assert.equal(stage("den_finalized"), "review_complete_reply_pending");
+  assert.equal(stage("reply_pending"), "review_complete_reply_pending");
+  assert.equal(stage("replied"), "review_complete_replied");
+  assert.equal(stage("reply_terminal"), "reply_terminal");
+  assert.equal(stage("review_terminal"), "review_terminal");
+  assert.equal(stage("superseded"), "superseded");
 });
 
 test("manual reviewer route returns receipt-backed exact command", async () => {

@@ -268,7 +268,7 @@ function reviewPipelinePageRecord(value: unknown): Record<string, unknown> {
   throw new Error("Den list_review_pipeline returned an invalid page");
 }
 
-function managedSubmissionStage(record: ReviewSubmissionRecord): string {
+export function managedSubmissionStage(record: ReviewSubmissionRecord): string {
   switch (record.phase) {
     case "submitted":
     case "den_handoff_recorded":
