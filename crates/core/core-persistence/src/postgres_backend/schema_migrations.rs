@@ -8,7 +8,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 57;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 58;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -306,17 +306,31 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "repair missing external turn creation ordinal",
         apply: Some(apply_postgres_external_turn_creation_ordinal),
     },
+    PostgresSchemaMigration {
+        version: 58,
+        description: "repair external turn ordinal with quoted schema",
+        apply: Some(apply_postgres_external_turn_creation_ordinal),
+    },
 ];
+
+fn postgres_catalog_schema_name(schema: &str) -> String {
+    schema
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .unwrap_or(schema)
+        .replace("\"\"", "\"")
+}
 
 fn apply_postgres_external_turn_creation_ordinal(
     tx: &mut Transaction<'_>,
     schema: &str,
 ) -> CoreResult<()> {
+    let catalog_schema = postgres_catalog_schema_name(schema);
     let external_turns_exists = tx
         .query_opt(
             "SELECT 1 FROM information_schema.tables
               WHERE table_schema::text = $1 AND table_name = 'external_turns'",
-            &[&schema],
+            &[&catalog_schema],
         )
         .map_err(|error| postgres_error("inspect PostgreSQL external turns table", error))?
         .is_some();
@@ -356,13 +370,14 @@ fn apply_postgres_external_turn_creation_cursor(
     tx: &mut Transaction<'_>,
     schema: &str,
 ) -> CoreResult<()> {
+    let catalog_schema = postgres_catalog_schema_name(schema);
     let external_turns_exists = tx
         .query_opt(
             "SELECT 1
                FROM information_schema.tables
               WHERE table_schema::text = $1
                 AND table_name = 'external_turns'",
-            &[&schema],
+            &[&catalog_schema],
         )
         .map_err(|error| postgres_error("inspect PostgreSQL external turns table", error))?
         .is_some();
@@ -385,13 +400,14 @@ fn apply_postgres_external_runtime_thread_cursor(
     tx: &mut Transaction<'_>,
     schema: &str,
 ) -> CoreResult<()> {
+    let catalog_schema = postgres_catalog_schema_name(schema);
     let external_runtime_events_exists = tx
         .query_opt(
             "SELECT 1
                FROM information_schema.tables
               WHERE table_schema::text = $1
                 AND table_name = 'external_runtime_events'",
-            &[&schema],
+            &[&catalog_schema],
         )
         .map_err(|error| postgres_error("inspect PostgreSQL external runtime events table", error))?
         .is_some();
@@ -2522,7 +2538,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env"]
-    fn postgres_version_57_repairs_recorded_ordinal_schema_drift() {
+    fn postgres_version_58_repairs_recorded_ordinal_schema_drift_with_quoted_schema() {
         let database_url = std::env::var("RUSTY_CREW_POSTGRES_BACKEND_DATABASE_URL")
             .or_else(|_| std::env::var("RUSTY_CREW_TEST_DATABASE_URL"))
             .or_else(|_| std::env::var("RUSTY_CREW_DATABASE_URL"))
@@ -2536,20 +2552,21 @@ mod tests {
                 .as_nanos()
         );
         let mut client = Client::connect(&database_url, NoTls).unwrap();
-        prepare_postgres_migration_metadata(&mut client, &schema).unwrap();
-        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+        let quoted_schema = quote_postgres_identifier(&schema);
+        prepare_postgres_migration_metadata(&mut client, &quoted_schema).unwrap();
+        apply_postgres_schema_migrations(&mut client, &quoted_schema).unwrap();
         client
             .batch_execute(&format!(
-                "DELETE FROM {schema}.schema_migrations WHERE version = 57;
+                "DELETE FROM {quoted_schema}.schema_migrations WHERE version IN (57, 58);
                  ALTER TABLE {schema}.external_turns DROP COLUMN creation_ordinal;
                  DROP SEQUENCE IF EXISTS {schema}.external_turn_creation_ordinal_seq;"
             ))
             .unwrap();
 
-        apply_postgres_schema_migrations(&mut client, &schema).unwrap();
+        apply_postgres_schema_migrations(&mut client, &quoted_schema).unwrap();
 
         assert_eq!(
-            current_postgres_schema_version(&mut client, &schema).unwrap(),
+            current_postgres_schema_version(&mut client, &quoted_schema).unwrap(),
             POSTGRES_SCHEMA_VERSION
         );
         assert!(client
