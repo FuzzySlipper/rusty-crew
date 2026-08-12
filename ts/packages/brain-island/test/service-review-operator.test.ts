@@ -54,6 +54,49 @@ test("review config readback reports credential presence without secret material
   assert.equal(JSON.stringify(readback).includes("must-not-leak"), false);
 });
 
+test("config diagnostics remain readable when @reviewer is absent", async () => {
+  const result = await handleReviewOperatorRequest(
+    {
+      method: "GET",
+      url: new URL("http://crew/v1/admin/review-operator/config"),
+      requestId: "request-no-reviewer",
+    },
+    {
+      deploymentRole: "debug",
+      authority: () => authority,
+      diagnostics: () => diagnostics,
+      refreshDiagnostics: async () => diagnostics,
+      resolveReviewer: async () => {
+        throw new Error("NotFound: agent_route_not_found");
+      },
+      readRuntimeConfigFile: async () => ({ value: {} }),
+      writeRuntimeConfigFile: async () => undefined,
+      applyRuntimeConfigFromDisk: async () => ({}),
+      withRuntimeConfigMutation: (mutation) => mutation(),
+      pipeline: async () => ({
+        projectId: "rusty-view",
+        deploymentRole: "debug",
+        limit: 50,
+        offset: 0,
+        items: [],
+      }),
+      promptReviewer: async () => ({ status: "accepted" }) as never,
+    },
+  );
+  if ("kind" in result || typeof result.body === "string") {
+    throw new Error("expected JSON admin route result");
+  }
+  assert.equal(result.status, 200);
+  assert.deepEqual(
+    (result.body as { data: { reviewerRoute: unknown } }).data.reviewerRoute,
+    {
+      address: "@reviewer",
+      routable: false,
+      reasonCode: "agent_route_not_found",
+    },
+  );
+});
+
 test("runtime review config preserves environment credentials and explicit disablement", () => {
   assert.equal(reviewConfig({ reviewDenAuthority: null }, authority), null);
   assert.deepEqual(

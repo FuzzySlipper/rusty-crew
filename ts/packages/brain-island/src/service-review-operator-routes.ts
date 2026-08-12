@@ -1,4 +1,7 @@
-import type { AgentMessageDeliveryReceipt } from "@rusty-crew/contracts";
+import type {
+  AgentMessageDeliveryReceipt,
+  AgentRouteResolution,
+} from "@rusty-crew/contracts";
 import type {
   RustyCrewDeploymentRole,
   RustyCrewReviewDenAuthorityConfig,
@@ -64,7 +67,7 @@ export async function handleReviewOperatorRequest(
     if (input.url.pathname === `${PREFIX}/config`) {
       if (input.method === "GET") {
         const diagnostics = await context.refreshDiagnostics();
-        const reviewerRoute = await context.resolveReviewer();
+        const reviewerRoute = await resolveReviewerRoute(context);
         return successRoute(
           input.requestId,
           reviewOperatorConfigReadback({
@@ -120,7 +123,7 @@ export async function handleReviewOperatorRequest(
           throw error;
         }
         const diagnostics = await context.refreshDiagnostics();
-        const reviewerRoute = await context.resolveReviewer();
+        const reviewerRoute = await resolveReviewerRoute(context);
         return successRoute(input.requestId, {
           status: "updated",
           config: reviewOperatorConfigReadback({
@@ -171,7 +174,7 @@ export async function handleReviewOperatorRequest(
         context.deploymentRole,
       );
       const taskId = Number(taskMatch[1]);
-      const reviewerRoute = await context.resolveReviewer();
+      const reviewerRoute = await resolveReviewerRoute(context);
       if (!reviewerRoute.routable || reviewerRoute.resolvedTarget == null) {
         throw new ReviewOperatorConflictError(
           reviewerRoute.reasonCode ?? "reviewer_route_unavailable",
@@ -228,6 +231,24 @@ class ReviewOperatorConflictError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+async function resolveReviewerRoute(
+  context: ReviewOperatorRouteContext,
+): Promise<AgentRouteResolution> {
+  try {
+    return await context.resolveReviewer();
+  } catch (error) {
+    return {
+      address: "@reviewer",
+      routable: false,
+      reasonCode:
+        error instanceof Error &&
+        error.message.includes("agent_route_not_found")
+          ? "agent_route_not_found"
+          : "reviewer_route_resolution_failed",
+    };
   }
 }
 
