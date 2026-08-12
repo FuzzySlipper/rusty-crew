@@ -308,8 +308,8 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
     },
     PostgresSchemaMigration {
         version: 58,
-        description: "repair external turn ordinal with quoted schema",
-        apply: Some(apply_postgres_external_turn_creation_ordinal),
+        description: "repair skipped quoted-schema external runtime migrations",
+        apply: Some(apply_postgres_quoted_schema_external_runtime_repairs),
     },
 ];
 
@@ -319,6 +319,15 @@ fn postgres_catalog_schema_name(schema: &str) -> String {
         .and_then(|value| value.strip_suffix('"'))
         .unwrap_or(schema)
         .replace("\"\"", "\"")
+}
+
+fn apply_postgres_quoted_schema_external_runtime_repairs(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    apply_postgres_external_runtime_thread_cursor(tx, schema)?;
+    apply_postgres_external_turn_creation_cursor(tx, schema)?;
+    apply_postgres_external_turn_creation_ordinal(tx, schema)
 }
 
 fn apply_postgres_external_turn_creation_ordinal(
@@ -2557,8 +2566,9 @@ mod tests {
         apply_postgres_schema_migrations(&mut client, &quoted_schema).unwrap();
         client
             .batch_execute(&format!(
-                "DELETE FROM {quoted_schema}.schema_migrations WHERE version IN (57, 58);
+                "DELETE FROM {quoted_schema}.schema_migrations WHERE version = 58;
                  ALTER TABLE {schema}.external_turns DROP COLUMN creation_ordinal;
+                 ALTER TABLE {schema}.external_turns DROP COLUMN created_at;
                  DROP SEQUENCE IF EXISTS {schema}.external_turn_creation_ordinal_seq;"
             ))
             .unwrap();
@@ -2575,6 +2585,16 @@ mod tests {
                   WHERE table_schema = $1
                     AND table_name = 'external_turns'
                     AND column_name = 'creation_ordinal'",
+                &[&schema],
+            )
+            .unwrap()
+            .is_some());
+        assert!(client
+            .query_opt(
+                "SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = $1
+                    AND table_name = 'external_turns'
+                    AND column_name = 'created_at'",
                 &[&schema],
             )
             .unwrap()
