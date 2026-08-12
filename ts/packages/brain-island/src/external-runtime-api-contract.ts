@@ -936,13 +936,16 @@ function routeSchemas(): Record<string, JsonSchema> {
     ReviewOperatorConfigReadback: {
       type: "object",
       required: [
+        "configRevision",
         "deploymentRole",
         "serverName",
         "toolProfileKey",
         "credential",
         "diagnostics",
+        "reviewerRoute",
       ],
       properties: {
+        configRevision: { type: "string" },
         deploymentRole: { type: "string", enum: ["production", "debug"] },
         authorityId: { type: "string" },
         endpointRef: { type: "string" },
@@ -959,12 +962,16 @@ function routeSchemas(): Record<string, JsonSchema> {
           additionalProperties: false,
         },
         diagnostics: { type: "object", additionalProperties: true },
+        reviewerRoute: {
+          $ref: "#/components/schemas/AgentRouteResolution",
+        },
       },
       additionalProperties: false,
     },
     ReviewOperatorConfigWrite: {
       type: "object",
       properties: {
+        expectedConfigRevision: { type: "string", minLength: 1 },
         enabled: { type: "boolean" },
         authorityId: { type: "string", minLength: 1 },
         endpointRef: { type: "string", minLength: 1 },
@@ -975,6 +982,7 @@ function routeSchemas(): Record<string, JsonSchema> {
         },
       },
       additionalProperties: false,
+      required: ["expectedConfigRevision"],
     },
     ReviewOperatorConfigMutationResult: {
       type: "object",

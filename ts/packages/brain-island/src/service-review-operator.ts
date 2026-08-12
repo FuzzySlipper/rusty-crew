@@ -1,4 +1,8 @@
-import type { ReviewSubmissionRecord } from "@rusty-crew/contracts";
+import { createHash } from "node:crypto";
+import type {
+  AgentRouteResolution,
+  ReviewSubmissionRecord,
+} from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import type {
   RustyCrewDeploymentRole,
@@ -16,6 +20,7 @@ import {
 } from "./service-mcp-tools.js";
 
 export interface ReviewOperatorConfigReadback {
+  configRevision: string;
   deploymentRole: RustyCrewDeploymentRole;
   authorityId?: string;
   endpointRef?: string;
@@ -27,6 +32,7 @@ export interface ReviewOperatorConfigReadback {
     source: "service_environment" | "none";
   };
   diagnostics: ReviewDenAuthorityDiagnostics;
+  reviewerRoute: AgentRouteResolution;
 }
 
 export interface ReviewPipelinePage {
@@ -54,9 +60,11 @@ export function reviewOperatorConfigReadback(input: {
   deploymentRole: RustyCrewDeploymentRole;
   authority: RustyCrewReviewDenAuthorityConfig | undefined;
   diagnostics: ReviewDenAuthorityDiagnostics;
+  reviewerRoute: AgentRouteResolution;
 }): ReviewOperatorConfigReadback {
   const authority = input.authority;
   return {
+    configRevision: reviewOperatorConfigRevision(authority),
     deploymentRole: input.deploymentRole,
     ...(authority === undefined
       ? {}
@@ -73,7 +81,26 @@ export function reviewOperatorConfigReadback(input: {
         authority?.bearerToken === undefined ? "none" : "service_environment",
     },
     diagnostics: input.diagnostics,
+    reviewerRoute: input.reviewerRoute,
   };
+}
+
+export function reviewOperatorConfigRevision(
+  authority: RustyCrewReviewDenAuthorityConfig | undefined,
+): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify(
+        authority === undefined
+          ? null
+          : {
+              authorityId: authority.authorityId,
+              endpointRef: authority.endpointRef,
+              auditIdentity: authority.auditIdentity,
+            },
+      ),
+    )
+    .digest("hex");
 }
 
 export async function composedReviewPipeline(input: {

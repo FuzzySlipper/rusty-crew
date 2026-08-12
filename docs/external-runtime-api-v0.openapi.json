@@ -7539,13 +7539,16 @@
       "ReviewOperatorConfigReadback": {
         "type": "object",
         "required": [
+          "configRevision",
           "deploymentRole",
           "serverName",
           "toolProfileKey",
           "credential",
-          "diagnostics"
+          "diagnostics",
+          "reviewerRoute"
         ],
         "properties": {
+          "configRevision": { "type": "string" },
           "deploymentRole": {
             "type": "string",
             "enum": ["production", "debug"]
@@ -7567,13 +7570,17 @@
             },
             "additionalProperties": false
           },
-          "diagnostics": { "type": "object", "additionalProperties": true }
+          "diagnostics": { "type": "object", "additionalProperties": true },
+          "reviewerRoute": {
+            "$ref": "#/components/schemas/AgentRouteResolution"
+          }
         },
         "additionalProperties": false
       },
       "ReviewOperatorConfigWrite": {
         "type": "object",
         "properties": {
+          "expectedConfigRevision": { "type": "string", "minLength": 1 },
           "enabled": { "type": "boolean" },
           "authorityId": { "type": "string", "minLength": 1 },
           "endpointRef": { "type": "string", "minLength": 1 },
@@ -7583,7 +7590,8 @@
             "enum": ["production", "debug"]
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "required": ["expectedConfigRevision"]
       },
       "ReviewOperatorConfigMutationResult": {
         "type": "object",

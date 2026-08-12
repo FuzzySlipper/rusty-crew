@@ -7,6 +7,7 @@ import { validateReviewDenAuthorityConfig } from "./service-config.js";
 import type { ReviewDenAuthorityDiagnostics } from "./service-review-den-authority.js";
 import {
   composedReviewPipeline,
+  reviewOperatorConfigRevision,
   reviewOperatorConfigReadback,
 } from "./service-review-operator.js";
 import {
@@ -22,6 +23,9 @@ export interface ReviewOperatorRouteContext {
   authority(): RustyCrewReviewDenAuthorityConfig | undefined;
   diagnostics(): ReviewDenAuthorityDiagnostics;
   refreshDiagnostics(): Promise<ReviewDenAuthorityDiagnostics>;
+  resolveReviewer(): Promise<
+    import("@rusty-crew/contracts").AgentRouteResolution
+  >;
   readRuntimeConfigFile(): Promise<{ value: Record<string, unknown> }>;
   writeRuntimeConfigFile(value: Record<string, unknown>): Promise<void>;
   applyRuntimeConfigFromDisk(): Promise<unknown>;
@@ -60,12 +64,14 @@ export async function handleReviewOperatorRequest(
     if (input.url.pathname === `${PREFIX}/config`) {
       if (input.method === "GET") {
         const diagnostics = await context.refreshDiagnostics();
+        const reviewerRoute = await context.resolveReviewer();
         return successRoute(
           input.requestId,
           reviewOperatorConfigReadback({
             deploymentRole: context.deploymentRole,
             authority: context.authority(),
             diagnostics,
+            reviewerRoute,
           }),
         );
       }
@@ -76,6 +82,17 @@ export async function handleReviewOperatorRequest(
         context.deploymentRole,
       );
       rejectSecretFields(body);
+      const expectedRevision = requiredString(
+        body.expectedConfigRevision,
+        "expectedConfigRevision",
+      );
+      const actualRevision = reviewOperatorConfigRevision(context.authority());
+      if (expectedRevision !== actualRevision) {
+        throw new ReviewOperatorConflictError(
+          "review_den_authority_revision_conflict",
+          "review Den authority config revision conflict",
+        );
+      }
       return context.withRuntimeConfigMutation(async () => {
         const runtimeFile = await context.readRuntimeConfigFile();
         const previousValue = structuredClone(runtimeFile.value);
@@ -103,12 +120,14 @@ export async function handleReviewOperatorRequest(
           throw error;
         }
         const diagnostics = await context.refreshDiagnostics();
+        const reviewerRoute = await context.resolveReviewer();
         return successRoute(input.requestId, {
           status: "updated",
           config: reviewOperatorConfigReadback({
             deploymentRole: context.deploymentRole,
             authority: context.authority(),
             diagnostics,
+            reviewerRoute,
           }),
           applyResult,
         });
@@ -152,6 +171,13 @@ export async function handleReviewOperatorRequest(
         context.deploymentRole,
       );
       const taskId = Number(taskMatch[1]);
+      const reviewerRoute = await context.resolveReviewer();
+      if (!reviewerRoute.routable || reviewerRoute.resolvedTarget == null) {
+        throw new ReviewOperatorConflictError(
+          reviewerRoute.reasonCode ?? "reviewer_route_unavailable",
+          "@reviewer does not resolve to a routable session",
+        );
+      }
       const ttlMs = boundedInteger(
         body.ttlMs,
         300_000,
@@ -184,12 +210,24 @@ export async function handleReviewOperatorRequest(
       retryable: false,
     });
   } catch (error) {
-    return failure(400, input.requestId, {
-      code: "invalid_input",
-      reason_code: "review_operator_request_failed",
+    const conflict = error instanceof ReviewOperatorConflictError;
+    return failure(conflict ? 409 : 400, input.requestId, {
+      code: conflict ? "conflict" : "invalid_input",
+      reason_code: conflict
+        ? error.reasonCode
+        : "review_operator_request_failed",
       message: error instanceof Error ? error.message : String(error),
       retryable: false,
     });
+  }
+}
+
+class ReviewOperatorConflictError extends Error {
+  constructor(
+    readonly reasonCode: string,
+    message: string,
+  ) {
+    super(message);
   }
 }
 

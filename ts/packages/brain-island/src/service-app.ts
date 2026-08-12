@@ -6194,6 +6194,7 @@ function reviewOperatorRouteContext(state: ServiceState) {
     authority: () => state.reviewDenAuthority,
     diagnostics: () => state.reviewDenAuthorityDiagnostics,
     refreshDiagnostics: () => refreshReviewDenAuthorityDiagnostics(state),
+    resolveReviewer: () => state.bridge.resolveAgentAddress("@reviewer"),
     readRuntimeConfigFile: () =>
       readRuntimeConfigFileForMutationFromModule(
         profileAdminMutationContext(state),

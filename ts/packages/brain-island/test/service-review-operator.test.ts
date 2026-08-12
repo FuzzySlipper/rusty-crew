@@ -27,12 +27,24 @@ const diagnostics = {
   checkedAt: "2026-08-12T00:00:00.000Z",
   message: "ready",
 };
+const reviewerRoute = {
+  address: "@reviewer",
+  routable: true,
+  resolvedTarget: {
+    agentId: "reviewer",
+    displayLabel: "Reviewer",
+    profileId: "reviewer",
+    runtimeKind: "codex_app_server" as const,
+    sessionId: "reviewer-session",
+  },
+};
 
 test("review config readback reports credential presence without secret material", () => {
   const readback = reviewOperatorConfigReadback({
     deploymentRole: "production",
     authority,
     diagnostics,
+    reviewerRoute,
   });
   assert.deepEqual(readback.credential, {
     present: true,
@@ -139,6 +151,7 @@ test("manual reviewer route returns receipt-backed exact command", async () => {
       authority: () => authority,
       diagnostics: () => diagnostics,
       refreshDiagnostics: async () => diagnostics,
+      resolveReviewer: async () => reviewerRoute,
       readRuntimeConfigFile: async () => ({ value: {} }),
       writeRuntimeConfigFile: async () => undefined,
       applyRuntimeConfigFromDisk: async () => ({}),
@@ -182,6 +195,7 @@ test("config write rejects browser-supplied credentials", async () => {
       url: new URL("http://crew/v1/admin/review-operator/config"),
       requestId: "request-2",
       body: {
+        expectedConfigRevision: "wrong-on-purpose",
         authorityId: "a",
         endpointRef: "config://mcp/den",
         bearerToken: "secret",
@@ -192,6 +206,7 @@ test("config write rejects browser-supplied credentials", async () => {
       authority: () => authority,
       diagnostics: () => diagnostics,
       refreshDiagnostics: async () => diagnostics,
+      resolveReviewer: async () => reviewerRoute,
       readRuntimeConfigFile: async () => ({ value: {} }),
       writeRuntimeConfigFile: async () => undefined,
       applyRuntimeConfigFromDisk: async () => ({}),
