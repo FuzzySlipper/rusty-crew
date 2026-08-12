@@ -3661,18 +3661,18 @@ test("durable thread reconstruction folds legacy sparse completions across event
       new Set(replayedEvents.map((event) => event.sequenceId)).size,
       replayedEvents.length,
     );
-    assert.deepEqual(
-      replayedEvents.find((event) => event.itemId === "rs_media-6863")?.payload
-        .media,
-      [
-        {
-          mediaIndex: 0,
-          captureSource: "image_view_path",
-          captureState: "unavailable",
-          reasonCode: "external_media_source_unavailable",
-        },
-      ],
-    );
+    const mediaPayload = replayedEvents.find(
+      (event) => event.itemId === "rs_media-6863",
+    )?.payload;
+    assert.ok(typeof mediaPayload === "object" && mediaPayload !== null);
+    assert.deepEqual((mediaPayload as Record<string, unknown>).media, [
+      {
+        mediaIndex: 0,
+        captureSource: "image_view_path",
+        captureState: "unavailable",
+        reasonCode: "external_media_source_unavailable",
+      },
+    ]);
   } finally {
     await reloaded?.stop().catch(() => undefined);
     await fixture.cleanup();
