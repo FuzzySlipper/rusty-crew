@@ -334,6 +334,44 @@ fn passing_review_gate_is_restart_durable_and_does_not_wake_submitter() {
 }
 
 #[test]
+fn review_submission_query_bounds_and_pages_the_store_read() {
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "review-page-session",
+            "review-page-agent",
+            "review-page-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    begin(&engine, &session.session_id, 7101, 'a');
+    begin(&engine, &session.session_id, 7102, 'b');
+    begin(&engine, &session.session_id, 7103, 'c');
+
+    let first = engine
+        .list_review_submissions(&ReviewSubmissionQuery {
+            project_id: Some(ProjectId::new("rusty-crew")),
+            limit: Some(2),
+            offset: Some(0),
+            ..ReviewSubmissionQuery::default()
+        })
+        .unwrap();
+    let second = engine
+        .list_review_submissions(&ReviewSubmissionQuery {
+            project_id: Some(ProjectId::new("rusty-crew")),
+            limit: Some(2),
+            offset: Some(2),
+            ..ReviewSubmissionQuery::default()
+        })
+        .unwrap();
+    assert_eq!(first.len(), 2);
+    assert_eq!(second.len(), 1);
+    assert!(first.iter().all(|record| !second
+        .iter()
+        .any(|next| next.submission_id == record.submission_id)));
+}
+
+#[test]
 fn newer_sha_supersedes_old_workflow_and_duplicate_submit_is_idempotent() {
     let engine = test_engine();
     let session = engine

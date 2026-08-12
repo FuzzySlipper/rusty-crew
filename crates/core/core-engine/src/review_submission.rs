@@ -509,12 +509,24 @@ impl CoreEngine {
         &self,
         query: &ReviewSubmissionQuery,
     ) -> CoreResult<Vec<ReviewSubmissionRecord>> {
-        let mut records = list_review_submission_records(&self.store)?;
+        let mut records = match query.limit {
+            Some(limit) => list_review_submission_record_page(
+                &self.store,
+                query.project_id.as_ref().map(|project| project.0.as_str()),
+                limit.min(101),
+                query.offset.unwrap_or(0),
+            )?,
+            None => list_review_submission_records(&self.store)?,
+        };
         records.retain(|record| {
             query
-                .submission_id
+                .project_id
                 .as_ref()
-                .is_none_or(|id| record.submission_id == *id)
+                .is_none_or(|project_id| record.project_id == *project_id)
+                && query
+                    .submission_id
+                    .as_ref()
+                    .is_none_or(|id| record.submission_id == *id)
                 && query
                     .task_id
                     .as_ref()

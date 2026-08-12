@@ -1694,6 +1694,14 @@
       "get": {
         "operationId": "readReviewOperatorConfig",
         "tags": ["external-runtime"],
+        "parameters": [
+          {
+            "name": "expectedDeploymentRole",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "enum": ["production", "debug"] }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful typed response",
@@ -6399,7 +6407,18 @@
       },
       "ReviewSubmissionQuery": {
         "properties": {
+          "limit": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "offset": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
           "pendingOnly": { "type": "boolean" },
+          "projectId": { "type": ["string", "null"] },
           "reviewerSessionId": { "type": ["string", "null"] },
           "submissionId": { "type": ["string", "null"] },
           "submitterSessionId": { "type": ["string", "null"] },

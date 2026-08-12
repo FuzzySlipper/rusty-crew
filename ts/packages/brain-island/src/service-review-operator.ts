@@ -117,52 +117,62 @@ export async function composedReviewPipeline(input: {
     args: Record<string, unknown>,
   ) => Promise<unknown>;
 }): Promise<ReviewPipelinePage> {
+  const denCapacity = Math.ceil(input.limit / 2);
+  const crewCapacity = input.limit - denCapacity;
+  const { denOffset, crewOffset } = decodePipelineOffset(input.offset);
+  const denExhausted = denOffset === PIPELINE_OFFSET_EXHAUSTED;
+  const crewExhausted = crewOffset === PIPELINE_OFFSET_EXHAUSTED;
   const authority = serviceReviewDenAuthority(input.authority);
   if (authority === undefined) {
     throw new Error(
       "Dedicated service review Den authority is not configured.",
     );
   }
-  const denPayload = await (input.callDenTool?.("list_review_pipeline", {
-    project_id: input.projectId,
-    limit: input.limit,
-    offset: input.offset,
-  }) ??
-    callReviewPipelineTool({
-      authority,
-      runtimeConfig: input.runtimeConfig,
-      mcpConfig: input.mcpConfig,
-      projectId: input.projectId,
-      limit: input.limit,
-      offset: input.offset,
-    }));
+  const denPayload = denExhausted
+    ? { items: [] }
+    : await (input.callDenTool?.("list_review_pipeline", {
+        project_id: input.projectId,
+        limit: denCapacity,
+        offset: denOffset,
+      }) ??
+        callReviewPipelineTool({
+          authority,
+          runtimeConfig: input.runtimeConfig,
+          mcpConfig: input.mcpConfig,
+          projectId: input.projectId,
+          limit: denCapacity,
+          offset: denOffset,
+        }));
   const denPage = reviewPipelinePageRecord(denPayload);
   const denItems = arrayValue(denPage.items);
-  const submissions = (
-    await input.bridge.listReviewSubmissions({
-      pendingOnly: false,
-    })
-  )
-    .filter((record) => record.projectId === input.projectId)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
-  const submissionsByTask = new Map<number, ReviewSubmissionRecord[]>();
-  for (const submission of submissions) {
-    const taskId = Number(submission.taskId);
-    if (!Number.isSafeInteger(taskId)) continue;
-    const values = submissionsByTask.get(taskId) ?? [];
-    values.push(submission);
-    submissionsByTask.set(taskId, values);
-  }
+  const crewPage =
+    crewCapacity === 0 || crewExhausted
+      ? []
+      : await input.bridge.listReviewSubmissions({
+          projectId: input.projectId,
+          pendingOnly: false,
+          limit: crewCapacity + 1,
+          offset: crewOffset,
+        });
 
   const items: ReviewPipelineItem[] = [];
-  const denTaskIds = new Set<number>();
+  const denItemsByTask = new Map<number, Record<string, unknown>>();
   for (const rawItem of denItems) {
     if (!isRecord(rawItem) || !isRecord(rawItem.task)) continue;
     const taskId = numericValue(rawItem.task.id);
     if (taskId === undefined) continue;
-    denTaskIds.add(taskId);
-    const matches = submissionsByTask.get(taskId) ?? [];
-    if (matches.length === 0) {
+    denItemsByTask.set(taskId, rawItem);
+    const hasManagedSubmission =
+      (
+        await input.bridge.listReviewSubmissions({
+          projectId: input.projectId,
+          taskId: String(taskId),
+          pendingOnly: false,
+          limit: 1,
+          offset: 0,
+        })
+      ).length > 0;
+    if (!hasManagedSubmission) {
       items.push({
         stableId: `den-task:${input.projectId}:${taskId}`,
         projectId: input.projectId,
@@ -172,50 +182,75 @@ export async function composedReviewPipeline(input: {
         latestGate: recordOrNull(rawItem.latest_gate),
         stage: denOnlyStage(rawItem),
       });
-      continue;
-    }
-    for (const submission of matches) {
-      items.push({
-        stableId: submission.submissionId,
-        projectId: input.projectId,
-        taskId,
-        task: rawItem.task,
-        latestRound: recordOrNull(rawItem.latest_round),
-        latestGate: recordOrNull(rawItem.latest_gate),
-        submission,
-        stage: managedSubmissionStage(submission),
-      });
     }
   }
-  for (const submission of submissions) {
+  for (const submission of crewPage.slice(0, crewCapacity)) {
     const taskId = Number(submission.taskId);
-    if (!Number.isSafeInteger(taskId) || denTaskIds.has(taskId)) continue;
+    if (!Number.isSafeInteger(taskId)) continue;
+    const denItem = denItemsByTask.get(taskId);
     items.push({
       stableId: submission.submissionId,
       projectId: input.projectId,
       taskId,
-      latestRound: null,
-      latestGate: null,
+      ...(denItem !== undefined && isRecord(denItem.task)
+        ? { task: denItem.task }
+        : {}),
+      latestRound:
+        denItem === undefined ? null : recordOrNull(denItem.latest_round),
+      latestGate:
+        denItem === undefined ? null : recordOrNull(denItem.latest_gate),
       submission,
       stage: managedSubmissionStage(submission),
     });
   }
 
-  const boundedItems = items.slice(0, input.limit);
   const denNextOffset = numericValue(denPage.next_offset);
+  const crewHasNext = crewPage.length > crewCapacity;
+  const nextDenOffset = denExhausted
+    ? PIPELINE_OFFSET_EXHAUSTED
+    : (denNextOffset ?? PIPELINE_OFFSET_EXHAUSTED);
+  const nextCrewOffset = crewExhausted
+    ? PIPELINE_OFFSET_EXHAUSTED
+    : crewHasNext
+      ? crewOffset + crewCapacity
+      : PIPELINE_OFFSET_EXHAUSTED;
+  const hasNext =
+    nextDenOffset !== PIPELINE_OFFSET_EXHAUSTED ||
+    nextCrewOffset !== PIPELINE_OFFSET_EXHAUSTED;
   return {
     projectId: input.projectId,
     deploymentRole: input.deploymentRole,
     limit: input.limit,
     offset: input.offset,
-    ...(items.length > boundedItems.length
-      ? { nextOffset: input.offset + boundedItems.length }
-      : denNextOffset === undefined
-        ? {}
-        : { nextOffset: denNextOffset }),
+    ...(hasNext
+      ? { nextOffset: encodePipelineOffset(nextDenOffset, nextCrewOffset) }
+      : {}),
     ...(denNextOffset === undefined ? {} : { denNextOffset }),
-    items: boundedItems,
+    items,
   };
+}
+
+const PIPELINE_OFFSET_RADIX = 1_000_000;
+const PIPELINE_OFFSET_EXHAUSTED = PIPELINE_OFFSET_RADIX - 1;
+
+function decodePipelineOffset(offset: number): {
+  denOffset: number;
+  crewOffset: number;
+} {
+  return {
+    denOffset: Math.floor(offset / PIPELINE_OFFSET_RADIX),
+    crewOffset: offset % PIPELINE_OFFSET_RADIX,
+  };
+}
+
+function encodePipelineOffset(denOffset: number, crewOffset: number): number {
+  if (
+    denOffset > PIPELINE_OFFSET_EXHAUSTED ||
+    crewOffset > PIPELINE_OFFSET_EXHAUSTED
+  ) {
+    throw new Error("review pipeline offset exceeds the bounded cursor range");
+  }
+  return denOffset * PIPELINE_OFFSET_RADIX + crewOffset;
 }
 
 async function callReviewPipelineTool(input: {

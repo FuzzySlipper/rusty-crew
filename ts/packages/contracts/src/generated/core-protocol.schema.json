@@ -7802,8 +7802,30 @@
     },
     "ReviewSubmissionQuery": {
       "properties": {
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "offset": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "pendingOnly": {
           "type": "boolean"
+        },
+        "projectId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reviewerSessionId": {
           "type": [

@@ -12,6 +12,15 @@ pub(crate) fn list(store: &CoreCoordinationStore) -> CoreResult<Vec<ReviewSubmis
     store.list_review_submissions()
 }
 
+pub(crate) fn list_page(
+    store: &CoreCoordinationStore,
+    project_id: Option<&str>,
+    limit: u32,
+    offset: u64,
+) -> CoreResult<Vec<ReviewSubmissionRecord>> {
+    store.list_review_submissions_page(project_id, limit, offset)
+}
+
 pub(crate) fn save(
     store: &CoreCoordinationStore,
     record: &ReviewSubmissionRecord,

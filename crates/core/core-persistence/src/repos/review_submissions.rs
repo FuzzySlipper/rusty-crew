@@ -95,6 +95,36 @@ impl CoordinationStore {
         records
     }
 
+    pub fn list_review_submissions_page(
+        &self,
+        project_id: Option<&str>,
+        limit: u32,
+        offset: u64,
+    ) -> CoreResult<Vec<ReviewSubmissionRecord>> {
+        let conn = self.conn()?;
+        let mut statement = conn
+            .prepare(
+                "SELECT record_json FROM review_submissions
+                 WHERE (?1 IS NULL OR project_id = ?1)
+                 ORDER BY updated_at DESC, submission_id
+                 LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(|error| persistence_error("prepare bounded review submission list", error))?;
+        let records = statement
+            .query_map(
+                params![project_id, i64::from(limit), offset as i64],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(|error| persistence_error("query bounded review submissions", error))?
+            .map(|raw| {
+                decode_review_submission(&raw.map_err(|error| {
+                    persistence_error("read bounded review submission row", error)
+                })?)
+            })
+            .collect();
+        records
+    }
+
     pub fn insert_review_submission(
         &self,
         record: &ReviewSubmissionRecord,

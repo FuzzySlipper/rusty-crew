@@ -253,6 +253,21 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn list_review_submissions_page(
+        &self,
+        project_id: Option<&str>,
+        limit: u32,
+        offset: u64,
+    ) -> CoreResult<Vec<ReviewSubmissionRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_review_submissions_page(project_id, limit, offset),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.list_review_submissions_page(project_id, limit, offset)
+            }
+        }
+    }
+
     pub fn insert_review_submission(
         &self,
         record: &ReviewSubmissionRecord,

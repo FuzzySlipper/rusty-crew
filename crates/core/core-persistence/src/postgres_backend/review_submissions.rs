@@ -72,6 +72,31 @@ impl PostgresBackendStore {
             .collect()
     }
 
+    pub fn list_review_submissions_page(
+        &self,
+        project_id: Option<&str>,
+        limit: u32,
+        offset: u64,
+    ) -> CoreResult<Vec<ReviewSubmissionRecord>> {
+        let schema = self.quoted_schema();
+        let limit = i64::from(limit);
+        let offset = offset as i64;
+        self.client()?
+            .query(
+                &format!(
+                    "SELECT record_json FROM {schema}.review_submissions
+                     WHERE ($1::TEXT IS NULL OR project_id = $1)
+                     ORDER BY updated_at DESC, submission_id
+                     LIMIT $2 OFFSET $3"
+                ),
+                &[&project_id, &limit, &offset],
+            )
+            .map_err(|error| postgres_error("list bounded PostgreSQL review submissions", error))?
+            .into_iter()
+            .map(|row| decode_review_submission(row.get(0)))
+            .collect()
+    }
+
     pub fn insert_review_submission(
         &self,
         record: &ReviewSubmissionRecord,

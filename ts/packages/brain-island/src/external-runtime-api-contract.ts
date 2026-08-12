@@ -697,6 +697,13 @@ export const EXTERNAL_RUNTIME_API_OPERATIONS = [
     "get",
     EXTERNAL_RUNTIME_API_PATHS.reviewOperatorConfig,
     "ReviewOperatorConfigReadback",
+    undefined,
+    [
+      {
+        name: "expectedDeploymentRole",
+        schema: { type: "string", enum: ["production", "debug"] },
+      },
+    ],
   ),
   operation(
     "review.operator.config.write",

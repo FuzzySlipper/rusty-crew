@@ -1842,7 +1842,10 @@ export type ReviewFindingStatus = {
 export type ReviewSubmissionPhase = "submitted" | "den_handoff_recorded" | "gate_pending" | "gate_failed" | "reviewer_dispatch_pending" | "reviewer_dispatched" | "den_finalization_pending" | "den_finalized" | "reply_pending" | "replied" | "reply_terminal" | "review_terminal" | "superseded";
 
 export type ReviewSubmissionQuery = {
+  limit?: number | null;
+  offset?: number | null;
   pendingOnly: boolean;
+  projectId?: string | null;
   reviewerSessionId?: string | null;
   submissionId?: string | null;
   submitterSessionId?: string | null;

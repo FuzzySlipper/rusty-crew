@@ -83,8 +83,8 @@ use provider_state_store::{
     save_provider_state as save_provider_state_store,
 };
 use review_submission_store::{
-    list as list_review_submission_records, load as load_review_submission_record,
-    save as save_review_submission_record,
+    list as list_review_submission_records, list_page as list_review_submission_record_page,
+    load as load_review_submission_record, save as save_review_submission_record,
 };
 use roleplay_lore_store::RoleplayLoreStore;
 use roleplay_records_store::RoleplayRecordsStore;

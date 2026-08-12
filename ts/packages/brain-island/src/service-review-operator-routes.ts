@@ -89,14 +89,16 @@ export async function handleReviewOperatorRequest(
         body.expectedConfigRevision,
         "expectedConfigRevision",
       );
-      const actualRevision = reviewOperatorConfigRevision(context.authority());
-      if (expectedRevision !== actualRevision) {
-        throw new ReviewOperatorConflictError(
-          "review_den_authority_revision_conflict",
-          "review Den authority config revision conflict",
+      return await context.withRuntimeConfigMutation(async () => {
+        const actualRevision = reviewOperatorConfigRevision(
+          context.authority(),
         );
-      }
-      return context.withRuntimeConfigMutation(async () => {
+        if (expectedRevision !== actualRevision) {
+          throw new ReviewOperatorConflictError(
+            "review_den_authority_revision_conflict",
+            "review Den authority config revision conflict",
+          );
+        }
         const runtimeFile = await context.readRuntimeConfigFile();
         const previousValue = structuredClone(runtimeFile.value);
         if (body.enabled === false) {

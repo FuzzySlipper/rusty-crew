@@ -753,11 +753,14 @@ pub struct ReviewSubmissionTransitionRequest {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewSubmissionQuery {
+    pub project_id: Option<ProjectId>,
     pub submission_id: Option<String>,
     pub task_id: Option<TaskId>,
     pub submitter_session_id: Option<SessionId>,
     pub reviewer_session_id: Option<SessionId>,
     pub pending_only: bool,
+    pub limit: Option<u32>,
+    pub offset: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
