@@ -186,6 +186,7 @@ function projectPayload(
   turn: Record<string, unknown>,
 ): NeutralExternalRuntimeEvent["payload"] {
   const source = Object.keys(item).length === 0 ? params : item;
+  const itemType = stringValue(item.type);
   const status = statusValue(source.status) ?? statusValue(turn.status);
   const text =
     stringValue(params.delta) ??
@@ -193,16 +194,22 @@ function projectPayload(
     stringValue(source.text);
   const durationMs = numberValue(source.durationMs);
   const messagePhase =
-    stringValue(source.type) === "agentMessage" ||
-    method.includes("agentMessage")
+    itemType === "agentMessage" || method.includes("agentMessage")
       ? messagePhaseValue(source.phase ?? params.phase)
       : undefined;
+  const summary = Array.isArray(source.summary)
+    ? source.summary.filter(
+        (entry): entry is string => typeof entry === "string",
+      )
+    : undefined;
   const base = {
     nativeMethod: method,
+    ...(itemType === undefined ? {} : { itemType }),
     ...(status === undefined ? {} : { status }),
     ...(text === undefined ? {} : { text }),
     ...(messagePhase === undefined ? {} : { messagePhase }),
     ...(durationMs === undefined ? {} : { durationMs }),
+    ...(summary === undefined || summary.length === 0 ? {} : { summary }),
   };
   switch (kind) {
     case "command_activity": {
@@ -245,16 +252,7 @@ function projectPayload(
       };
     }
     case "reasoning_delta":
-      return {
-        ...base,
-        ...(!Array.isArray(source.summary)
-          ? {}
-          : {
-              summary: source.summary.filter(
-                (entry): entry is string => typeof entry === "string",
-              ),
-            }),
-      };
+      return base;
     case "usage":
       return { ...base, usage: projectTokenUsage(params.tokenUsage) };
     case "thread_lifecycle": {

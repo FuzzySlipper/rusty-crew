@@ -8,6 +8,7 @@ import { test } from "node:test";
 import type {
   ExternalAgentBinding,
   ExternalAgentSessionCreationRequest,
+  ExternalControllerContext,
   SessionId,
 } from "@rusty-crew/contracts";
 import {
@@ -3443,6 +3444,241 @@ test("controller does not report a missing root deleted while descendants remain
   }
 });
 
+test("durable thread reconstruction folds legacy sparse completions across event pages", async () => {
+  const fixture = await externalCreationFixture(false);
+  let reloaded: ServiceExternalRuntimeController | undefined;
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "durable-item-fold-session",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const delivery = await fixture.bridge.deliverAgentMessage({
+      caller: { type: "system", senderAgentId: "operator" },
+      deliveryId: "durable-item-fold-delivery",
+      idempotencyKey: "durable-item-fold-delivery",
+      messageId: "durable-item-fold-message",
+      toAddress: created.creation.session.agentId,
+      inputKind: "operator",
+      body: "exercise durable item folding",
+      requireWake: true,
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    assert.equal(delivery.activation?.type, "external_turn_requested");
+    await fixture.controller.tick();
+    await waitUntil(
+      async () => (await fixture.bridge.listActiveExternalTurns()).length === 1,
+      "durable item fold turn start",
+    );
+    const active = (await fixture.bridge.listActiveExternalTurns())[0];
+    assert.ok(active?.nativeTurnId);
+    const threadId = created.thread.threadId;
+    const turnId = active.nativeTurnId;
+
+    // This deliberately models events written before itemType was retained:
+    // the lifecycle snapshots are sparse, while the useful summary lives in
+    // reasoning deltas. More than one persistence page ensures reconstruction
+    // cannot accidentally pass by reading only the first event page.
+    fixture.transport.emit({
+      method: "warning",
+      params: { threadId, turnId, message: "capture controller context" },
+    });
+    await waitUntil(
+      async () => fixture.latestEventController() !== undefined,
+      "event controller context capture",
+    );
+    const controllerContext = fixture.latestEventController();
+    assert.ok(controllerContext);
+    let legacySequence = 0;
+    const recordLegacyEvent = async (
+      itemId: string,
+      kind: string,
+      payload: Record<string, unknown>,
+    ) => {
+      legacySequence += 1;
+      await fixture.bridge.recordExternalRuntimeEvent({
+        controller: controllerContext,
+        event: {
+          eventId: `legacy-fold-event-${legacySequence}`,
+          sessionId: created.creation.session.sessionId,
+          createdAt: new Date().toISOString(),
+          kind,
+          runtimeId: fixture.runtimeId,
+          nativeThreadId: threadId,
+          nativeTurnId: turnId,
+          itemId,
+          payload,
+        },
+      });
+    };
+    await recordLegacyEvent("rs_reasoning-6863", "item_lifecycle", {
+      nativeMethod: "item/started",
+    });
+    await recordLegacyEvent("rs_reasoning-6863", "reasoning_delta", {
+      nativeMethod: "item/reasoning/summaryPartAdded",
+    });
+    for (let index = 0; index < 140; index += 1) {
+      await recordLegacyEvent("rs_reasoning-6863", "reasoning_delta", {
+        nativeMethod: "item/reasoning/summaryTextDelta",
+        text: index === 0 ? "Recovered legacy summary" : ".",
+      });
+    }
+    await recordLegacyEvent("rs_reasoning-6863", "item_lifecycle", {
+      nativeMethod: "item/completed",
+    });
+    await recordLegacyEvent("rs_contentless-6863", "item_lifecycle", {
+      nativeMethod: "item/started",
+    });
+    await recordLegacyEvent("rs_contentless-6863", "item_lifecycle", {
+      nativeMethod: "item/completed",
+    });
+    await recordLegacyEvent("rs_media-6863", "item_lifecycle", {
+      nativeMethod: "item/completed",
+      status: "completed",
+      media: [
+        {
+          mediaIndex: 0,
+          captureSource: "image_view_path",
+          captureState: "unavailable",
+          reasonCode: "external_media_source_unavailable",
+        },
+      ],
+    });
+    await recordLegacyEvent("command-after-first-page", "command_activity", {
+      nativeMethod: "item/completed",
+      itemType: "commandExecution",
+      command: "npm test",
+      cwd: fixture.dataDir,
+      status: "completed",
+      output: "all tests passed",
+      exitCode: 0,
+      durationMs: 12,
+    });
+    await recordLegacyEvent("commentary-after-command", "item_lifecycle", {
+      nativeMethod: "item/completed",
+      itemType: "agentMessage",
+      text: "The command completed.",
+      messagePhase: "commentary",
+    });
+    await recordLegacyEvent("final-after-command", "item_lifecycle", {
+      nativeMethod: "item/completed",
+      itemType: "agentMessage",
+      text: "Finished durable reconstruction.",
+      messagePhase: "final_answer",
+    });
+    const nativeThread = fixture.transport.threads.find(
+      (thread) => thread.id === threadId,
+    );
+    assert.ok(nativeThread);
+    const nativeTurn = (
+      nativeThread.turns as Array<Record<string, unknown>>
+    )[0];
+    assert.ok(nativeTurn);
+    nativeTurn.status = "completed";
+    nativeTurn.completedAt = 2;
+    nativeTurn.durationMs = 1_000;
+    fixture.transport.emit({
+      method: "turn/completed",
+      params: {
+        threadId,
+        turn: nativeTurn,
+      },
+    });
+    await waitUntil(
+      async () => (await fixture.bridge.listActiveExternalTurns()).length === 0,
+      "durable item fold turn completion",
+      15_000,
+    );
+
+    await fixture.controller.stop();
+    reloaded = new ServiceExternalRuntimeController({
+      bridge: fixture.bridge,
+      instanceId: "durable-item-fold-reloaded",
+      driverFactory: (_registration, authority) =>
+        new CodexAppServerDriver(fixture.transport, authority, {
+          requestTimeoutMs: 50,
+        }),
+    });
+    await reloaded.connect(fixture.runtimeId);
+    const read = await reloaded.readThread(fixture.runtimeId, {
+      threadId,
+      includeTurns: true,
+    });
+    const items = read.thread.turns[0]?.items ?? [];
+    assert.deepEqual(
+      items.map((item) => item.itemId),
+      [
+        "request:agent-message:durable-item-fold-message",
+        "rs_reasoning-6863",
+        "command-after-first-page",
+        "commentary-after-command",
+        "final-after-command",
+      ],
+    );
+    assert.equal(
+      items.some((item) => item.kind === "item"),
+      false,
+    );
+    assert.equal(items[1]?.kind, "reasoning");
+    assert.match(items[1]?.summary?.[0] ?? "", /^Recovered legacy summary/);
+    assert.notEqual(items[1]?.truncated, true);
+    assert.deepEqual(
+      { kind: items[2]?.kind, text: items[2]?.text },
+      {
+        kind: "commandExecution",
+        text: "npm test\nall tests passed",
+      },
+    );
+    assert.deepEqual(
+      items.slice(3).map((item) => ({
+        kind: item.kind,
+        messagePhase: item.messagePhase,
+        text: item.text,
+      })),
+      [
+        {
+          kind: "agentMessage",
+          messagePhase: "commentary",
+          text: "The command completed.",
+        },
+        {
+          kind: "agentMessage",
+          messagePhase: "final_answer",
+          text: "Finished durable reconstruction.",
+        },
+      ],
+    );
+    const replayedEvents = await fixture.bridge.queryExternalRuntimeEvents({
+      runtimeId: fixture.runtimeId,
+      nativeTurnId: turnId,
+      afterSequence: 0,
+      limit: 512,
+    });
+    assert.equal(
+      new Set(replayedEvents.map((event) => event.sequenceId)).size,
+      replayedEvents.length,
+    );
+    assert.deepEqual(
+      replayedEvents.find((event) => event.itemId === "rs_media-6863")?.payload
+        .media,
+      [
+        {
+          mediaIndex: 0,
+          captureSource: "image_view_path",
+          captureState: "unavailable",
+          reasonCode: "external_media_source_unavailable",
+        },
+      ],
+    );
+  } finally {
+    await reloaded?.stop().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
 test("thread snapshots preserve message phase across controller reload", async () => {
   const fixture = await externalCreationFixture(false);
   let reloaded: ServiceExternalRuntimeController | undefined;
@@ -4588,6 +4824,7 @@ async function externalCreationFixture(
   const runtimeId = "creation-runtime";
   const profileId = profileIdOverride;
   const bridge = await loadNativeBridge();
+  let latestEventController: ExternalControllerContext | undefined;
   const controllerBridge = new Proxy(bridge, {
     get(target, property, receiver) {
       if (
@@ -4623,21 +4860,22 @@ async function externalCreationFixture(
           throw new Error(bridgeFailure.message);
         };
       }
-      if (
-        bridgeFailure?.operation === "record_lineage_event" &&
-        property === "recordExternalRuntimeEvent" &&
-        (bridgeFailure.remaining ?? 1) > 0
-      ) {
+      if (property === "recordExternalRuntimeEvent") {
         return async (
           input: Parameters<
             NativeBridgeModule["recordExternalRuntimeEvent"]
           >[0],
         ) => {
-          if (input.event.kind !== "thread_lineage_replaced") {
-            return target.recordExternalRuntimeEvent(input);
+          latestEventController = input.controller;
+          if (
+            bridgeFailure?.operation === "record_lineage_event" &&
+            (bridgeFailure.remaining ?? 1) > 0 &&
+            input.event.kind === "thread_lineage_replaced"
+          ) {
+            bridgeFailure.remaining = (bridgeFailure.remaining ?? 1) - 1;
+            throw new Error(bridgeFailure.message);
           }
-          bridgeFailure.remaining = (bridgeFailure.remaining ?? 1) - 1;
-          throw new Error(bridgeFailure.message);
+          return target.recordExternalRuntimeEvent(input);
         };
       }
       return Reflect.get(target, property, receiver) as unknown;
@@ -4701,6 +4939,7 @@ async function externalCreationFixture(
     runtimeId,
     profileId,
     bridge,
+    latestEventController: () => latestEventController,
     transport,
     controller,
     cleanup: async () => {
@@ -4726,8 +4965,9 @@ function withoutProfileProvenance(
 async function waitUntil(
   predicate: () => Promise<boolean>,
   label: string,
+  timeoutMs = 5_000,
 ): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));

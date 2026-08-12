@@ -74,6 +74,7 @@ const DEFAULT_RECOVERY_MAX_DELAY_MS = 60_000;
 const DEFAULT_EXTERNAL_THREAD_TURN_PAGE_LIMIT = 50;
 const MAX_EXTERNAL_THREAD_TURN_PAGE_LIMIT = 100;
 const MAX_EXTERNAL_THREAD_ITEMS_PER_TURN = 128;
+const EXTERNAL_TURN_EVENT_PAGE_LIMIT = 128;
 const MAX_EXTERNAL_THREAD_ITEM_TEXT_CHARS = 4_096;
 const MAX_EXTERNAL_THREAD_ITEM_SUMMARY_ENTRIES = 8;
 const MAX_EXTERNAL_THREAD_ITEM_SUMMARY_CHARS = 1_024;
@@ -801,15 +802,11 @@ export class ServiceExternalRuntimeController {
     runtimeId: string,
     correlation: ExternalTurnCorrelation,
   ): Promise<ExternalThreadTurnProjection> {
+    const nativeTurnId = correlation.nativeTurnId;
     const events =
-      correlation.nativeTurnId === null
+      nativeTurnId == null
         ? []
-        : await this.#bridge.queryExternalRuntimeEvents({
-            runtimeId,
-            nativeTurnId: correlation.nativeTurnId,
-            afterSequence: 0,
-            limit: MAX_EXTERNAL_THREAD_ITEMS_PER_TURN + 2,
-          });
+        : await this.#queryDurableExternalTurnEvents(runtimeId, nativeTurnId);
     const items = projectDurableExternalTurnItems(correlation, events);
     const projectedItems = await this.#attachDurableExternalTurnInputImages(
       items.items,
@@ -840,6 +837,31 @@ export class ServiceExternalRuntimeController {
       items: projectedItems,
       ...(items.truncated ? { itemsTruncated: true } : {}),
     };
+  }
+
+  async #queryDurableExternalTurnEvents(
+    runtimeId: string,
+    nativeTurnId: string,
+  ): Promise<NormalizedExternalRuntimeEvent[]> {
+    const events: NormalizedExternalRuntimeEvent[] = [];
+    let afterSequence = 0;
+    for (;;) {
+      const page = await this.#bridge.queryExternalRuntimeEvents({
+        runtimeId,
+        nativeTurnId,
+        afterSequence,
+        limit: EXTERNAL_TURN_EVENT_PAGE_LIMIT,
+      });
+      events.push(...page);
+      if (page.length < EXTERNAL_TURN_EVENT_PAGE_LIMIT) return events;
+      const last = page.at(-1);
+      if (last === undefined || last.sequenceId <= afterSequence) {
+        throw new Error(
+          `external turn event cursor did not advance for ${nativeTurnId}`,
+        );
+      }
+      afterSequence = last.sequenceId;
+    }
   }
 
   async #attachDurableExternalTurnInputImages(
@@ -1970,6 +1992,7 @@ export class ServiceExternalRuntimeController {
         source: "agent_message_delivery",
         deliveryId: receipt.request.deliveryId,
         messageId: receipt.request.messageId,
+        text: activation.messageText,
         imageAttachmentIds: receipt.request.imageAttachmentIds ?? [],
       },
       rawDetailRef: null,
@@ -5391,36 +5414,95 @@ function projectDurableExternalTurnItems(
       ...(bounded.truncated ? { truncated: true } : {}),
     });
   }
-  const latestByItem = new Map<string, NormalizedExternalRuntimeEvent>();
+  const eventsByItem = new Map<
+    string,
+    {
+      firstSequenceId: number;
+      events: NormalizedExternalRuntimeEvent[];
+    }
+  >();
   for (const event of events) {
     if (event.itemId == null) continue;
-    latestByItem.set(event.itemId, event);
+    const existing = eventsByItem.get(event.itemId);
+    if (existing === undefined) {
+      eventsByItem.set(event.itemId, {
+        firstSequenceId: event.sequenceId,
+        events: [event],
+      });
+    } else {
+      existing.events.push(event);
+    }
   }
-  const durableItems = [...latestByItem.values()]
-    .sort((left, right) => left.sequenceId - right.sequenceId)
-    .slice(0, MAX_EXTERNAL_THREAD_ITEMS_PER_TURN - items.length)
-    .map(projectDurableExternalThreadItem);
+  const projectedItems = [...eventsByItem.values()]
+    .sort((left, right) => left.firstSequenceId - right.firstSequenceId)
+    .map((history) => projectDurableExternalThreadItem(history.events))
+    .filter((item): item is ExternalThreadItemProjection => item !== undefined);
+  const available = MAX_EXTERNAL_THREAD_ITEMS_PER_TURN - items.length;
+  const durableItems = projectedItems.slice(0, available);
   items.push(...durableItems);
   return {
     items,
-    truncated:
-      latestByItem.size > durableItems.length ||
-      events.length > MAX_EXTERNAL_THREAD_ITEMS_PER_TURN + 1,
+    truncated: projectedItems.length > durableItems.length,
   };
 }
 
 function projectDurableExternalThreadItem(
-  event: NormalizedExternalRuntimeEvent,
-): ExternalThreadItemProjection {
-  const payload = isRecord(event.payload) ? event.payload : {};
-  const rawText = stringValue(payload.text) ?? stringValue(payload.output);
+  events: readonly NormalizedExternalRuntimeEvent[],
+): ExternalThreadItemProjection | undefined {
+  const first = events[0];
+  if (first === undefined) return undefined;
+  const mergedPayload: Record<string, unknown> = {};
+  const deltaText: string[] = [];
+  const reasoningSummary: string[] = [];
+  let explicitSummary: string[] | undefined;
+  let snapshotText: string | undefined;
+  let detailHandle: string | undefined;
+  for (const event of events) {
+    const payload = isRecord(event.payload) ? event.payload : {};
+    Object.assign(mergedPayload, payload);
+    if (event.rawDetailRef != null) detailHandle = event.rawDetailRef;
+    const nativeMethod = stringValue(payload.nativeMethod);
+    const eventText = stringValue(payload.text);
+    if (Array.isArray(payload.summary)) {
+      const candidate = payload.summary.filter(
+        (entry): entry is string => typeof entry === "string",
+      );
+      if (candidate.length > 0) explicitSummary = candidate;
+    }
+    if (nativeMethod === "item/started" || nativeMethod === "item/completed") {
+      snapshotText = eventText ?? stringValue(payload.output) ?? snapshotText;
+      continue;
+    }
+    if (event.kind === "reasoning_delta") {
+      if (nativeMethod?.endsWith("summaryPartAdded")) {
+        reasoningSummary.push("");
+      } else if (nativeMethod?.endsWith("summaryTextDelta")) {
+        if (reasoningSummary.length === 0) reasoningSummary.push("");
+        reasoningSummary[reasoningSummary.length - 1] += eventText ?? "";
+      }
+      continue;
+    }
+    if (
+      eventText !== undefined &&
+      (event.kind === "assistant_text_delta" ||
+        event.kind === "plan_delta" ||
+        nativeMethod?.toLowerCase().includes("delta") === true)
+    ) {
+      deltaText.push(eventText);
+    }
+  }
+  const kind = durableExternalThreadItemKind(events, mergedPayload);
+  const rawText = durableExternalThreadItemText(
+    kind,
+    mergedPayload,
+    snapshotText,
+    deltaText.join(""),
+  );
   const text =
     rawText === undefined ? undefined : boundedExternalThreadText(rawText);
-  const rawSummary = Array.isArray(payload.summary)
-    ? payload.summary.filter(
-        (entry): entry is string => typeof entry === "string",
-      )
-    : [];
+  const rawSummary = (explicitSummary ?? reasoningSummary).filter(
+    (entry) => entry.length > 0,
+  );
   const summary = rawSummary
     .slice(0, MAX_EXTERNAL_THREAD_ITEM_SUMMARY_ENTRIES)
     .map(
@@ -5428,33 +5510,32 @@ function projectDurableExternalThreadItem(
         boundedExternalThreadText(entry, MAX_EXTERNAL_THREAD_ITEM_SUMMARY_CHARS)
           .value,
     );
-  const kind =
-    event.kind === "external_turn_steer_input" ||
-    event.kind === "external_turn_steer_intent"
-      ? "userMessage"
-      : stringValue(payload.messagePhase) !== undefined
-        ? "agentMessage"
-        : stringValue(payload.command) !== undefined
-          ? "commandExecution"
-          : stringValue(payload.server) !== undefined
-            ? "mcpToolCall"
-            : stringValue(payload.tool) !== undefined
-              ? "dynamicToolCall"
-              : summary.length > 0
-                ? "reasoning"
-                : "item";
+  const status = stringValue(mergedPayload.status);
+  const isSteerInput = events.some(
+    (event) =>
+      event.kind === "external_turn_steer_input" ||
+      event.kind === "external_turn_steer_intent",
+  );
+  if (kind === "userMessage" && !isSteerInput) return undefined;
+  if (
+    text === undefined &&
+    summary.length === 0 &&
+    ["item", "agentMessage", "reasoning", "plan"].includes(kind)
+  ) {
+    return undefined;
+  }
   return {
-    itemId: event.itemId ?? event.eventId,
+    itemId: first.itemId ?? first.eventId,
     kind,
-    ...(stringValue(payload.status) === undefined
-      ? {}
-      : { status: stringValue(payload.status) }),
+    ...(status === undefined ? {} : { status }),
     ...(text === undefined ? {} : { text: text.value }),
     ...(summary.length === 0 ? {} : { summary }),
     ...(kind === "agentMessage"
-      ? { messagePhase: projectAgentMessagePhase(payload.messagePhase) }
+      ? {
+          messagePhase: projectAgentMessagePhase(mergedPayload.messagePhase),
+        }
       : {}),
-    ...(event.rawDetailRef == null ? {} : { detailHandle: event.rawDetailRef }),
+    ...(detailHandle === undefined ? {} : { detailHandle }),
     ...(text?.truncated === true ||
     rawSummary.length > summary.length ||
     rawSummary.some(
@@ -5463,6 +5544,78 @@ function projectDurableExternalThreadItem(
       ? { truncated: true }
       : {}),
   };
+}
+
+function durableExternalThreadItemKind(
+  events: readonly NormalizedExternalRuntimeEvent[],
+  payload: Record<string, unknown>,
+): string {
+  const itemType = stringValue(payload.itemType);
+  if (itemType !== undefined) return itemType;
+  if (
+    events.some(
+      (event) =>
+        event.kind === "external_turn_steer_input" ||
+        event.kind === "external_turn_steer_intent",
+    )
+  ) {
+    return "userMessage";
+  }
+  if (
+    stringValue(payload.messagePhase) !== undefined ||
+    events.some((event) => event.kind === "assistant_text_delta")
+  ) {
+    return "agentMessage";
+  }
+  if (events.some((event) => event.kind === "command_activity")) {
+    return "commandExecution";
+  }
+  if (events.some((event) => event.kind === "file_activity")) {
+    return "fileChange";
+  }
+  if (events.some((event) => event.kind === "mcp_activity")) {
+    return "mcpToolCall";
+  }
+  if (events.some((event) => event.kind === "dynamic_tool_activity")) {
+    return "dynamicToolCall";
+  }
+  if (
+    events.some((event) => event.kind === "reasoning_delta") ||
+    Array.isArray(payload.summary)
+  ) {
+    return "reasoning";
+  }
+  if (events.some((event) => event.kind === "plan_delta")) return "plan";
+  return "item";
+}
+
+function durableExternalThreadItemText(
+  kind: string,
+  payload: Record<string, unknown>,
+  snapshotText: string | undefined,
+  deltaText: string,
+): string | undefined {
+  if (kind === "commandExecution") {
+    const value = [stringValue(payload.command), stringValue(payload.output)]
+      .filter((entry): entry is string => entry !== undefined)
+      .join("\n");
+    if (value.length > 0) return value;
+  }
+  if (kind === "fileChange" && Array.isArray(payload.fileChanges)) {
+    return `${payload.fileChanges.length} file change${payload.fileChanges.length === 1 ? "" : "s"}`;
+  }
+  if (kind === "mcpToolCall") {
+    const value = [stringValue(payload.server), stringValue(payload.tool)]
+      .filter((entry): entry is string => entry !== undefined)
+      .join("/");
+    if (value.length > 0) return value;
+  }
+  if (kind === "dynamicToolCall" && snapshotText === undefined) {
+    const tool = stringValue(payload.tool);
+    if (tool !== undefined) return tool;
+  }
+  if (snapshotText !== undefined) return snapshotText;
+  return deltaText.length === 0 ? undefined : deltaText;
 }
 
 function boundedExternalThreadText(

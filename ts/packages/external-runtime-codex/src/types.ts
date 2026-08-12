@@ -153,6 +153,12 @@ export type NeutralExternalEventKind =
 
 export interface NeutralExternalRuntimeEventPayload {
   readonly nativeMethod: string;
+  /**
+   * Native thread-item discriminator captured while the complete item is
+   * available. Durable transcript reconstruction must not infer this from
+   * whichever optional content fields happened to survive on a later event.
+   */
+  readonly itemType?: string;
   readonly status?: string;
   readonly text?: string;
   readonly messagePhase?: "commentary" | "final_answer" | "unknown";

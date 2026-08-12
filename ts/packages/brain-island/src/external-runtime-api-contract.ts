@@ -1939,6 +1939,7 @@ function routeSchemas(): Record<string, JsonSchema> {
       required: ["nativeMethod"],
       properties: {
         nativeMethod: { type: "string" },
+        itemType: { type: "string" },
         status: { type: "string" },
         text: { type: "string" },
         message: { type: "string" },

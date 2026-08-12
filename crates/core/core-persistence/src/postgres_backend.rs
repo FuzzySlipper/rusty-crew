@@ -16745,6 +16745,24 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![2]
         );
+        assert_eq!(
+            store
+                .query_external_runtime_turn_events(
+                    &turn.runtime_id,
+                    "native-turn-retention",
+                    0,
+                    10,
+                )
+                .unwrap()
+                .into_iter()
+                .map(|event| (event.sequence_id, event.kind))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, "assistant_text_delta".into()),
+                (2, "command_activity".into()),
+                (3, "turn_lifecycle".into()),
+            ]
+        );
         assert!(store
             .query_external_runtime_thread_events(&turn.runtime_id, "native-thread-missing", 0, 10,)
             .unwrap()

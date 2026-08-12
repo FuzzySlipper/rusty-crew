@@ -1633,7 +1633,6 @@ impl PostgresBackendStore {
             &format!(
                 "SELECT record_json FROM {schema}.external_runtime_events
                  WHERE runtime_id = $1 AND native_turn_id = $2 AND sequence_id > $3
-                   AND kind IN ('item_lifecycle', 'turn_lifecycle', 'external_turn_steer_intent', 'external_turn_steer_input')
                  ORDER BY sequence_id LIMIT $4"
             ),
             &[

@@ -105,6 +105,7 @@ assert.ok(schema("ExternalRuntimeCommandCatalog").properties?.models);
 assert.ok(schema("ExternalRuntimeCommandExecutionResult").properties?.receipt);
 assert.ok(schema("ExternalRuntimeEventPayload").properties?.settings);
 assert.ok(schema("ExternalRuntimeEventPayload").properties?.usage);
+assert.ok(schema("ExternalRuntimeEventPayload").properties?.itemType);
 assert.deepEqual(
   propertySchema("ExternalRuntimeEventPayload", "predecessorLifecycle").enum,
   ["retained", "archived"],

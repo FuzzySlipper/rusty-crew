@@ -46,11 +46,37 @@ for (const [itemType, expectedKind] of [
     assert.equal(event.kind, expectedKind);
     assert.equal(event.itemId, "item-1");
     assert.equal(event.payload.nativeMethod, "item/completed");
+    assert.equal(event.payload.itemType, itemType);
     assert.equal("threadId" in event.payload, false);
     assert.equal("turnId" in event.payload, false);
     assert.equal("item" in event.payload, false);
   });
 }
+
+test("completed reasoning items retain their semantic type and full summary", () => {
+  const event = mapNotification(
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          id: "reasoning-1",
+          type: "reasoning",
+          summary: ["Checked the durable projection"],
+          content: [],
+        },
+      },
+    },
+    2,
+    16_384,
+    true,
+  );
+
+  assert.equal(event.kind, "item_lifecycle");
+  assert.equal(event.payload.itemType, "reasoning");
+  assert.deepEqual(event.payload.summary, ["Checked the durable projection"]);
+});
 
 test("error notifications preserve bounded durable diagnostics", () => {
   const event = mapNotification(

@@ -2142,7 +2142,6 @@ impl CoordinationStore {
             &conn,
             "SELECT record_json FROM external_runtime_events
              WHERE runtime_id = ?1 AND native_turn_id = ?2 AND sequence_id > ?3
-               AND kind IN ('item_lifecycle', 'turn_lifecycle', 'external_turn_steer_intent', 'external_turn_steer_input')
              ORDER BY sequence_id LIMIT ?4",
             params![
                 runtime_id.0,
@@ -3183,6 +3182,20 @@ mod tests {
             )
             .unwrap()
             .is_empty());
+        assert_eq!(
+            store
+                .query_external_runtime_turn_events(
+                    &ExternalRuntimeId::new("codex-local"),
+                    "native-turn-a",
+                    0,
+                    10,
+                )
+                .unwrap()
+                .into_iter()
+                .map(|event| event.sequence_id)
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
         let plan = {
             let conn = store.conn().unwrap();
             let mut stmt = conn
