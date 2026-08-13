@@ -21,6 +21,12 @@ export interface ProviderRequestDebugRecord {
   wake_id: string;
   provider: {
     brain_module: string;
+    model_config_id?: string;
+    model_config_revision?: number;
+    endpoint_id?: string;
+    endpoint_revision?: number;
+    credential_id?: string;
+    credential_revision?: number;
     provider_alias?: string;
     model?: string;
     protocol?: string;
@@ -38,6 +44,12 @@ export interface RecordProviderRequestDebugInput {
   sessionId: SessionId | string;
   wakeId: string;
   brainModule: string;
+  modelConfigId?: string;
+  modelConfigRevision?: number;
+  endpointId?: string;
+  endpointRevision?: number;
+  credentialId?: string;
+  credentialRevision?: number;
   providerAlias?: string;
   model?: string;
   protocol?: string;
@@ -100,6 +112,24 @@ export class MemoryProviderRequestDebugStore implements ProviderRequestDebugStor
       wake_id: input.wakeId,
       provider: {
         brain_module: input.brainModule,
+        ...(input.modelConfigId === undefined
+          ? {}
+          : { model_config_id: input.modelConfigId }),
+        ...(input.modelConfigRevision === undefined
+          ? {}
+          : { model_config_revision: input.modelConfigRevision }),
+        ...(input.endpointId === undefined
+          ? {}
+          : { endpoint_id: input.endpointId }),
+        ...(input.endpointRevision === undefined
+          ? {}
+          : { endpoint_revision: input.endpointRevision }),
+        ...(input.credentialId === undefined
+          ? {}
+          : { credential_id: input.credentialId }),
+        ...(input.credentialRevision === undefined
+          ? {}
+          : { credential_revision: input.credentialRevision }),
         ...(input.providerAlias === undefined
           ? {}
           : { provider_alias: input.providerAlias }),

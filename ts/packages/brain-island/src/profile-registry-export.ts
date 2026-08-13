@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { basename } from "node:path";
 import type { NativeRuntimeConfigDiagnostic } from "@rusty-crew/native-bridge";
 import type {
@@ -18,6 +19,9 @@ export type ProfileBundleExportEntryKind =
   | "generated_registry_json"
   | "generated_runtime_plan_json"
   | "generated_checksums_json"
+  | "generated_model_configuration_json"
+  | "generated_model_endpoint_json"
+  | "generated_credential_reference_json"
   | "optional_memory_space_export";
 
 export interface ProfileBundleExportEntry {
@@ -73,6 +77,7 @@ export function buildProfileBundleExportPlan(
     ...fileAssetEntries(record),
     generatedRegistryJson(record),
     generatedRuntimePlanJson(record),
+    ...generatedModelDependencyEntries(record),
     generatedChecksumsJson(record),
     optionalMemorySpaceExport(record),
   ];
@@ -100,6 +105,50 @@ export function buildProfileBundleExportPlan(
     ],
     warnings: exportWarnings(record, entries),
   };
+}
+
+function generatedModelDependencyEntries(
+  record: AdminProfileRegistryRecord,
+): ProfileBundleExportEntry[] {
+  const dependencies = record.modelDependencies;
+  if (dependencies === undefined) return [];
+  const entries: ProfileBundleExportEntry[] = [];
+  if (dependencies.configuration !== undefined) {
+    entries.push({
+      targetPath: "dependencies/model-configuration.json",
+      kind: "generated_model_configuration_json",
+      source: "registry_active_state",
+      contentJson: dependencies.configuration,
+      notes: [
+        "independently revisioned model configuration required by this profile",
+      ],
+    });
+  }
+  if (dependencies.endpoint !== undefined) {
+    entries.push({
+      targetPath: "dependencies/model-endpoint.json",
+      kind: "generated_model_endpoint_json",
+      source: "registry_active_state",
+      contentJson: dependencies.endpoint,
+      notes: [
+        "independently revisioned reusable endpoint required by the model configuration",
+      ],
+    });
+  }
+  if (dependencies.credential !== undefined) {
+    entries.push({
+      targetPath: "dependencies/credential-reference.json",
+      kind: "generated_credential_reference_json",
+      source: "registry_active_state",
+      contentJson: dependencies.credential,
+      notes: [
+        dependencies.credential.hasSecret
+          ? "redacted credential identity only; secret material is never exported"
+          : "credential identity is exported with an explicit missing-secret state",
+      ],
+    });
+  }
+  return entries;
 }
 
 export class ProfileBundleExportPlanError extends Error {
@@ -254,6 +303,7 @@ function generatedChecksumsJson(
     source: "generated_metadata",
     contentJson: {
       profileId: record.profileId,
+      modelDependencies: modelDependencyChecksums(record),
       assets: record.sourceAssetStatuses.map((asset) =>
         stripUndefined({
           assetKind: asset.assetKind,
@@ -267,6 +317,45 @@ function generatedChecksumsJson(
     },
     notes: ["fingerprints are included for review and backup verification"],
   };
+}
+
+function modelDependencyChecksums(record: AdminProfileRegistryRecord) {
+  const dependencies = record.modelDependencies;
+  if (dependencies === undefined) return undefined;
+  return stripUndefined({
+    modelConfiguration:
+      dependencies.configuration === undefined
+        ? undefined
+        : dependencyChecksum(dependencies.configuration),
+    modelEndpoint:
+      dependencies.endpoint === undefined
+        ? undefined
+        : dependencyChecksum(dependencies.endpoint),
+    credentialReference:
+      dependencies.credential === undefined
+        ? undefined
+        : dependencyChecksum(dependencies.credential),
+  });
+}
+
+function dependencyChecksum(value: unknown): string {
+  return `sha256:${createHash("sha256").update(stableJson(value)).digest("hex")}`;
+}
+
+function stableJson(value: unknown): string {
+  if (value === undefined) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function optionalMemorySpaceExport(

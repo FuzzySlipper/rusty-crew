@@ -390,6 +390,12 @@ export interface ProviderRequestDebugDetail {
   wake_id: string;
   provider: {
     brain_module: string;
+    model_config_id?: string;
+    model_config_revision?: number;
+    endpoint_id?: string;
+    endpoint_revision?: number;
+    credential_id?: string;
+    credential_revision?: number;
     provider_alias?: string;
     model?: string;
     protocol?: string;
@@ -413,6 +419,8 @@ export interface SessionContextUsageResult {
     model_config_revision?: number;
     endpoint_id?: string;
     endpoint_revision?: number;
+    credential_id?: string;
+    credential_revision?: number;
     status: "active" | "disabled" | "archived" | "missing" | "unknown";
     protocol?: "responses" | "chat_completions";
     provider_kind?: string;

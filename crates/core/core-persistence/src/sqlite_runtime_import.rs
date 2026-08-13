@@ -5,6 +5,7 @@
 //! work during backend moves.
 
 use super::*;
+use sha2::{Digest, Sha256};
 
 impl CoordinationStore {
     pub fn save_import_batch(&self, record: &RuntimeImportBatchRecord) -> CoreResult<()> {
@@ -177,7 +178,7 @@ fn query_legacy_id_mappings(
         .map_err(|error| persistence_error("load legacy id mappings", error))
 }
 
-fn validate_logical_storage_import(
+pub(crate) fn validate_logical_storage_import(
     conn: &Connection,
     bundle: &LogicalStorageExportBundle,
     dry_run: &LogicalStorageImportDryRun,
@@ -197,6 +198,7 @@ fn validate_logical_storage_import(
 
     let mut issues = Vec::new();
     let mut accepted_records = 0_u64;
+    let mut accepted_record_keys = BTreeSet::new();
     let mut unsupported_records = 0_u64;
     let mut refused_records = 0_u64;
     let record_count = bundle
@@ -300,9 +302,12 @@ fn validate_logical_storage_import(
             continue;
         }
 
+        let mut repository_integrity_refused = false;
         if repository.exported_count != repository.records.len() as u64 {
+            refused_records += repository.records.len() as u64;
+            repository_integrity_refused = true;
             issues.push(logical_import_issue(
-                LogicalStorageImportIssueSeverity::Warning,
+                LogicalStorageImportIssueSeverity::Error,
                 "repository_count_mismatch",
                 Some(repository.repository_id.clone()),
                 None,
@@ -315,9 +320,37 @@ fn validate_logical_storage_import(
             ));
         }
 
+        if let Some(expected_checksum) = repository.checksum.as_deref() {
+            let actual_checksum = logical_storage_records_checksum(&repository.records)?;
+            if expected_checksum != actual_checksum {
+                if !repository_integrity_refused {
+                    refused_records += repository.records.len() as u64;
+                }
+                issues.push(logical_import_issue(
+                    LogicalStorageImportIssueSeverity::Error,
+                    "repository_checksum_mismatch",
+                    Some(repository.repository_id.clone()),
+                    None,
+                    format!(
+                        "repository {} checksum mismatch: expected {}, calculated {}",
+                        repository.repository_id, expected_checksum, actual_checksum
+                    ),
+                ));
+                continue;
+            }
+        }
+
+        if repository_integrity_refused {
+            continue;
+        }
+
         for record in &repository.records {
             match validate_logical_storage_record(repository, record, &dry_run.validation_time) {
-                Ok(()) => accepted_records += 1,
+                Ok(()) => {
+                    accepted_records += 1;
+                    accepted_record_keys
+                        .insert((repository.repository_id.clone(), record.stable_id.clone()));
+                }
                 Err(issue) => {
                     refused_records += 1;
                     issues.push(issue);
@@ -325,6 +358,14 @@ fn validate_logical_storage_import(
             }
         }
     }
+
+    validate_model_registry_references(
+        bundle,
+        &mut issues,
+        &mut accepted_records,
+        &mut accepted_record_keys,
+        &mut refused_records,
+    );
 
     Ok(LogicalStorageImportValidationReport {
         import_batch_id: dry_run.import_batch_id.clone(),
@@ -339,6 +380,170 @@ fn validate_logical_storage_import(
         already_imported,
         issues,
     })
+}
+
+pub fn logical_storage_records_checksum(records: &[LogicalStorageRecord]) -> CoreResult<String> {
+    let mut canonical_records = records.to_vec();
+    canonical_records.sort_by(|left, right| left.stable_id.cmp(&right.stable_id));
+    let canonical_records = canonical_records
+        .iter()
+        .map(|record| {
+            serde_json::json!({
+                "stable_id": record.stable_id,
+                "record_version": record.record_version,
+                "payload": record.payload,
+            })
+        })
+        .collect::<Vec<_>>();
+    let bytes = serde_json::to_vec(&canonical_records).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::InternalError,
+            format!("serialize logical storage records for checksum: {error}"),
+        )
+    })?;
+    let digest = Sha256::digest(bytes);
+    Ok(format!(
+        "sha256:{}",
+        digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ))
+}
+
+pub fn model_registry_logical_repositories(
+    endpoints: &[ModelEndpointRecord],
+    configurations: &[ModelConfigurationRecord],
+    exported_at: &IsoTimestamp,
+) -> CoreResult<Vec<LogicalStorageRepositoryBundle>> {
+    let endpoint_records = endpoints
+        .iter()
+        .map(|endpoint| LogicalStorageRecord {
+            stable_id: endpoint.endpoint_id.clone(),
+            record_version: 1,
+            exported_at: exported_at.clone(),
+            payload: LogicalStorageRecordPayload::ModelEndpoint(Box::new(endpoint.clone())),
+        })
+        .collect::<Vec<_>>();
+    let configuration_records = configurations
+        .iter()
+        .map(|configuration| LogicalStorageRecord {
+            stable_id: configuration.model_config_id.clone(),
+            record_version: 1,
+            exported_at: exported_at.clone(),
+            payload: LogicalStorageRecordPayload::ModelConfiguration(Box::new(
+                configuration.clone(),
+            )),
+        })
+        .collect::<Vec<_>>();
+    Ok(vec![
+        LogicalStorageRepositoryBundle {
+            repository_id: "model_endpoints".to_string(),
+            schema_version: 1,
+            required_capabilities: vec!["logical_export_import".to_string()],
+            exported_count: endpoint_records.len() as u64,
+            checksum: Some(logical_storage_records_checksum(&endpoint_records)?),
+            records: endpoint_records,
+        },
+        LogicalStorageRepositoryBundle {
+            repository_id: "model_configurations".to_string(),
+            schema_version: 1,
+            required_capabilities: vec!["logical_export_import".to_string()],
+            exported_count: configuration_records.len() as u64,
+            checksum: Some(logical_storage_records_checksum(&configuration_records)?),
+            records: configuration_records,
+        },
+    ])
+}
+
+fn validate_model_registry_references(
+    bundle: &LogicalStorageExportBundle,
+    issues: &mut Vec<LogicalStorageImportIssue>,
+    accepted_records: &mut u64,
+    accepted_record_keys: &mut BTreeSet<(String, String)>,
+    refused_records: &mut u64,
+) {
+    let endpoint_ids = bundle
+        .repositories
+        .iter()
+        .filter(|repository| repository.repository_id == "model_endpoints")
+        .flat_map(|repository| repository.records.iter())
+        .filter_map(|record| match &record.payload {
+            LogicalStorageRecordPayload::ModelEndpoint(endpoint) => {
+                Some(endpoint.endpoint_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    for record in bundle
+        .repositories
+        .iter()
+        .filter(|repository| repository.repository_id == "model_configurations")
+        .flat_map(|repository| repository.records.iter())
+    {
+        let LogicalStorageRecordPayload::ModelConfiguration(configuration) = &record.payload else {
+            continue;
+        };
+        if !endpoint_ids.contains(configuration.endpoint_id.as_str()) {
+            refuse_accepted_record(
+                "model_configurations",
+                &record.stable_id,
+                accepted_records,
+                accepted_record_keys,
+                refused_records,
+            );
+            issues.push(logical_import_issue(
+                LogicalStorageImportIssueSeverity::Error,
+                "model_configuration_endpoint_missing",
+                Some("model_configurations".to_string()),
+                Some(record.stable_id.clone()),
+                format!(
+                    "model configuration {} references endpoint {} absent from the logical bundle",
+                    configuration.model_config_id, configuration.endpoint_id
+                ),
+            ));
+        }
+    }
+
+    for repository in bundle.repositories.iter().filter(|repository| {
+        repository.repository_id == "model_endpoints"
+            || repository.repository_id == "model_configurations"
+    }) {
+        if repository.schema_version != 1 {
+            for record in &repository.records {
+                refuse_accepted_record(
+                    &repository.repository_id,
+                    &record.stable_id,
+                    accepted_records,
+                    accepted_record_keys,
+                    refused_records,
+                );
+            }
+            issues.push(logical_import_issue(
+                LogicalStorageImportIssueSeverity::Error,
+                "model_repository_schema_version_unsupported",
+                Some(repository.repository_id.clone()),
+                None,
+                format!(
+                    "repository {} schema version {} is unsupported; expected 1",
+                    repository.repository_id, repository.schema_version
+                ),
+            ));
+        }
+    }
+}
+
+fn refuse_accepted_record(
+    repository_id: &str,
+    stable_id: &str,
+    accepted_records: &mut u64,
+    accepted_record_keys: &mut BTreeSet<(String, String)>,
+    refused_records: &mut u64,
+) {
+    if accepted_record_keys.remove(&(repository_id.to_string(), stable_id.to_string())) {
+        *accepted_records = accepted_records.saturating_sub(1);
+        *refused_records += 1;
+    }
 }
 
 fn validate_logical_storage_record(
@@ -359,6 +564,64 @@ fn validate_logical_storage_record(
     match &record.payload {
         LogicalStorageRecordPayload::QueueMessage(message) => {
             validate_logical_queue_message(repository, record, message.as_ref(), now)
+        }
+        LogicalStorageRecordPayload::ModelEndpoint(endpoint) => {
+            if repository.repository_id != "model_endpoints" {
+                return Err(logical_import_issue(
+                    LogicalStorageImportIssueSeverity::Error,
+                    "model_endpoint_in_wrong_repository",
+                    Some(repository.repository_id.clone()),
+                    Some(record.stable_id.clone()),
+                    "model endpoint records must be grouped under model_endpoints",
+                ));
+            }
+            if record.record_version != 1 || record.stable_id != endpoint.endpoint_id {
+                return Err(logical_import_issue(
+                    LogicalStorageImportIssueSeverity::Error,
+                    "model_endpoint_identity_or_version_invalid",
+                    Some(repository.repository_id.clone()),
+                    Some(record.stable_id.clone()),
+                    "model endpoint logical record requires version 1 and a stable_id matching endpoint_id",
+                ));
+            }
+            endpoint.validate().map_err(|error| {
+                logical_import_issue(
+                    LogicalStorageImportIssueSeverity::Error,
+                    "model_endpoint_invalid",
+                    Some(repository.repository_id.clone()),
+                    Some(record.stable_id.clone()),
+                    error.to_string(),
+                )
+            })
+        }
+        LogicalStorageRecordPayload::ModelConfiguration(configuration) => {
+            if repository.repository_id != "model_configurations" {
+                return Err(logical_import_issue(
+                    LogicalStorageImportIssueSeverity::Error,
+                    "model_configuration_in_wrong_repository",
+                    Some(repository.repository_id.clone()),
+                    Some(record.stable_id.clone()),
+                    "model configuration records must be grouped under model_configurations",
+                ));
+            }
+            if record.record_version != 1 || record.stable_id != configuration.model_config_id {
+                return Err(logical_import_issue(
+                    LogicalStorageImportIssueSeverity::Error,
+                    "model_configuration_identity_or_version_invalid",
+                    Some(repository.repository_id.clone()),
+                    Some(record.stable_id.clone()),
+                    "model configuration logical record requires version 1 and a stable_id matching model_config_id",
+                ));
+            }
+            configuration.validate().map_err(|error| {
+                logical_import_issue(
+                    LogicalStorageImportIssueSeverity::Error,
+                    "model_configuration_invalid",
+                    Some(repository.repository_id.clone()),
+                    Some(record.stable_id.clone()),
+                    error.to_string(),
+                )
+            })
         }
         LogicalStorageRecordPayload::TypedJson { .. } => Ok(()),
     }

@@ -8,7 +8,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 59;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 60;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -316,7 +316,26 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         description: "add normalized model endpoint and configuration registries",
         apply: Some(super::model_registry::apply_postgres_model_registry),
     },
+    PostgresSchemaMigration {
+        version: 60,
+        description: "add logical import batch idempotency records",
+        apply: Some(apply_postgres_logical_import_batches),
+    },
 ];
+
+fn apply_postgres_logical_import_batches(tx: &mut Transaction<'_>, schema: &str) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "CREATE TABLE IF NOT EXISTS {schema}.runtime_import_batches (
+            import_batch_id TEXT PRIMARY KEY,
+            source_system TEXT NOT NULL,
+            source_label TEXT NOT NULL,
+            source_snapshot_ref TEXT,
+            notes TEXT,
+            imported_at TEXT NOT NULL
+         );"
+    ))
+    .map_err(|error| postgres_error("create PostgreSQL logical import batches", error))
+}
 
 fn postgres_catalog_schema_name(schema: &str) -> String {
     schema

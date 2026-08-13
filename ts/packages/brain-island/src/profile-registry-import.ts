@@ -81,7 +81,13 @@ export interface BuildProfileRegistryImportPlanInput {
   now?: string;
   runtimeConfig?: RustyCrewRuntimeConfig;
   existingProfiles?: readonly ProfileConfig[];
-  bridge?: Pick<NativeBridgeModule, "validateRuntimeConfigDraft">;
+  bridge?: Pick<NativeBridgeModule, "validateRuntimeConfigDraft"> &
+    Partial<
+      Pick<
+        NativeBridgeModule,
+        "getModelConfiguration" | "getModelEndpoint" | "getServiceCredential"
+      >
+    >;
 }
 
 export async function buildProfileRegistryImportPlan(
@@ -96,6 +102,7 @@ export async function buildProfileRegistryImportPlan(
   const diagnostics = [
     ...profileFieldDiagnostics(source),
     ...activationDiagnostics(mode, input),
+    ...(await modelDependencyDiagnostics(source.profile, input.bridge)),
   ];
   if (input.runtimeConfig && input.bridge) {
     const profiles = mergeProfileForValidation(
@@ -144,6 +151,112 @@ export async function buildProfileRegistryImportPlan(
     },
     diagnostics,
   };
+}
+
+async function modelDependencyDiagnostics(
+  profile: ProfileConfig,
+  bridge: BuildProfileRegistryImportPlanInput["bridge"],
+): Promise<NativeRuntimeConfigDiagnostic[]> {
+  const modelConfigId = profile.modelConfigId;
+  if (modelConfigId === undefined) return [];
+  if (
+    bridge?.getModelConfiguration === undefined ||
+    bridge.getModelEndpoint === undefined ||
+    bridge.getServiceCredential === undefined
+  ) {
+    return [
+      {
+        severity: "warning",
+        code: "model_dependency_validation_unavailable",
+        path: "modelConfigId",
+        message:
+          "model dependency readers were not supplied; import cannot dry-run configuration, endpoint, auth, or secret references",
+      },
+    ];
+  }
+  const configuration = await bridge.getModelConfiguration(modelConfigId);
+  if (configuration === undefined) {
+    return [
+      {
+        severity: "error",
+        code: "model_configuration_missing",
+        path: "modelConfigId",
+        message: `model configuration ${modelConfigId} was not found`,
+      },
+    ];
+  }
+  const diagnostics: NativeRuntimeConfigDiagnostic[] = [];
+  if (configuration.revision < 1 || configuration.capabilities.version !== 1) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_configuration_version_unsupported",
+      path: "modelConfigId",
+      message: `model configuration ${modelConfigId} has revision ${configuration.revision} and capabilities version ${configuration.capabilities.version}; positive revision and capabilities version 1 are required`,
+    });
+  }
+  const endpoint = await bridge.getModelEndpoint(configuration.endpointId);
+  if (endpoint === undefined) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_endpoint_missing",
+      path: "modelConfigId",
+      message: `model configuration ${modelConfigId} references missing endpoint ${configuration.endpointId}`,
+    });
+    return diagnostics;
+  }
+  if (endpoint.revision < 1) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_endpoint_version_unsupported",
+      path: "modelConfigId",
+      message: `model endpoint ${endpoint.endpointId} has invalid revision ${endpoint.revision}`,
+    });
+  }
+  if (endpoint.authScheme === "none") return diagnostics;
+  if (endpoint.credentialId === undefined) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_endpoint_credential_missing",
+      path: "modelConfigId",
+      message: `model endpoint ${endpoint.endpointId} requires ${endpoint.authScheme} but has no credential reference`,
+    });
+    return diagnostics;
+  }
+  const credential = await bridge.getServiceCredential(endpoint.credentialId);
+  if (credential === undefined) {
+    diagnostics.push({
+      severity: "error",
+      code: "service_credential_missing",
+      path: "modelConfigId",
+      message: `model endpoint ${endpoint.endpointId} references missing credential ${endpoint.credentialId}`,
+    });
+    return diagnostics;
+  }
+  const expectedCredentialKind =
+    endpoint.authScheme === "openai_codex_oauth" ? "openai_oauth" : "api_key";
+  if (
+    credential.credentialKind !== expectedCredentialKind &&
+    !(
+      expectedCredentialKind === "api_key" &&
+      credential.credentialKind === "legacy_raw_api_key"
+    )
+  ) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_endpoint_auth_incompatible",
+      path: "modelConfigId",
+      message: `model endpoint ${endpoint.endpointId} uses ${endpoint.authScheme} but credential ${credential.credentialId} is ${credential.credentialKind}`,
+    });
+  }
+  if (!credential.credential.hasSecret) {
+    diagnostics.push({
+      severity: "error",
+      code: "service_credential_secret_missing",
+      path: "modelConfigId",
+      message: `credential ${credential.credentialId} has no secret`,
+    });
+  }
+  return diagnostics;
 }
 
 function activeRuntimeSettingsJson(

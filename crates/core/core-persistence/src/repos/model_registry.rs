@@ -82,6 +82,118 @@ pub(crate) fn ensure_migration_backfill_is_safe(
 }
 
 impl CoordinationStore {
+    pub fn apply_model_registry_logical_import(
+        &self,
+        bundle: &LogicalStorageExportBundle,
+        dry_run: &LogicalStorageImportDryRun,
+    ) -> CoreResult<Vec<LogicalStorageApplyProof>> {
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start model registry logical import", error))?;
+        let validation =
+            crate::sqlite_runtime_import::validate_logical_storage_import(&tx, bundle, dry_run)?;
+        if !validation.can_apply() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "model registry logical import dry-run did not pass",
+            ));
+        }
+        let (mut endpoints, mut configurations) = logical_model_records(bundle)?;
+        endpoints.sort_by(|left, right| left.endpoint_id.cmp(&right.endpoint_id));
+        configurations.sort_by(|left, right| left.model_config_id.cmp(&right.model_config_id));
+
+        for endpoint in &endpoints {
+            endpoint.validate()?;
+            validate_import_endpoint_credential_in_tx(&tx, endpoint)?;
+            match get_model_endpoint_in_conn(&tx, &endpoint.endpoint_id)? {
+                Some(existing) if existing == *endpoint => {}
+                Some(_) => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        format!(
+                            "model endpoint {} conflicts with target record",
+                            endpoint.endpoint_id
+                        ),
+                    ))
+                }
+                None => write_model_endpoint_in_tx(&tx, endpoint, None)?,
+            }
+        }
+        for configuration in &configurations {
+            let endpoint = get_model_endpoint_in_conn(&tx, &configuration.endpoint_id)?
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::NotFound,
+                        format!(
+                            "model endpoint {} not found during logical import",
+                            configuration.endpoint_id
+                        ),
+                    )
+                })?;
+            configuration.validate_for_endpoint(&endpoint)?;
+            match get_model_configuration_in_conn(&tx, &configuration.model_config_id)? {
+                Some(existing) if existing == *configuration => {}
+                Some(_) => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        format!(
+                            "model configuration {} conflicts with target record",
+                            configuration.model_config_id
+                        ),
+                    ))
+                }
+                None => write_model_configuration_in_tx(&tx, configuration, None)?,
+            }
+            sync_normalized_configuration_shadow_in_tx(&tx, &endpoint, configuration)?;
+        }
+
+        tx.execute(
+            "INSERT INTO runtime_import_batches (
+                import_batch_id,source_system,source_label,source_snapshot_ref,notes,imported_at
+             ) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![
+                dry_run.import_batch_id,
+                bundle.source.backend,
+                bundle.source.backend_label,
+                bundle.source.snapshot_ref,
+                "model endpoint/configuration logical import",
+                dry_run.validation_time,
+            ],
+        )
+        .map_err(|error| persistence_error("record model registry import batch", error))?;
+
+        let readback_endpoints = endpoints
+            .iter()
+            .map(|record| get_model_endpoint_in_conn(&tx, &record.endpoint_id))
+            .collect::<CoreResult<Option<Vec<_>>>>()?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "imported endpoint missing"))?;
+        let readback_configurations = configurations
+            .iter()
+            .map(|record| get_model_configuration_in_conn(&tx, &record.model_config_id))
+            .collect::<CoreResult<Option<Vec<_>>>>()?
+            .ok_or_else(|| {
+                CoreError::new(CoreErrorKind::NotFound, "imported configuration missing")
+            })?;
+        let applied_repositories =
+            crate::sqlite_runtime_import::model_registry_logical_repositories(
+                &readback_endpoints,
+                &readback_configurations,
+                &dry_run.validation_time,
+            )?;
+        let proofs =
+            model_registry_apply_proofs(bundle, &applied_repositories, &dry_run.import_batch_id)?;
+        if proofs.iter().any(|proof| !proof.verified) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "model registry post-import count/checksum proof failed",
+            ));
+        }
+        tx.commit()
+            .map_err(|error| persistence_error("commit model registry logical import", error))?;
+        Ok(proofs)
+    }
+
     pub fn upsert_model_endpoint(
         &self,
         write: &ModelEndpointWrite,
@@ -277,6 +389,116 @@ impl CoordinationStore {
         }
         Ok(report)
     }
+}
+
+pub(crate) fn logical_model_records(
+    bundle: &LogicalStorageExportBundle,
+) -> CoreResult<(Vec<ModelEndpointRecord>, Vec<ModelConfigurationRecord>)> {
+    let mut endpoints = Vec::new();
+    let mut configurations = Vec::new();
+    for repository in &bundle.repositories {
+        for record in &repository.records {
+            match &record.payload {
+                LogicalStorageRecordPayload::ModelEndpoint(endpoint)
+                    if repository.repository_id == "model_endpoints" =>
+                {
+                    endpoints.push(endpoint.as_ref().clone());
+                }
+                LogicalStorageRecordPayload::ModelConfiguration(configuration)
+                    if repository.repository_id == "model_configurations" =>
+                {
+                    configurations.push(configuration.as_ref().clone());
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok((endpoints, configurations))
+}
+
+fn validate_import_endpoint_credential_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    endpoint: &ModelEndpointRecord,
+) -> CoreResult<()> {
+    let Some(credential_id) = endpoint.credential_id.as_deref() else {
+        return Ok(());
+    };
+    let (kind, has_secret) = tx
+        .query_row(
+            "SELECT credential_kind, secret_ciphertext IS NOT NULL
+             FROM service_credentials WHERE credential_id=?1",
+            params![credential_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?)),
+        )
+        .optional()
+        .map_err(|error| persistence_error("load logical import credential", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("service credential {credential_id} not found"),
+            )
+        })?;
+    if !has_secret {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("service credential {credential_id} has no secret"),
+        ));
+    }
+    let compatible = matches!(
+        (endpoint.auth_scheme, kind.as_str()),
+        (
+            ModelEndpointAuthScheme::BearerApiKey,
+            "api_key" | "legacy_raw_api_key"
+        ) | (ModelEndpointAuthScheme::OpenAiCodexOauth, "openai_oauth")
+    );
+    if compatible {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "model endpoint {} auth scheme is incompatible with credential kind {kind}",
+                endpoint.endpoint_id
+            ),
+        ))
+    }
+}
+
+pub(crate) fn model_registry_apply_proofs(
+    expected: &LogicalStorageExportBundle,
+    applied: &[LogicalStorageRepositoryBundle],
+    import_batch_id: &str,
+) -> CoreResult<Vec<LogicalStorageApplyProof>> {
+    ["model_endpoints", "model_configurations"]
+        .into_iter()
+        .map(|repository_id| {
+            let expected = expected
+                .repositories
+                .iter()
+                .find(|repository| repository.repository_id == repository_id)
+                .ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        format!("logical bundle is missing repository {repository_id}"),
+                    )
+                })?;
+            let applied = applied
+                .iter()
+                .find(|repository| repository.repository_id == repository_id)
+                .expect("model registry exporter always returns both repositories");
+            let applied_checksum = applied.checksum.clone().unwrap_or_default();
+            Ok(LogicalStorageApplyProof {
+                import_batch_id: import_batch_id.to_string(),
+                repository_id: repository_id.to_string(),
+                expected_count: expected.exported_count,
+                applied_count: applied.exported_count,
+                expected_checksum: expected.checksum.clone(),
+                verified: expected.exported_count == applied.exported_count
+                    && expected.checksum.as_deref() == Some(applied_checksum.as_str()),
+                applied_checksum,
+            })
+        })
+        .collect()
 }
 
 pub(crate) fn sync_legacy_provider_to_normalized_in_tx(
@@ -1254,6 +1476,35 @@ mod tests {
         }
     }
 
+    fn logical_bundle(
+        endpoints: &[ModelEndpointRecord],
+        configurations: &[ModelConfigurationRecord],
+    ) -> LogicalStorageExportBundle {
+        LogicalStorageExportBundle {
+            bundle_version: 1,
+            export_id: "model-registry-export-1".to_string(),
+            exported_at: "2026-08-12T20:10:00Z".to_string(),
+            service_version: Some("test".to_string()),
+            source: LogicalStorageExportSource {
+                backend: "sqlite".to_string(),
+                backend_label: "source".to_string(),
+                source_instance_id: Some("source-1".to_string()),
+                snapshot_ref: Some("snapshot-1".to_string()),
+            },
+            schema_version: 1,
+            module_versions: Vec::new(),
+            capability_snapshot: Vec::new(),
+            repositories: crate::sqlite_runtime_import::model_registry_logical_repositories(
+                endpoints,
+                configurations,
+                &"2026-08-12T20:10:00Z".to_string(),
+            )
+            .unwrap(),
+            legacy_id_mappings: Vec::new(),
+            profile_asset_refs: Vec::new(),
+        }
+    }
+
     #[test]
     fn normalized_registries_have_independent_cas_and_secret_free_shadows() {
         let (store, path) = store();
@@ -1289,6 +1540,142 @@ mod tests {
         assert!(!shadow.credential.has_secret);
         assert_eq!(store.get_model_provider_secret("model-a").unwrap(), None);
         drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn model_registry_logical_import_preserves_revisions_and_proves_readback() {
+        let (source, source_path) = store();
+        source
+            .upsert_model_endpoint(&endpoint("shared", None))
+            .unwrap();
+        source
+            .upsert_model_configuration(&configuration("model-a", "shared"))
+            .unwrap();
+        let mut endpoint_update = endpoint("shared", Some(1));
+        endpoint_update.description = Some("revision two".to_string());
+        let source_endpoint = source.upsert_model_endpoint(&endpoint_update).unwrap();
+        let source_configuration = source.get_model_configuration("model-a").unwrap().unwrap();
+        assert_eq!(source_endpoint.revision, 2);
+        assert_eq!(source_configuration.revision, 1);
+        let bundle = logical_bundle(
+            std::slice::from_ref(&source_endpoint),
+            std::slice::from_ref(&source_configuration),
+        );
+
+        let (target, target_path) = store();
+        let dry_run = LogicalStorageImportDryRun {
+            import_batch_id: "model-registry-import-1".to_string(),
+            target_backend: "sqlite".to_string(),
+            validation_time: "2026-08-12T20:11:00Z".to_string(),
+            supported_capabilities: vec!["logical_export_import".to_string()],
+            supported_repositories: vec![
+                "model_endpoints".to_string(),
+                "model_configurations".to_string(),
+            ],
+        };
+        let validation = target
+            .validate_logical_storage_import(&bundle, &dry_run)
+            .unwrap();
+        assert!(validation.can_apply(), "{:#?}", validation.issues);
+        let proofs = target
+            .apply_model_registry_logical_import(&bundle, &dry_run)
+            .unwrap();
+        assert_eq!(proofs.len(), 2);
+        assert!(proofs.iter().all(|proof| proof.verified));
+        assert_eq!(
+            target
+                .get_model_endpoint("shared")
+                .unwrap()
+                .unwrap()
+                .revision,
+            2
+        );
+        assert_eq!(
+            target
+                .get_model_configuration("model-a")
+                .unwrap()
+                .unwrap()
+                .revision,
+            1
+        );
+        assert!(target
+            .apply_model_registry_logical_import(&bundle, &dry_run)
+            .unwrap_err()
+            .message
+            .contains("dry-run did not pass"));
+
+        drop(source);
+        drop(target);
+        let _ = std::fs::remove_file(source_path);
+        let _ = std::fs::remove_file(target_path);
+    }
+
+    #[test]
+    fn model_registry_logical_dry_run_rejects_checksum_and_reference_drift() {
+        let endpoint_record = ModelEndpointRecord {
+            endpoint_id: "shared".to_string(),
+            status: ModelProviderStatus::Active,
+            display_name: None,
+            description: None,
+            base_url: "http://127.0.0.1:8080/v1".to_string(),
+            protocol: ModelProviderProtocol::ChatCompletions,
+            wire_dialect: ModelEndpointWireDialect::Standard,
+            auth_scheme: ModelEndpointAuthScheme::None,
+            credential_id: None,
+            prompt_cache_transport: PromptCacheTransport::None,
+            metadata_json: json!({}),
+            revision: 1,
+            created_at: "2026-08-12T20:00:00Z".to_string(),
+            updated_at: "2026-08-12T20:00:00Z".to_string(),
+        };
+        let mut configuration_record = ModelConfigurationRecord {
+            model_config_id: "model-a".to_string(),
+            endpoint_id: "missing".to_string(),
+            status: ModelProviderStatus::Active,
+            display_name: None,
+            description: None,
+            model_id: "model-a".to_string(),
+            context_window_tokens: Some(32_000),
+            max_output_tokens: Some(4_096),
+            temperature_milli: None,
+            reasoning_effort: None,
+            reasoning_format: None,
+            reasoning_history: ChatCompletionsReasoningHistory::ProviderDefault,
+            reasoning_budget_tokens: None,
+            thinking_mode: ChatCompletionsThinkingMode::ProviderDefault,
+            prompt_caching_policy: ChatCompletionsPromptCachingPolicy::Disabled,
+            capabilities: Default::default(),
+            metadata_json: json!({}),
+            revision: 1,
+            created_at: "2026-08-12T20:00:00Z".to_string(),
+            updated_at: "2026-08-12T20:00:00Z".to_string(),
+        };
+        let mut bundle = logical_bundle(&[endpoint_record], &[configuration_record.clone()]);
+        bundle.repositories[0].checksum = Some("sha256:wrong".to_string());
+        let (target, path) = store();
+        let dry_run = LogicalStorageImportDryRun {
+            import_batch_id: "bad-model-registry".to_string(),
+            target_backend: "sqlite".to_string(),
+            validation_time: "2026-08-12T20:11:00Z".to_string(),
+            supported_capabilities: vec!["logical_export_import".to_string()],
+            supported_repositories: Vec::new(),
+        };
+        let report = target
+            .validate_logical_storage_import(&bundle, &dry_run)
+            .unwrap();
+        assert!(!report.can_apply());
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "repository_checksum_mismatch"));
+        assert!(report
+            .issues
+            .iter()
+            .any(|issue| issue.code == "model_configuration_endpoint_missing"));
+
+        configuration_record.endpoint_id = "shared".to_string();
+        drop(target);
         let _ = std::fs::remove_file(path);
     }
 

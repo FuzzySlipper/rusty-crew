@@ -1402,6 +1402,7 @@ export type LogicalTurnDiagnostic = {
   activeExecutionEpochId?: string | null;
   admittedAt: string;
   attention?: LogicalTurnAttention | null;
+  binding: LogicalTurnBindingSnapshot;
   continuationCount: number;
   currentContinuationId: string;
   lastLivenessAt: string;

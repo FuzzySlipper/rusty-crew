@@ -9644,9 +9644,10 @@ mod tests {
     use crate::repos::runtime_counters::{COUNTER_MESSAGES, COUNTER_WAKES};
     use crate::{
         ApplyRoleplayAlternativeRequest, ApplyRoleplayAlternativeResult, ChatTranscriptSearchScope,
-        CoordinationStore, ExternalBindingProvenance, McpBindingDiagnostics, MessageBlockWrite,
-        ProjectId, RoleplayChatLayerLink, RoleplayLoreCanonStatus, RoleplayLoreLayerPurpose,
-        RoleplayLoreVisibility,
+        CoordinationStore, ExternalBindingProvenance, LogicalStorageExportBundle,
+        LogicalStorageExportSource, LogicalStorageImportDryRun, McpBindingDiagnostics,
+        MessageBlockWrite, ProjectId, RoleplayChatLayerLink, RoleplayLoreCanonStatus,
+        RoleplayLoreLayerPurpose, RoleplayLoreVisibility,
     };
     use postgres::NoTls;
     use rusty_crew_core_protocol::{
@@ -11608,6 +11609,12 @@ mod tests {
             archived: false,
             narrator_diagnostic: Some(crate::RoleplayNarratorDiagnosticRecord {
                 wake_id: "wake-pg".into(),
+                model_config_id: Some("model-config-pg".into()),
+                model_config_revision: Some(3),
+                endpoint_id: Some("endpoint-pg".into()),
+                endpoint_revision: Some(2),
+                credential_id: Some("credential-pg".into()),
+                credential_revision: Some(1),
                 scene_brief: "The observatory door is open.".into(),
                 relevant_lore_record_ids: vec!["lore-pg".into()],
                 updated_at: now.clone(),
@@ -17498,6 +17505,12 @@ mod tests {
             })
             .unwrap();
         let diagnostic = crate::RoleplayMechanicDiagnosticRecord {
+            model_config_id: None,
+            model_config_revision: None,
+            endpoint_id: None,
+            endpoint_revision: None,
+            credential_id: None,
+            credential_revision: None,
             diagnostic_id: "diagnostic-pg".into(),
             mechanic_session_id: association.mechanic_session_id.clone(),
             mechanic_profile_id: association.mechanic_profile_id.clone(),
@@ -17909,6 +17922,114 @@ mod tests {
         assert_eq!(
             store.upsert_model_provider(&legacy).unwrap_err().message,
             "legacy_provider_shared_endpoint_conflict"
+        );
+        store.drop_schema_for_test().unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_model_registry_logical_import_preserves_and_proves_records() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("model_logical_import");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let endpoint = ModelEndpointRecord {
+            endpoint_id: "portable-endpoint".to_string(),
+            status: ModelProviderStatus::Active,
+            display_name: Some("Portable endpoint".to_string()),
+            description: None,
+            base_url: "http://127.0.0.1:18082/v1".to_string(),
+            protocol: ModelProviderProtocol::ChatCompletions,
+            wire_dialect: ModelEndpointWireDialect::Standard,
+            auth_scheme: ModelEndpointAuthScheme::None,
+            credential_id: None,
+            prompt_cache_transport: PromptCacheTransport::None,
+            metadata_json: json!({}),
+            revision: 3,
+            created_at: "2026-08-12T20:00:00Z".to_string(),
+            updated_at: "2026-08-12T20:03:00Z".to_string(),
+        };
+        let configuration = ModelConfigurationRecord {
+            model_config_id: "portable-model".to_string(),
+            endpoint_id: endpoint.endpoint_id.clone(),
+            status: ModelProviderStatus::Active,
+            display_name: Some("Portable model".to_string()),
+            description: None,
+            model_id: "portable/model".to_string(),
+            context_window_tokens: Some(32_000),
+            max_output_tokens: Some(4_096),
+            temperature_milli: None,
+            reasoning_effort: None,
+            reasoning_format: None,
+            reasoning_history: ChatCompletionsReasoningHistory::ProviderDefault,
+            reasoning_budget_tokens: None,
+            thinking_mode: ChatCompletionsThinkingMode::ProviderDefault,
+            prompt_caching_policy: ChatCompletionsPromptCachingPolicy::Disabled,
+            capabilities: Default::default(),
+            metadata_json: json!({}),
+            revision: 2,
+            created_at: "2026-08-12T20:00:00Z".to_string(),
+            updated_at: "2026-08-12T20:02:00Z".to_string(),
+        };
+        let exported_at = "2026-08-12T20:10:00Z".to_string();
+        let bundle = LogicalStorageExportBundle {
+            bundle_version: 1,
+            export_id: "postgres-model-import".to_string(),
+            exported_at: exported_at.clone(),
+            service_version: Some("test".to_string()),
+            source: LogicalStorageExportSource {
+                backend: "sqlite".to_string(),
+                backend_label: "portable-source".to_string(),
+                source_instance_id: None,
+                snapshot_ref: Some("portable-snapshot".to_string()),
+            },
+            schema_version: 1,
+            module_versions: Vec::new(),
+            capability_snapshot: Vec::new(),
+            repositories: crate::sqlite_runtime_import::model_registry_logical_repositories(
+                std::slice::from_ref(&endpoint),
+                std::slice::from_ref(&configuration),
+                &exported_at,
+            )
+            .unwrap(),
+            legacy_id_mappings: Vec::new(),
+            profile_asset_refs: Vec::new(),
+        };
+        let dry_run = LogicalStorageImportDryRun {
+            import_batch_id: "postgres-model-import-1".to_string(),
+            target_backend: "postgres".to_string(),
+            validation_time: "2026-08-12T20:11:00Z".to_string(),
+            supported_capabilities: vec!["logical_export_import".to_string()],
+            supported_repositories: vec![
+                "model_endpoints".to_string(),
+                "model_configurations".to_string(),
+            ],
+        };
+        let proofs = store
+            .apply_model_registry_logical_import(&bundle, &dry_run)
+            .unwrap();
+        assert!(proofs.iter().all(|proof| proof.verified));
+        assert_eq!(
+            store
+                .get_model_endpoint(&endpoint.endpoint_id)
+                .unwrap()
+                .unwrap(),
+            endpoint
+        );
+        assert_eq!(
+            store
+                .get_model_configuration(&configuration.model_config_id)
+                .unwrap()
+                .unwrap(),
+            configuration
+        );
+        assert_eq!(
+            store
+                .apply_model_registry_logical_import(&bundle, &dry_run)
+                .unwrap_err()
+                .kind,
+            CoreErrorKind::AlreadyExists
         );
         store.drop_schema_for_test().unwrap();
     }

@@ -1,6 +1,7 @@
 //! PostgreSQL normalized model endpoint and configuration repositories.
 
 use super::*;
+use crate::{LogicalStorageApplyProof, LogicalStorageExportBundle, LogicalStorageImportDryRun};
 
 pub(super) fn apply_postgres_model_registry(
     tx: &mut Transaction<'_>,
@@ -42,6 +43,134 @@ pub(super) fn apply_postgres_model_registry(
 }
 
 impl PostgresBackendStore {
+    pub fn apply_model_registry_logical_import(
+        &self,
+        bundle: &LogicalStorageExportBundle,
+        dry_run: &LogicalStorageImportDryRun,
+    ) -> CoreResult<Vec<LogicalStorageApplyProof>> {
+        if dry_run.import_batch_id.trim().is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "logical import requires an import_batch_id",
+            ));
+        }
+        let (mut endpoints, mut configurations) =
+            crate::repos::model_registry::logical_model_records(bundle)?;
+        validate_postgres_logical_model_bundle(bundle, &endpoints, &configurations)?;
+        endpoints.sort_by(|left, right| left.endpoint_id.cmp(&right.endpoint_id));
+        configurations.sort_by(|left, right| left.model_config_id.cmp(&right.model_config_id));
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL model registry logical import", error)
+        })?;
+        if tx
+            .query_opt(
+                &format!("SELECT 1 FROM {schema}.runtime_import_batches WHERE import_batch_id=$1"),
+                &[&dry_run.import_batch_id],
+            )
+            .map_err(|error| postgres_error("check PostgreSQL logical import batch", error))?
+            .is_some()
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "import batch {} is already recorded",
+                    dry_run.import_batch_id
+                ),
+            ));
+        }
+        for endpoint in &endpoints {
+            validate_postgres_import_credential(&mut tx, &schema, endpoint)?;
+            match get_endpoint(&mut tx, &schema, &endpoint.endpoint_id)? {
+                Some(existing) if existing == *endpoint => {}
+                Some(_) => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        format!(
+                            "model endpoint {} conflicts with target record",
+                            endpoint.endpoint_id
+                        ),
+                    ))
+                }
+                None => insert_postgres_logical_endpoint(&mut tx, &schema, endpoint)?,
+            }
+        }
+        for configuration in &configurations {
+            let endpoint =
+                get_endpoint(&mut tx, &schema, &configuration.endpoint_id)?.ok_or_else(|| {
+                    CoreError::new(
+                        CoreErrorKind::NotFound,
+                        format!("model endpoint {} not found", configuration.endpoint_id),
+                    )
+                })?;
+            configuration.validate_for_endpoint(&endpoint)?;
+            match get_configuration(&mut tx, &schema, &configuration.model_config_id)? {
+                Some(existing) if existing == *configuration => {}
+                Some(_) => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        format!(
+                            "model configuration {} conflicts with target record",
+                            configuration.model_config_id
+                        ),
+                    ))
+                }
+                None => insert_postgres_logical_configuration(&mut tx, &schema, configuration)?,
+            }
+            sync_configuration_shadow(&mut tx, &schema, &endpoint, configuration)?;
+        }
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.runtime_import_batches
+                 (import_batch_id,source_system,source_label,source_snapshot_ref,notes,imported_at)
+                 VALUES ($1,$2,$3,$4,$5,$6)"
+            ),
+            &[
+                &dry_run.import_batch_id,
+                &bundle.source.backend,
+                &bundle.source.backend_label,
+                &bundle.source.snapshot_ref,
+                &Some("model endpoint/configuration logical import".to_string()),
+                &dry_run.validation_time,
+            ],
+        )
+        .map_err(|error| postgres_error("record PostgreSQL logical import batch", error))?;
+
+        let readback_endpoints = endpoints
+            .iter()
+            .map(|record| get_endpoint(&mut tx, &schema, &record.endpoint_id))
+            .collect::<CoreResult<Option<Vec<_>>>>()?
+            .ok_or_else(|| CoreError::new(CoreErrorKind::NotFound, "imported endpoint missing"))?;
+        let readback_configurations = configurations
+            .iter()
+            .map(|record| get_configuration(&mut tx, &schema, &record.model_config_id))
+            .collect::<CoreResult<Option<Vec<_>>>>()?
+            .ok_or_else(|| {
+                CoreError::new(CoreErrorKind::NotFound, "imported configuration missing")
+            })?;
+        let applied = crate::sqlite_runtime_import::model_registry_logical_repositories(
+            &readback_endpoints,
+            &readback_configurations,
+            &dry_run.validation_time,
+        )?;
+        let proofs = crate::repos::model_registry::model_registry_apply_proofs(
+            bundle,
+            &applied,
+            &dry_run.import_batch_id,
+        )?;
+        if proofs.iter().any(|proof| !proof.verified) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "PostgreSQL model registry post-import count/checksum proof failed",
+            ));
+        }
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL model registry logical import", error)
+        })?;
+        Ok(proofs)
+    }
+
     pub fn upsert_model_endpoint(
         &self,
         write: &ModelEndpointWrite,
@@ -297,6 +426,180 @@ impl PostgresBackendStore {
         }
         Ok(report)
     }
+}
+
+fn validate_postgres_logical_model_bundle(
+    bundle: &LogicalStorageExportBundle,
+    endpoints: &[ModelEndpointRecord],
+    configurations: &[ModelConfigurationRecord],
+) -> CoreResult<()> {
+    if bundle.bundle_version != 1 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "unsupported logical bundle version {}",
+                bundle.bundle_version
+            ),
+        ));
+    }
+    for repository_id in ["model_endpoints", "model_configurations"] {
+        let repository = bundle
+            .repositories
+            .iter()
+            .find(|repository| repository.repository_id == repository_id)
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    format!("logical bundle is missing repository {repository_id}"),
+                )
+            })?;
+        if repository.schema_version != 1
+            || repository.exported_count != repository.records.len() as u64
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("repository {repository_id} version/count proof failed"),
+            ));
+        }
+        let checksum =
+            crate::sqlite_runtime_import::logical_storage_records_checksum(&repository.records)?;
+        if repository.checksum.as_deref() != Some(checksum.as_str()) {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("repository {repository_id} checksum proof failed"),
+            ));
+        }
+    }
+    let endpoint_by_id = endpoints
+        .iter()
+        .map(|endpoint| (endpoint.endpoint_id.as_str(), endpoint))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for endpoint in endpoints {
+        endpoint.validate()?;
+    }
+    for configuration in configurations {
+        let endpoint = endpoint_by_id
+            .get(configuration.endpoint_id.as_str())
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    format!(
+                        "model configuration {} references missing endpoint {}",
+                        configuration.model_config_id, configuration.endpoint_id
+                    ),
+                )
+            })?;
+        configuration.validate_for_endpoint(endpoint)?;
+    }
+    Ok(())
+}
+
+fn validate_postgres_import_credential(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    endpoint: &ModelEndpointRecord,
+) -> CoreResult<()> {
+    let Some(credential_id) = endpoint.credential_id.as_deref() else {
+        return Ok(());
+    };
+    let row = tx
+        .query_opt(
+            &format!(
+                "SELECT credential_kind,secret_ciphertext IS NOT NULL
+                 FROM {schema}.service_credentials WHERE credential_id=$1"
+            ),
+            &[&credential_id],
+        )
+        .map_err(|error| postgres_error("load PostgreSQL logical import credential", error))?
+        .ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("service credential {credential_id} not found"),
+            )
+        })?;
+    let kind = row.get::<_, String>(0);
+    let has_secret = row.get::<_, bool>(1);
+    if !has_secret {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("service credential {credential_id} has no secret"),
+        ));
+    }
+    let compatible = matches!(
+        (endpoint.auth_scheme, kind.as_str()),
+        (
+            ModelEndpointAuthScheme::BearerApiKey,
+            "api_key" | "legacy_raw_api_key"
+        ) | (ModelEndpointAuthScheme::OpenAiCodexOauth, "openai_oauth")
+    );
+    if compatible {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "model endpoint {} auth scheme is incompatible with credential kind {kind}",
+                endpoint.endpoint_id
+            ),
+        ))
+    }
+}
+
+fn insert_postgres_logical_endpoint(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    record: &ModelEndpointRecord,
+) -> CoreResult<()> {
+    let status = enum_text(record.status)?;
+    let protocol = enum_text(record.protocol)?;
+    let json = to_json_text(record)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.model_endpoints
+             (endpoint_id,status,protocol,credential_id,record_json,revision,created_at,updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"
+        ),
+        &[
+            &record.endpoint_id,
+            &status,
+            &protocol,
+            &record.credential_id,
+            &json,
+            &(record.revision as i64),
+            &record.created_at,
+            &record.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL logical model endpoint", error))?;
+    Ok(())
+}
+
+fn insert_postgres_logical_configuration(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    record: &ModelConfigurationRecord,
+) -> CoreResult<()> {
+    let status = enum_text(record.status)?;
+    let json = to_json_text(record)?;
+    tx.execute(
+        &format!(
+            "INSERT INTO {schema}.model_configurations
+             (model_config_id,endpoint_id,status,model_id,record_json,revision,created_at,updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)"
+        ),
+        &[
+            &record.model_config_id,
+            &record.endpoint_id,
+            &status,
+            &record.model_id,
+            &json,
+            &(record.revision as i64),
+            &record.created_at,
+            &record.updated_at,
+        ],
+    )
+    .map_err(|error| postgres_error("insert PostgreSQL logical model configuration", error))?;
+    Ok(())
 }
 
 fn backfill_postgres_legacy_model_registry(

@@ -110,6 +110,12 @@ interface RoleplaySessionMetadata {
   archived: boolean;
   narratorDiagnostic?: {
     wakeId: string;
+    modelConfigId?: string;
+    modelConfigRevision?: number;
+    endpointId?: string;
+    endpointRevision?: number;
+    credentialId?: string;
+    credentialRevision?: number;
     sceneBrief: string;
     relevantLoreRecordIds: string[];
     updatedAt: string;

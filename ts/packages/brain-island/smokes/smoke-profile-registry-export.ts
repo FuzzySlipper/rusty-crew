@@ -46,7 +46,7 @@ modelConfig:
       promptSoulMarkdown: longRegisteredSoulMarkdown,
       promptMemoryMarkdown: "Registered DB memory text.",
       activeRuntimeSettingsJson: {
-        modelConfig: { provider: "den-router" },
+        modelConfigId: "registered-model",
         apiKey: "must-not-export",
       },
       sourceAssetRefs: [
@@ -95,6 +95,45 @@ modelConfig:
   const diagnostics = await buildAdminProfileRegistryDiagnostics({
     bridge: {
       listProfileRegistryRecords: async () => registryRecords,
+      getModelConfiguration: async (modelConfigId) => ({
+        modelConfigId,
+        endpointId: "shared-endpoint",
+        status: "active",
+        modelId: "registered/model",
+        reasoningHistory: "provider_default",
+        thinkingMode: "provider_default",
+        promptCachingPolicy: "disabled",
+        capabilities: { version: 1, imageInput: false },
+        metadataJson: {},
+        revision: 4,
+        createdAt: "2026-06-26T09:00:00Z",
+        updatedAt: "2026-06-26T10:00:00Z",
+      }),
+      getModelEndpoint: async (endpointId) => ({
+        endpointId,
+        status: "active",
+        baseUrl: "https://example.invalid/v1",
+        protocol: "chat_completions",
+        wireDialect: "standard",
+        authScheme: "bearer_api_key",
+        credentialId: "shared-credential",
+        promptCacheTransport: "none",
+        metadataJson: {},
+        revision: 3,
+        createdAt: "2026-06-26T09:00:00Z",
+        updatedAt: "2026-06-26T10:00:00Z",
+      }),
+      getServiceCredential: async (credentialId) => ({
+        credentialId,
+        displayName: "Shared credential",
+        providerKind: "display-only",
+        credentialKind: "api_key",
+        credential: { hasSecret: true },
+        linkedProviderAliases: [],
+        revision: 2,
+        createdAt: "2026-06-26T09:00:00Z",
+        updatedAt: "2026-06-26T10:00:00Z",
+      }),
     },
     runtimeConfig,
     now: "2026-06-26T10:05:00Z",
@@ -109,6 +148,21 @@ modelConfig:
   assert(registryPlan.activeDbStateEntries.includes("registry.json"));
   assert(registryPlan.activeDbStateEntries.includes("runtime-plan.json"));
   assert(registryPlan.activeDbStateEntries.includes("soul.md"));
+  assert(
+    registryPlan.activeDbStateEntries.includes(
+      "dependencies/model-configuration.json",
+    ),
+  );
+  assert(
+    registryPlan.activeDbStateEntries.includes(
+      "dependencies/model-endpoint.json",
+    ),
+  );
+  assert(
+    registryPlan.activeDbStateEntries.includes(
+      "dependencies/credential-reference.json",
+    ),
+  );
   assert(!registryPlan.fileAssetEntries.includes("soul.md"));
   assert(
     registryPlan.optionalEntries.includes("memory-spaces/profile_dense.json"),
@@ -123,6 +177,11 @@ modelConfig:
     true,
   );
   assert.equal(JSON.stringify(registryPlan).includes("must-not-export"), false);
+  assert.equal(
+    JSON.stringify(registryPlan).includes("shared-credential"),
+    true,
+  );
+  assert.equal(JSON.stringify(registryPlan).includes("secretValue"), false);
 
   assert.throws(
     () =>

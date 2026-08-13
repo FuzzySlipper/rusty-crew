@@ -2356,25 +2356,28 @@ fn legacy_import_metadata_maps_pi_crew_and_hermes_ids_without_runtime_coupling()
 fn logical_storage_import_dry_run_validates_capabilities_and_idempotency_without_writes() {
     let db_path = temp_db_path("logical-import-dry-run");
     let store = CoordinationStore::open_file(&db_path).unwrap();
+    let records = vec![LogicalStorageRecord {
+        stable_id: "runtime-counter:brain_turns".to_string(),
+        record_version: 1,
+        exported_at: "2026-06-26T10:00:00Z".to_string(),
+        payload: LogicalStorageRecordPayload::TypedJson {
+            object_kind: "runtime_counter".to_string(),
+            payload_json: json!({
+                "scope_type": "runtime",
+                "counter_name": "brain_turns",
+                "value": 7
+            }),
+        },
+    }];
     let bundle = logical_import_bundle(vec![LogicalStorageRepositoryBundle {
         repository_id: "runtime_counters".to_string(),
         schema_version: 1,
         required_capabilities: vec!["transactions".to_string()],
         exported_count: 1,
-        checksum: Some("sha256:runtime-counters".to_string()),
-        records: vec![LogicalStorageRecord {
-            stable_id: "runtime-counter:brain_turns".to_string(),
-            record_version: 1,
-            exported_at: "2026-06-26T10:00:00Z".to_string(),
-            payload: LogicalStorageRecordPayload::TypedJson {
-                object_kind: "runtime_counter".to_string(),
-                payload_json: json!({
-                    "scope_type": "runtime",
-                    "counter_name": "brain_turns",
-                    "value": 7
-                }),
-            },
-        }],
+        checksum: Some(
+            crate::sqlite_runtime_import::logical_storage_records_checksum(&records).unwrap(),
+        ),
+        records,
     }]);
     let dry_run = LogicalStorageImportDryRun {
         import_batch_id: "dry-run-batch-1".to_string(),

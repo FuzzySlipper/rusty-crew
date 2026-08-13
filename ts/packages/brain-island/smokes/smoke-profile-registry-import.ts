@@ -102,6 +102,13 @@ backgroundReview:
       2,
     ),
   );
+  writeFileSync(
+    join(profilesDir, "normalized.json"),
+    JSON.stringify({
+      profileId: "normalized",
+      modelConfigId: "normalized-model",
+    }),
+  );
 
   const bridge = await loadNativeBridge();
   const runtimeConfig: RustyCrewRuntimeConfig = {
@@ -267,6 +274,71 @@ backgroundReview:
       (diagnostic) =>
         diagnostic.code === "unsupported_profile_field" &&
         diagnostic.path === "futureKnob",
+    ),
+    true,
+  );
+
+  const normalizedPlan = await buildProfileRegistryImportPlan({
+    profilesDir,
+    profileId: "normalized" as ProfileId,
+    now: "2026-06-26T08:06:00Z",
+    bridge: {
+      validateRuntimeConfigDraft: async () => ({
+        ok: true,
+        diagnostics: [],
+        normalized: {
+          profilesDir,
+          brains: [],
+          sessions: [],
+          scheduledJobs: [],
+          channelBindings: [],
+          mcpBindings: [],
+        },
+      }),
+      getModelConfiguration: async (modelConfigId) => ({
+        modelConfigId,
+        endpointId: "normalized-endpoint",
+        status: "active",
+        modelId: "normalized/model",
+        reasoningHistory: "provider_default",
+        thinkingMode: "provider_default",
+        promptCachingPolicy: "disabled",
+        capabilities: { version: 1, imageInput: false },
+        metadataJson: {},
+        revision: 2,
+        createdAt: "2026-06-26T08:00:00Z",
+        updatedAt: "2026-06-26T08:00:00Z",
+      }),
+      getModelEndpoint: async (endpointId) => ({
+        endpointId,
+        status: "active",
+        baseUrl: "https://example.invalid/v1",
+        protocol: "responses",
+        wireDialect: "openai_stateful",
+        authScheme: "openai_codex_oauth",
+        credentialId: "oauth-credential",
+        promptCacheTransport: "none",
+        metadataJson: {},
+        revision: 3,
+        createdAt: "2026-06-26T08:00:00Z",
+        updatedAt: "2026-06-26T08:00:00Z",
+      }),
+      getServiceCredential: async (credentialId) => ({
+        credentialId,
+        displayName: "OAuth credential",
+        providerKind: "display-only",
+        credentialKind: "openai_oauth",
+        credential: { hasSecret: false },
+        linkedProviderAliases: [],
+        revision: 4,
+        createdAt: "2026-06-26T08:00:00Z",
+        updatedAt: "2026-06-26T08:00:00Z",
+      }),
+    },
+  });
+  assert.equal(
+    normalizedPlan.diagnostics.some(
+      (diagnostic) => diagnostic.code === "service_credential_secret_missing",
     ),
     true,
   );

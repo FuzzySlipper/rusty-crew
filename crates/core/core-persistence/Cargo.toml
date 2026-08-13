@@ -17,5 +17,6 @@ rusty-crew-core-protocol = { path = "../core-protocol" }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 time.workspace = true
 fs2.workspace = true

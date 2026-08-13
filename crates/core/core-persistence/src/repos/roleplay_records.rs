@@ -684,6 +684,12 @@ mod tests {
                     archived: false,
                     narrator_diagnostic: Some(RoleplayNarratorDiagnosticRecord {
                         wake_id: "wake-one".into(),
+                        model_config_id: Some("model-config-one".into()),
+                        model_config_revision: Some(3),
+                        endpoint_id: Some("endpoint-one".into()),
+                        endpoint_revision: Some(2),
+                        credential_id: Some("credential-one".into()),
+                        credential_revision: Some(1),
                         scene_brief: "The observatory door is open.".into(),
                         relevant_lore_record_ids: vec!["lore-one".into()],
                         updated_at: "2026-07-10T00:00:00Z".into(),

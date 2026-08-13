@@ -266,6 +266,12 @@ fn mechanic_diagnostics_link_applied_proposals_and_protect_outcome_revisions() {
         let applied = approve_and_apply(&engine, narrator_config_proposal("proposal-diagnostic"));
         let diagnostic = engine
             .create_roleplay_mechanic_diagnostic(&RoleplayMechanicDiagnosticCreate {
+                model_config_id: None,
+                model_config_revision: None,
+                endpoint_id: None,
+                endpoint_revision: None,
+                credential_id: None,
+                credential_revision: None,
                 diagnostic_id: "diagnostic-one".to_string(),
                 mechanic_session_id: SessionId::new("mechanic-session"),
                 roleplay_session_id: "roleplay-session".to_string(),

@@ -260,6 +260,16 @@ const CORE_REPOSITORY_GROUPS: &[RepositoryGroupDescriptor] = &[
         ],
     },
     RepositoryGroupDescriptor {
+        group_id: "model_registry",
+        label: "Model Endpoint And Configuration Registry",
+        correctness_sensitive: true,
+        backend_requirements: &[TXN, JSON, SIZE, LOGICAL_EXPORT],
+        notes: &[
+            "Owns independently revisioned model_endpoints and model_configurations logical repositories.",
+            "Logical transfer preserves endpoint-before-configuration dependencies, excludes credential secrets, and proves post-apply counts and checksums.",
+        ],
+    },
+    RepositoryGroupDescriptor {
         group_id: "module_schema_registry",
         label: "Module Schema Registry",
         correctness_sensitive: true,

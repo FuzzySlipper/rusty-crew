@@ -1693,6 +1693,59 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn export_model_registry_logical_repositories(
+        &self,
+        exported_at: &IsoTimestamp,
+    ) -> CoreResult<Vec<LogicalStorageRepositoryBundle>> {
+        let mut endpoints = Vec::new();
+        let mut configurations = Vec::new();
+        let mut offset = 0_u32;
+        loop {
+            let page = self.list_model_endpoints(&ModelEndpointQuery {
+                limit: Some(1_000),
+                offset: Some(offset),
+                ..Default::default()
+            })?;
+            let page_len = page.len() as u32;
+            endpoints.extend(page);
+            if page_len < 1_000 {
+                break;
+            }
+            offset += page_len;
+        }
+        offset = 0;
+        loop {
+            let page = self.list_model_configurations(&ModelConfigurationQuery {
+                limit: Some(1_000),
+                offset: Some(offset),
+                ..Default::default()
+            })?;
+            let page_len = page.len() as u32;
+            configurations.extend(page);
+            if page_len < 1_000 {
+                break;
+            }
+            offset += page_len;
+        }
+        crate::sqlite_runtime_import::model_registry_logical_repositories(
+            &endpoints,
+            &configurations,
+            exported_at,
+        )
+    }
+
+    pub fn apply_model_registry_logical_import(
+        &self,
+        bundle: &LogicalStorageExportBundle,
+        dry_run: &LogicalStorageImportDryRun,
+    ) -> CoreResult<Vec<LogicalStorageApplyProof>> {
+        match self {
+            Self::Sqlite(store) => store.apply_model_registry_logical_import(bundle, dry_run),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.apply_model_registry_logical_import(bundle, dry_run),
+        }
+    }
+
     pub fn upsert_model_provider(
         &self,
         write: &ModelProviderWrite,

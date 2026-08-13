@@ -787,6 +787,18 @@ export async function rustyViewSessionContextUsage(
           : optionalNumber(
               optionalRecord(provider?.metadataJson)?.endpointRevision,
             ),
+      credential_id:
+        modelConfigId === undefined
+          ? provider?.credentialId
+          : optionalString(
+              optionalRecord(provider?.metadataJson)?.credentialId,
+            ),
+      credential_revision:
+        modelConfigId === undefined
+          ? provider?.credential?.revision
+          : optionalNumber(
+              optionalRecord(provider?.metadataJson)?.credentialRevision,
+            ),
       status: provider?.status ?? "missing",
       protocol: provider?.protocol,
       provider_kind:
@@ -1027,6 +1039,10 @@ async function normalizedDiagnosticProvider(
   if (configuration === undefined) return undefined;
   const endpoint = await bridge.getModelEndpoint(configuration.endpointId);
   if (endpoint === undefined) return undefined;
+  const credential =
+    endpoint.credentialId === undefined
+      ? undefined
+      : await bridge.getServiceCredential(endpoint.credentialId);
   return {
     alias: configuration.modelConfigId,
     status: configuration.status,
@@ -1053,10 +1069,17 @@ async function normalizedDiagnosticProvider(
     reasoningHistory: configuration.reasoningHistory,
     reasoningBudgetTokens: configuration.reasoningBudgetTokens,
     promptCaching: configuration.promptCachingPolicy,
-    credential: { hasSecret: endpoint.credentialId !== undefined },
+    credentialId: endpoint.credentialId,
+    credential: {
+      hasSecret: credential?.credential.hasSecret ?? false,
+      kind: credential?.credentialKind,
+      revision: credential?.revision,
+    },
     metadataJson: {
       endpointId: endpoint.endpointId,
       endpointRevision: endpoint.revision,
+      credentialId: credential?.credentialId,
+      credentialRevision: credential?.revision,
     },
     revision: configuration.revision,
     createdAt: configuration.createdAt,

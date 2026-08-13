@@ -1,6 +1,7 @@
 import type {
   BrainAction,
   BrainEventEnvelope,
+  BrainModelConfig,
   BrainWakeProviderStateOutput,
 } from "@rusty-crew/contracts";
 import type {
@@ -366,6 +367,7 @@ export async function createOpenAiResponsesBrainHost(
         sessionId: wake.sessionId,
         wakeId: wake.wakeId,
         brainModule: "openai-responses",
+        ...modelDiagnosticIdentity(context.profile.profile.modelConfig),
         providerAlias:
           "providerAlias" in responsesClientConfig
             ? responsesClientConfig.providerAlias
@@ -443,6 +445,7 @@ function recordOpenAiResponsesProviderRequestSamples(
     sessionId: wake.sessionId,
     wakeId: wake.wakeId,
     brainModule: "openai-responses",
+    ...modelDiagnosticIdentity(context.profile.profile.modelConfig),
     providerAlias:
       responsesClientConfig && "providerAlias" in responsesClientConfig
         ? responsesClientConfig.providerAlias
@@ -456,4 +459,15 @@ function recordOpenAiResponsesProviderRequestSamples(
       requests: samples,
     },
   });
+}
+
+function modelDiagnosticIdentity(config: BrainModelConfig) {
+  return {
+    modelConfigId: config.modelConfigId,
+    modelConfigRevision: config.modelConfigRevision,
+    endpointId: config.endpointId,
+    endpointRevision: config.endpointRevision,
+    credentialId: config.credentialId,
+    credentialRevision: config.credentialRevision,
+  };
 }

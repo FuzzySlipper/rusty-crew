@@ -447,6 +447,7 @@ pub struct LogicalTurnDiagnostic {
     pub logical_turn_id: LogicalTurnId,
     pub session_id: SessionId,
     pub source_wake_id: String,
+    pub binding: LogicalTurnBindingSnapshot,
     pub current_continuation_id: ContinuationId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_execution_epoch_id: Option<ExecutionEpochId>,

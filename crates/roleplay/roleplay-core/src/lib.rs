@@ -220,6 +220,42 @@ pub struct RoleplaySessionMetadata {
 pub struct RoleplayNarratorDiagnostic {
     #[serde(alias = "wake_id")]
     pub wake_id: String,
+    #[serde(
+        default,
+        alias = "model_config_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub model_config_id: Option<String>,
+    #[serde(
+        default,
+        alias = "model_config_revision",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub model_config_revision: Option<u64>,
+    #[serde(
+        default,
+        alias = "endpoint_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub endpoint_id: Option<String>,
+    #[serde(
+        default,
+        alias = "endpoint_revision",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub endpoint_revision: Option<u64>,
+    #[serde(
+        default,
+        alias = "credential_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub credential_id: Option<String>,
+    #[serde(
+        default,
+        alias = "credential_revision",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub credential_revision: Option<u64>,
     #[serde(alias = "scene_brief")]
     pub scene_brief: String,
     #[serde(default, alias = "relevant_lore_record_ids")]

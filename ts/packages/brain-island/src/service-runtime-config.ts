@@ -1349,11 +1349,31 @@ function brainModuleDiagnostics(input: {
       ? {}
       : { strategy: input.selection.strategy }),
     effectiveStrategy: input.moduleStrategy.diagnostics.effectiveStrategyId,
+    ...(input.profile.profile.modelConfig.modelConfigId === undefined
+      ? {}
+      : { modelConfigId: input.profile.profile.modelConfig.modelConfigId }),
+    ...(input.profile.profile.modelConfig.modelConfigRevision === undefined
+      ? {}
+      : {
+          modelConfigRevision:
+            input.profile.profile.modelConfig.modelConfigRevision,
+        }),
+    ...(input.profile.profile.modelConfig.endpointId === undefined
+      ? {}
+      : { endpointId: input.profile.profile.modelConfig.endpointId }),
+    ...(input.profile.profile.modelConfig.endpointRevision === undefined
+      ? {}
+      : {
+          endpointRevision: input.profile.profile.modelConfig.endpointRevision,
+        }),
     ...(input.profile.profile.providerAlias === undefined
       ? {}
       : { providerAlias: input.profile.profile.providerAlias }),
     modelProvider: {
       providerKind: input.profile.profile.modelConfig.provider,
+      authScheme: input.profile.profile.modelConfig.authScheme,
+      promptCacheTransport:
+        input.profile.profile.modelConfig.promptCacheTransport,
       protocol:
         input.profile.profile.modelConfig.api === "openai-responses"
           ? "responses"
@@ -1396,6 +1416,8 @@ function brainModuleDiagnostics(input: {
       ...(input.profile.profile.modelConfig.apiKeyEnv === undefined
         ? {
             credential: {
+              credentialId: input.profile.profile.modelConfig.credentialId,
+              revision: input.profile.profile.modelConfig.credentialRevision,
               hasSecret:
                 input.profile.profile.modelConfig.credentialKind !== undefined,
               kind: input.profile.profile.modelConfig.credentialKind,
@@ -1403,6 +1425,8 @@ function brainModuleDiagnostics(input: {
           }
         : {
             credential: {
+              credentialId: input.profile.profile.modelConfig.credentialId,
+              revision: input.profile.profile.modelConfig.credentialRevision,
               hasSecret: true,
               secretRef: input.profile.profile.modelConfig.apiKeyEnv,
               kind: input.profile.profile.modelConfig.credentialKind,

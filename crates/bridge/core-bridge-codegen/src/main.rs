@@ -4691,6 +4691,12 @@ fn sample_roleplay_session_metadata() -> roleplay::RoleplaySessionMetadata {
         archived: false,
         narrator_diagnostic: Some(roleplay::RoleplayNarratorDiagnostic {
             wake_id: "validation-wake".to_owned(),
+            model_config_id: Some("validation-model-config".to_owned()),
+            model_config_revision: Some(3),
+            endpoint_id: Some("validation-endpoint".to_owned()),
+            endpoint_revision: Some(2),
+            credential_id: Some("validation-credential".to_owned()),
+            credential_revision: Some(1),
             scene_brief: "Validation scene brief.".to_owned(),
             relevant_lore_record_ids: vec!["validation-lore".to_owned()],
             updated_at: sample_timestamp(),

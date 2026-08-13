@@ -2,6 +2,7 @@ import type {
   BrainAction,
   BrainContinuationPayload,
   BrainEventEnvelope,
+  BrainModelConfig,
   BrainWakeProviderStateOutput,
   ToolProfile,
 } from "@rusty-crew/contracts";
@@ -96,6 +97,7 @@ export function createChatCompletionsBrainHost(
             ...current,
             narratorDiagnostic: {
               wakeId: input.wakeId,
+              ...modelDiagnosticIdentity(context.profile.profile.modelConfig),
               sceneBrief: input.sceneBrief,
               relevantLoreRecordIds: input.relevantLoreRecordIds,
               updatedAt: now,
@@ -278,6 +280,7 @@ function createRustChatCompletionsBrainHostExecutor(
         sessionId: wake.sessionId,
         wakeId: wake.wakeId,
         brainModule: implementation.moduleLabel,
+        ...modelDiagnosticIdentity(context.profile.profile.modelConfig),
         providerAlias: context.profile.profile.providerAlias,
         model: input.config.model,
         protocol: "chat_completions",
@@ -385,6 +388,7 @@ function recordChatCompletionsProviderRequestSamples(
     sessionId: wake.sessionId,
     wakeId: wake.wakeId,
     brainModule: "chat-completions",
+    ...modelDiagnosticIdentity(context.profile.profile.modelConfig),
     providerAlias: context.profile.profile.providerAlias,
     model,
     protocol: "chat_completions",
@@ -395,6 +399,17 @@ function recordChatCompletionsProviderRequestSamples(
       requests: samples,
     },
   });
+}
+
+function modelDiagnosticIdentity(config: BrainModelConfig) {
+  return {
+    modelConfigId: config.modelConfigId,
+    modelConfigRevision: config.modelConfigRevision,
+    endpointId: config.endpointId,
+    endpointRevision: config.endpointRevision,
+    credentialId: config.credentialId,
+    credentialRevision: config.credentialRevision,
+  };
 }
 
 function rustChatCompletionsMessages(

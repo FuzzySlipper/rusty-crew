@@ -3,7 +3,10 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import type {
   NativeBridgeModule,
+  NativeModelConfigurationRecord,
+  NativeModelEndpointRecord,
   NativeProfileRegistryRecord,
+  NativeServiceCredentialRecord,
 } from "@rusty-crew/native-bridge";
 import type {
   ExternalMessageDeliveryPolicy,
@@ -45,6 +48,7 @@ export interface AdminProfileRegistryRecord {
   ownerId?: string;
   modelConfigId?: string;
   providerAlias?: string;
+  modelDependencies?: AdminProfileModelDependencies;
   externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   localToolProfileId?: string;
   toolPolicy?: {
@@ -76,6 +80,18 @@ export interface AdminProfileRegistryRecord {
   fallbackStatus: "registry_authoritative";
 }
 
+export interface AdminProfileModelDependencies {
+  configuration?: NativeModelConfigurationRecord;
+  endpoint?: NativeModelEndpointRecord;
+  credential?: {
+    credentialId: string;
+    displayName: string;
+    credentialKind: string;
+    revision: number;
+    hasSecret: boolean;
+  };
+}
+
 export interface AdminProfileRegistryDiagnostics {
   generatedAt: string;
   records: AdminProfileRegistryRecord[];
@@ -87,7 +103,13 @@ export interface AdminProfileRegistryDiagnostics {
 }
 
 export interface BuildAdminProfileRegistryDiagnosticsInput {
-  bridge: Pick<NativeBridgeModule, "listProfileRegistryRecords">;
+  bridge: Pick<NativeBridgeModule, "listProfileRegistryRecords"> &
+    Partial<
+      Pick<
+        NativeBridgeModule,
+        "getModelConfiguration" | "getModelEndpoint" | "getServiceCredential"
+      >
+    >;
   runtimeConfig: RustyCrewRuntimeConfig;
   now: string;
   profileIds?: readonly ProfileId[];
@@ -118,7 +140,7 @@ export async function buildAdminProfileRegistryDiagnostics(
   const records = (
     await Promise.all(
       registryRecords.map((record) =>
-        registryAdminRecord(record, input.runtimeConfig),
+        registryAdminRecord(record, input.runtimeConfig, input.bridge),
       ),
     )
   ).sort((left, right) => left.profileId.localeCompare(right.profileId));
@@ -160,12 +182,22 @@ export function filterAdminProfileRegistryRecords(
 async function registryAdminRecord(
   record: NativeProfileRegistryRecord,
   runtimeConfig: RustyCrewRuntimeConfig,
+  bridge: BuildAdminProfileRegistryDiagnosticsInput["bridge"],
 ): Promise<AdminProfileRegistryRecord> {
   const sourceAssetStatuses = await assetStatuses(
     record.sourceAssetRefs,
     runtimeConfig.profilesDir,
   );
   const runtime = runtimeConfigReadbackFromRegistry(record, runtimeConfig);
+  const modelDependencies = await resolveAdminModelDependencies(
+    runtime.modelConfigId,
+    bridge,
+  );
+  const modelDiagnostics = adminModelDependencyDiagnostics(
+    record.profileId,
+    runtime.modelConfigId,
+    modelDependencies,
+  );
   return {
     source: "registry",
     profileId: record.profileId,
@@ -177,6 +209,7 @@ async function registryAdminRecord(
     ownerId: record.ownerId,
     modelConfigId: runtime.modelConfigId,
     providerAlias: runtime.providerAlias,
+    ...(modelDependencies === undefined ? {} : { modelDependencies }),
     externalMessageDeliveryPolicy: runtime.externalMessageDeliveryPolicy,
     localToolProfileId: runtime.localToolProfileId,
     toolPolicy: runtime.toolPolicy,
@@ -192,9 +225,122 @@ async function registryAdminRecord(
     activeRuntimeRefs: record.derivedRuntimeRefs,
     sourceAssetRefs: record.sourceAssetRefs,
     sourceAssetStatuses,
-    diagnostics: driftDiagnostics(record.profileId, sourceAssetStatuses),
+    diagnostics: [
+      ...driftDiagnostics(record.profileId, sourceAssetStatuses),
+      ...modelDiagnostics,
+    ],
     fallbackStatus: "registry_authoritative",
   };
+}
+
+async function resolveAdminModelDependencies(
+  modelConfigId: string | undefined,
+  bridge: BuildAdminProfileRegistryDiagnosticsInput["bridge"],
+): Promise<AdminProfileModelDependencies | undefined> {
+  if (
+    modelConfigId === undefined ||
+    bridge.getModelConfiguration === undefined
+  ) {
+    return undefined;
+  }
+  const configuration = await bridge.getModelConfiguration(modelConfigId);
+  if (configuration === undefined) return {};
+  if (bridge.getModelEndpoint === undefined) return { configuration };
+  const endpoint = await bridge.getModelEndpoint(configuration.endpointId);
+  if (endpoint === undefined) return { configuration };
+  if (
+    endpoint.credentialId === undefined ||
+    bridge.getServiceCredential === undefined
+  ) {
+    return { configuration, endpoint };
+  }
+  const credential = await bridge.getServiceCredential(endpoint.credentialId);
+  return {
+    configuration,
+    endpoint,
+    ...(credential === undefined
+      ? {}
+      : { credential: redactedCredentialDependency(credential) }),
+  };
+}
+
+function redactedCredentialDependency(
+  credential: NativeServiceCredentialRecord,
+): NonNullable<AdminProfileModelDependencies["credential"]> {
+  return {
+    credentialId: credential.credentialId,
+    displayName: credential.displayName,
+    credentialKind: credential.credentialKind,
+    revision: credential.revision,
+    hasSecret: credential.credential.hasSecret,
+  };
+}
+
+function adminModelDependencyDiagnostics(
+  profileId: string,
+  modelConfigId: string | undefined,
+  dependencies: AdminProfileModelDependencies | undefined,
+): NativeRuntimeConfigDiagnostic[] {
+  if (modelConfigId === undefined || dependencies === undefined) return [];
+  const path = `profiles.${profileId}.modelConfigId`;
+  if (dependencies.configuration === undefined) {
+    return [
+      {
+        severity: "error",
+        code: "model_configuration_missing",
+        path,
+        message: `model configuration ${modelConfigId} is missing`,
+      },
+    ];
+  }
+  if (dependencies.endpoint === undefined) {
+    return [
+      {
+        severity: "error",
+        code: "model_endpoint_missing",
+        path,
+        message: `model configuration ${modelConfigId} references missing endpoint ${dependencies.configuration.endpointId}`,
+      },
+    ];
+  }
+  const endpoint = dependencies.endpoint;
+  if (endpoint.authScheme !== "none" && endpoint.credentialId === undefined) {
+    return [
+      {
+        severity: "error",
+        code: "model_endpoint_credential_missing",
+        path,
+        message: `model endpoint ${endpoint.endpointId} requires ${endpoint.authScheme} but has no credential`,
+      },
+    ];
+  }
+  if (
+    endpoint.credentialId !== undefined &&
+    dependencies.credential === undefined
+  ) {
+    return [
+      {
+        severity: "error",
+        code: "service_credential_missing",
+        path,
+        message: `model endpoint ${endpoint.endpointId} references missing credential ${endpoint.credentialId}`,
+      },
+    ];
+  }
+  if (
+    endpoint.authScheme !== "none" &&
+    dependencies.credential?.hasSecret === false
+  ) {
+    return [
+      {
+        severity: "error",
+        code: "service_credential_secret_missing",
+        path,
+        message: `credential ${dependencies.credential.credentialId} has no secret for ${endpoint.authScheme}`,
+      },
+    ];
+  }
+  return [];
 }
 
 function runtimeConfigReadbackFromRegistry(

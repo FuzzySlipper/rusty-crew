@@ -95,13 +95,17 @@ parts it actually owns without pretending to support the full service store.
 
 ## Current Boundary
 
-Current implementation covers typed contract definitions and dry-run validation.
-It does not apply records.
+Current implementation covers typed contract definitions and general dry-run
+validation. The `model_endpoints` and `model_configurations` repositories also
+have typed, secret-free export records plus transactional SQLite/PostgreSQL
+apply paths. Those paths preserve independent revisions, validate endpoint and
+credential references, record the import batch only after successful writes,
+and return post-apply count/checksum proofs.
 
 The `logical_export_import` SQLite diagnostic capability means logical bundle
 contracts and dry-run validation are available. It does not mean full
 SQLite-to-PostgreSQL migration is production-ready.
 
-Future apply work must add repository-specific import implementations,
+Other repositories still require repository-specific import implementations,
 post-import count/checksum validation, quiesce/read-only runbook steps, and
-backend-specific conformance coverage.
+backend-specific conformance coverage before whole-service migration is ready.

@@ -2371,8 +2371,40 @@ export const bridgeWireSchemaArtifact = {
           "createdAt": {
             "type": "string"
           },
+          "credentialId": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "credentialRevision": {
+            "default": null,
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "diagnosticId": {
             "type": "string"
+          },
+          "endpointId": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "endpointRevision": {
+            "default": null,
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "hypothesis": {
             "type": "string"
@@ -2382,6 +2414,22 @@ export const bridgeWireSchemaArtifact = {
           },
           "mechanicSessionId": {
             "type": "string"
+          },
+          "modelConfigId": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelConfigRevision": {
+            "default": null,
+            "format": "uint64",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "notes": {
             "default": null,
@@ -2760,6 +2808,54 @@ export const bridgeWireSchemaArtifact = {
           "narratorDiagnostic": {
             "default": null,
             "properties": {
+              "credentialId": {
+                "default": null,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "credentialRevision": {
+                "default": null,
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "endpointId": {
+                "default": null,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "endpointRevision": {
+                "default": null,
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "modelConfigId": {
+                "default": null,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "modelConfigRevision": {
+                "default": null,
+                "format": "uint64",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
               "relevantLoreRecordIds": {
                 "default": [],
                 "items": {
@@ -7018,8 +7114,40 @@ export const bridgeWireSchemaArtifact = {
         "createdAt": {
           "type": "string"
         },
+        "credentialId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credentialRevision": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "diagnosticId": {
           "type": "string"
+        },
+        "endpointId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpointRevision": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "hypothesis": {
           "type": "string"
@@ -7029,6 +7157,22 @@ export const bridgeWireSchemaArtifact = {
         },
         "mechanicSessionId": {
           "type": "string"
+        },
+        "modelConfigId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelConfigRevision": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "notes": {
           "default": null,
@@ -7407,6 +7551,54 @@ export const bridgeWireSchemaArtifact = {
         "narratorDiagnostic": {
           "default": null,
           "properties": {
+            "credentialId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "credentialRevision": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "endpointId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "endpointRevision": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "modelConfigId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "modelConfigRevision": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "relevantLoreRecordIds": {
               "default": [],
               "items": {
@@ -18424,8 +18616,40 @@ export const bridgeWireSchemaArtifact = {
         "createdAt": {
           "type": "string"
         },
+        "credentialId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "credentialRevision": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "diagnosticId": {
           "type": "string"
+        },
+        "endpointId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "endpointRevision": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "hypothesis": {
           "type": "string"
@@ -18435,6 +18659,22 @@ export const bridgeWireSchemaArtifact = {
         },
         "mechanicSessionId": {
           "type": "string"
+        },
+        "modelConfigId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelConfigRevision": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "notes": {
           "default": null,
@@ -18801,6 +19041,54 @@ export const bridgeWireSchemaArtifact = {
         "narratorDiagnostic": {
           "default": null,
           "properties": {
+            "credentialId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "credentialRevision": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "endpointId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "endpointRevision": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "modelConfigId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "modelConfigRevision": {
+              "default": null,
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "relevantLoreRecordIds": {
               "default": [],
               "items": {
@@ -18984,6 +19272,54 @@ export const bridgeWireSchemaArtifact = {
             "narratorDiagnostic": {
               "default": null,
               "properties": {
+                "credentialId": {
+                  "default": null,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "credentialRevision": {
+                  "default": null,
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "endpointId": {
+                  "default": null,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "endpointRevision": {
+                  "default": null,
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "modelConfigId": {
+                  "default": null,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "modelConfigRevision": {
+                  "default": null,
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "relevantLoreRecordIds": {
                   "default": [],
                   "items": {
@@ -28560,6 +28896,48 @@ export const bridgeWireSchemaArtifact = {
             },
             "narratorDiagnostic": {
               "properties": {
+                "credentialId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "credentialRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "endpointId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "endpointRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "modelConfigId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "modelConfigRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "relevantLoreRecordIds": {
                   "default": [],
                   "items": {
@@ -28684,6 +29062,48 @@ export const bridgeWireSchemaArtifact = {
             },
             "narratorDiagnostic": {
               "properties": {
+                "credentialId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "credentialRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "endpointId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "endpointRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "modelConfigId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "modelConfigRevision": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
                 "relevantLoreRecordIds": {
                   "default": [],
                   "items": {

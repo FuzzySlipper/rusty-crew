@@ -5217,6 +5217,9 @@
               { "type": "null" }
             ]
           },
+          "binding": {
+            "$ref": "#/components/schemas/LogicalTurnBindingSnapshot"
+          },
           "continuationCount": {
             "format": "uint64",
             "minimum": 0,
@@ -5256,6 +5259,7 @@
           "logicalTurnId",
           "sessionId",
           "sourceWakeId",
+          "binding",
           "currentContinuationId",
           "continuationCount",
           "providerRequestTotal",

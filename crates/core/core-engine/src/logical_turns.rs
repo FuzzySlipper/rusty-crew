@@ -1104,6 +1104,7 @@ fn logical_turn_diagnostic(
         logical_turn_id: record.logical_turn_id,
         session_id: record.session_id,
         source_wake_id: record.source_wake_id,
+        binding: record.binding,
         current_continuation_id: record.current_continuation_id,
         active_execution_epoch_id: record.active_epoch_id,
         continuation_count: record.continuation_sequence.saturating_add(1),

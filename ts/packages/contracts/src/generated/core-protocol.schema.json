@@ -5905,6 +5905,9 @@
             }
           ]
         },
+        "binding": {
+          "$ref": "#/$defs/LogicalTurnBindingSnapshot"
+        },
         "continuationCount": {
           "format": "uint64",
           "minimum": 0,
@@ -5975,6 +5978,7 @@
         "logicalTurnId",
         "sessionId",
         "sourceWakeId",
+        "binding",
         "currentContinuationId",
         "continuationCount",
         "providerRequestTotal",

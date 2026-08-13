@@ -1710,6 +1710,18 @@ pub struct RoleplaySessionMetadataRecord {
 #[serde(rename_all = "camelCase")]
 pub struct RoleplayNarratorDiagnosticRecord {
     pub wake_id: String,
+    #[serde(default)]
+    pub model_config_id: Option<String>,
+    #[serde(default)]
+    pub model_config_revision: Option<u64>,
+    #[serde(default)]
+    pub endpoint_id: Option<String>,
+    #[serde(default)]
+    pub endpoint_revision: Option<u64>,
+    #[serde(default)]
+    pub credential_id: Option<String>,
+    #[serde(default)]
+    pub credential_revision: Option<u64>,
     pub scene_brief: String,
     #[serde(default)]
     pub relevant_lore_record_ids: Vec<String>,
@@ -2417,6 +2429,18 @@ pub struct RoleplayMechanicDiagnosticRecord {
     pub mechanic_profile_id: ProfileId,
     pub roleplay_session_id: String,
     pub roleplay_profile_id: ProfileId,
+    #[serde(default)]
+    pub model_config_id: Option<String>,
+    #[serde(default)]
+    pub model_config_revision: Option<u64>,
+    #[serde(default)]
+    pub endpoint_id: Option<String>,
+    #[serde(default)]
+    pub endpoint_revision: Option<u64>,
+    #[serde(default)]
+    pub credential_id: Option<String>,
+    #[serde(default)]
+    pub credential_revision: Option<u64>,
     pub symptom: String,
     pub hypothesis: String,
     #[serde(default)]
@@ -2437,6 +2461,18 @@ pub struct RoleplayMechanicDiagnosticCreate {
     pub diagnostic_id: String,
     pub mechanic_session_id: SessionId,
     pub roleplay_session_id: String,
+    #[serde(default)]
+    pub model_config_id: Option<String>,
+    #[serde(default)]
+    pub model_config_revision: Option<u64>,
+    #[serde(default)]
+    pub endpoint_id: Option<String>,
+    #[serde(default)]
+    pub endpoint_revision: Option<u64>,
+    #[serde(default)]
+    pub credential_id: Option<String>,
+    #[serde(default)]
+    pub credential_revision: Option<u64>,
     pub symptom: String,
     pub hypothesis: String,
     #[serde(default)]
@@ -3061,10 +3097,23 @@ pub struct LogicalStorageRecord {
 #[serde(tag = "kind", content = "record", rename_all = "snake_case")]
 pub enum LogicalStorageRecordPayload {
     QueueMessage(Box<LogicalQueuedMessageExportRecord>),
+    ModelEndpoint(Box<ModelEndpointRecord>),
+    ModelConfiguration(Box<ModelConfigurationRecord>),
     TypedJson {
         object_kind: String,
         payload_json: JsonValue,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicalStorageApplyProof {
+    pub import_batch_id: String,
+    pub repository_id: String,
+    pub expected_count: u64,
+    pub applied_count: u64,
+    pub expected_checksum: Option<String>,
+    pub applied_checksum: String,
+    pub verified: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

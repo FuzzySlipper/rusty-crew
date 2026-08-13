@@ -243,9 +243,15 @@ export interface RuntimeBrainModuleDiagnostics {
   moduleId: string;
   strategy?: string;
   effectiveStrategy?: string;
+  modelConfigId?: string;
+  modelConfigRevision?: number;
+  endpointId?: string;
+  endpointRevision?: number;
   providerAlias?: string;
   modelProvider?: {
     providerKind: string;
+    authScheme?: string;
+    promptCacheTransport?: string;
     protocol: "responses" | "chat_completions" | string;
     clientMode?: "fake" | "live" | string;
     providerRequestTimeoutMode?: "disabled" | "configured";
@@ -264,6 +270,8 @@ export interface RuntimeBrainModuleDiagnostics {
     responsesDialect?: string;
     promptCaching?: "disabled" | "automatic_5m" | "automatic_1h";
     credential?: {
+      credentialId?: string;
+      revision?: number;
       hasSecret: boolean;
       secretRef?: string;
       kind?: string;
