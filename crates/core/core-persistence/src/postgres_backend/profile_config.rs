@@ -30,26 +30,50 @@ impl PostgresBackendStore {
         let record_json = to_json_text(&record)?;
         let lifecycle_status =
             profile_registry_lifecycle_status_as_str(record.lifecycle_status).to_string();
-        self.client()?
-            .execute(
-                &format!(
-                    "INSERT INTO {schema}.profile_registry (
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL profile registry record create", error)
+        })?;
+        lock_profile_model_configuration_boundary(&mut tx, &schema)?;
+        let duplicate = tx
+            .query_opt(
+                &format!("SELECT 1 FROM {schema}.profile_registry WHERE profile_id = $1"),
+                &[&write.profile_id.0],
+            )
+            .map_err(|error| postgres_error("check PostgreSQL profile registry duplicate", error))?
+            .is_some();
+        if duplicate {
+            return Err(CoreError::new(
+                CoreErrorKind::AlreadyExists,
+                format!(
+                    "profile registry record {} already exists",
+                    write.profile_id
+                ),
+            ));
+        }
+        validate_profile_model_configuration(&mut tx, &schema, write)?;
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.profile_registry (
                         profile_id,
                         lifecycle_status,
                         record_json,
                         created_at,
                         updated_at
                      ) VALUES ($1, $2, $3, $4, $5)"
-                ),
-                &[
-                    &record.profile_id.0,
-                    &lifecycle_status,
-                    &record_json,
-                    &record.created_at,
-                    &record.updated_at,
-                ],
-            )
-            .map_err(|error| postgres_error("create PostgreSQL profile registry record", error))?;
+            ),
+            &[
+                &record.profile_id.0,
+                &lifecycle_status,
+                &record_json,
+                &record.created_at,
+                &record.updated_at,
+            ],
+        )
+        .map_err(|error| postgres_error("create PostgreSQL profile registry record", error))?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL profile registry record create", error)
+        })?;
         Ok(record)
     }
 
@@ -63,6 +87,7 @@ impl PostgresBackendStore {
         let mut tx = client.transaction().map_err(|error| {
             postgres_error("start PostgreSQL profile registry record update", error)
         })?;
+        lock_profile_model_configuration_boundary(&mut tx, &schema)?;
         let existing = tx
             .query_opt(
                 &format!(
@@ -99,6 +124,7 @@ impl PostgresBackendStore {
                 ),
             ));
         }
+        validate_profile_model_configuration(&mut tx, &schema, &update.write)?;
         let record = ProfileRegistryRecord {
             profile_id: update.write.profile_id.clone(),
             lifecycle_status: update.write.lifecycle_status,
@@ -1455,6 +1481,45 @@ impl PostgresBackendStore {
             expires_at: write.expires_at.clone(),
         })
     }
+}
+
+pub(super) fn lock_profile_model_configuration_boundary(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+) -> CoreResult<()> {
+    tx.batch_execute(&format!(
+        "LOCK TABLE {schema}.profile_registry, {schema}.model_configurations IN SHARE ROW EXCLUSIVE MODE"
+    ))
+    .map_err(|error| postgres_error("lock profile model configuration boundary", error))
+}
+
+fn validate_profile_model_configuration(
+    tx: &mut Transaction<'_>,
+    schema: &str,
+    write: &ProfileRegistryWrite,
+) -> CoreResult<()> {
+    let Some(model_config_id) =
+        crate::normalized_profile_model_config_id(&write.active_runtime_settings_json)
+    else {
+        return Ok(());
+    };
+    let exists = tx
+        .query_opt(
+            &format!("SELECT 1 FROM {schema}.model_configurations WHERE model_config_id = $1"),
+            &[&model_config_id],
+        )
+        .map_err(|error| postgres_error("validate PostgreSQL profile model configuration", error))?
+        .is_some();
+    if !exists {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "profile registry record {} references missing model configuration {}",
+                write.profile_id, model_config_id
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn row_to_simple_kv(row: &Row) -> CoreResult<SimpleKvRecord> {

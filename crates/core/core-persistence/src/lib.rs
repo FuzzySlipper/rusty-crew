@@ -180,6 +180,34 @@ pub(crate) use repos::service_config::{
 
 const DB_FILE_NAME: &str = "coordination.sqlite3";
 
+pub(crate) fn normalized_profile_model_config_id(settings: &JsonValue) -> Option<String> {
+    let nested = settings.get("profile").unwrap_or(&JsonValue::Null);
+    [settings, nested].into_iter().find_map(|scope| {
+        scope
+            .get("modelConfigId")
+            .or_else(|| scope.get("model_config_id"))
+            .and_then(JsonValue::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    })
+}
+
+pub(crate) fn effective_profile_model_config_id(settings: &JsonValue) -> Option<String> {
+    normalized_profile_model_config_id(settings).or_else(|| {
+        let nested = settings.get("profile").unwrap_or(&JsonValue::Null);
+        [settings, nested].into_iter().find_map(|scope| {
+            scope
+                .get("providerAlias")
+                .or_else(|| scope.get("provider_alias"))
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        })
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct CoordinationStore {
     conn: Arc<Mutex<Connection>>,

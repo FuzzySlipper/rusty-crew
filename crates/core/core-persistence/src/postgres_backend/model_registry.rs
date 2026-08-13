@@ -480,6 +480,7 @@ impl PostgresBackendStore {
         let mut tx = client.transaction().map_err(|error| {
             postgres_error("start PostgreSQL model configuration delete", error)
         })?;
+        super::profile_config::lock_profile_model_configuration_boundary(&mut tx, &schema)?;
         let existing =
             get_configuration(&mut tx, &schema, &delete.model_config_id)?.ok_or_else(|| {
                 CoreError::new(
@@ -493,6 +494,40 @@ impl PostgresBackendStore {
             Some(delete.expected_revision),
             Some(existing.revision),
         )?;
+        let rows = tx
+            .query(
+                &format!("SELECT record_json FROM {schema}.profile_registry"),
+                &[],
+            )
+            .map_err(|error| {
+                postgres_error(
+                    "query PostgreSQL model configuration profile references",
+                    error,
+                )
+            })?;
+        let mut referencing_profiles = Vec::new();
+        for row in rows {
+            let record_json: String = row.get(0);
+            let profile: ProfileRegistryRecord =
+                parse_postgres_json(&record_json, "profile registry record_json")?;
+            if crate::effective_profile_model_config_id(&profile.active_runtime_settings_json)
+                .as_deref()
+                == Some(delete.model_config_id.as_str())
+            {
+                referencing_profiles.push(profile.profile_id.0);
+            }
+        }
+        if !referencing_profiles.is_empty() {
+            referencing_profiles.sort();
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "model configuration {} is still referenced by profile(s): {}",
+                    delete.model_config_id,
+                    referencing_profiles.join(", ")
+                ),
+            ));
+        }
         let changed = tx
             .execute(
                 &format!(

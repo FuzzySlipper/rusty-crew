@@ -441,7 +441,7 @@ impl CoordinationStore {
         delete.validate()?;
         let mut conn = self.conn()?;
         let tx = conn
-            .transaction()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| persistence_error("start model configuration delete", error))?;
         let existing =
             get_model_configuration_in_conn(&tx, &delete.model_config_id)?.ok_or_else(|| {
@@ -456,6 +456,44 @@ impl CoordinationStore {
             Some(delete.expected_revision),
             Some(existing.revision),
         )?;
+        let mut statement = tx
+            .prepare("SELECT profile_id, active_runtime_settings_json FROM profile_registry")
+            .map_err(|error| {
+                persistence_error("prepare model configuration profile references", error)
+            })?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| {
+                persistence_error("query model configuration profile references", error)
+            })?;
+        let mut referencing_profiles = Vec::new();
+        for row in rows {
+            let (profile_id, settings_json) = row.map_err(|error| {
+                persistence_error("load model configuration profile reference", error)
+            })?;
+            let settings: JsonValue = from_json_text(&settings_json).map_err(|error| {
+                persistence_error("parse profile model configuration reference", error)
+            })?;
+            if crate::effective_profile_model_config_id(&settings).as_deref()
+                == Some(delete.model_config_id.as_str())
+            {
+                referencing_profiles.push(profile_id);
+            }
+        }
+        drop(statement);
+        if !referencing_profiles.is_empty() {
+            referencing_profiles.sort();
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "model configuration {} is still referenced by profile(s): {}",
+                    delete.model_config_id,
+                    referencing_profiles.join(", ")
+                ),
+            ));
+        }
         let changed = tx
             .execute(
                 "DELETE FROM model_configurations WHERE model_config_id=?1 AND revision=?2",
@@ -1581,6 +1619,34 @@ mod tests {
         }
     }
 
+    fn normalized_profile(profile_id: &str, model_config_id: &str) -> ProfileRegistryWrite {
+        ProfileRegistryWrite {
+            profile_id: ProfileId::new(profile_id),
+            lifecycle_status: ProfileRegistryLifecycleStatus::Active,
+            display_name: None,
+            summary: None,
+            default_session_kind: None,
+            agent_id: None,
+            owner_id: None,
+            prompt_soul_markdown: None,
+            prompt_memory_markdown: None,
+            active_runtime_settings_json: json!({
+                "providerAlias": "legacy-other",
+                "profile": {"modelConfigId": model_config_id},
+            }),
+            source_asset_refs: Vec::new(),
+            derived_runtime_refs: Vec::new(),
+            import_export: rusty_crew_core_protocol::ProfileRegistryImportExportMetadata {
+                imported_from: None,
+                imported_at: None,
+                exported_to: None,
+                exported_at: None,
+                metadata_json: json!({}),
+            },
+            now: "2026-08-13T00:00:00Z".to_string(),
+        }
+    }
+
     fn legacy_write(provider: ModelProviderRecord, now: &str) -> ModelProviderWrite {
         ModelProviderWrite {
             alias: provider.alias,
@@ -1692,6 +1758,68 @@ mod tests {
             .get_model_endpoint(&endpoint.endpoint_id)
             .unwrap()
             .is_none());
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn concurrent_profile_create_and_configuration_delete_cannot_leave_a_dangling_reference() {
+        use std::sync::{Arc, Barrier};
+
+        let (store, path) = store();
+        store
+            .upsert_model_endpoint(&endpoint("race-endpoint", None))
+            .unwrap();
+
+        for iteration in 0..20 {
+            let model_config_id = format!("race-config-{iteration}");
+            let profile_id = format!("race-profile-{iteration}");
+            let configuration = store
+                .upsert_model_configuration(&configuration(&model_config_id, "race-endpoint"))
+                .unwrap();
+            let barrier = Arc::new(Barrier::new(3));
+            let create_store = store.clone();
+            let create_barrier = Arc::clone(&barrier);
+            let profile = normalized_profile(&profile_id, &model_config_id);
+            let create = std::thread::spawn(move || {
+                create_barrier.wait();
+                create_store.create_profile_registry_record(&profile)
+            });
+            let delete_store = store.clone();
+            let delete_barrier = Arc::clone(&barrier);
+            let delete = std::thread::spawn(move || {
+                delete_barrier.wait();
+                delete_store.delete_model_configuration(&ModelConfigurationDelete {
+                    model_config_id,
+                    expected_revision: configuration.revision,
+                })
+            });
+            barrier.wait();
+            let create_result = create.join().unwrap();
+            let delete_result = delete.join().unwrap();
+            assert_ne!(create_result.is_ok(), delete_result.is_ok());
+
+            let persisted_profile = store
+                .get_profile_registry_record(&ProfileId::new(&profile_id))
+                .unwrap();
+            let persisted_configuration = store
+                .get_model_configuration(&format!("race-config-{iteration}"))
+                .unwrap();
+            assert_eq!(
+                persisted_profile.is_some(),
+                persisted_configuration.is_some()
+            );
+            if persisted_profile.is_some() {
+                store.purge_profile(&ProfileId::new(&profile_id)).unwrap();
+                store
+                    .delete_model_configuration(&ModelConfigurationDelete {
+                        model_config_id: format!("race-config-{iteration}"),
+                        expected_revision: persisted_configuration.unwrap().revision,
+                    })
+                    .unwrap();
+            }
+        }
 
         drop(store);
         let _ = std::fs::remove_file(path);

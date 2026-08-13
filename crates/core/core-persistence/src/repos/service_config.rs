@@ -9,7 +9,7 @@ impl CoordinationStore {
         validate_profile_registry_write(write)?;
         let mut conn = self.conn()?;
         let tx = conn
-            .transaction()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| persistence_error("start create profile registry record", error))?;
         if get_profile_registry_record(&tx, &write.profile_id)?.is_some() {
             return Err(CoreError::new(
@@ -20,6 +20,7 @@ impl CoordinationStore {
                 ),
             ));
         }
+        validate_profile_model_configuration_in_conn(&tx, write)?;
         insert_profile_registry_record_in_tx(&tx, write)?;
         let record = get_profile_registry_record(&tx, &write.profile_id)?.ok_or_else(|| {
             CoreError::new(
@@ -39,7 +40,7 @@ impl CoordinationStore {
         validate_profile_registry_write(&update.write)?;
         let mut conn = self.conn()?;
         let tx = conn
-            .transaction()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| persistence_error("start update profile registry record", error))?;
         let existing =
             get_profile_registry_record(&tx, &update.write.profile_id)?.ok_or_else(|| {
@@ -60,6 +61,7 @@ impl CoordinationStore {
                 ),
             ));
         }
+        validate_profile_model_configuration_in_conn(&tx, &update.write)?;
         update_profile_registry_record_in_tx(&tx, update, &existing)?;
         let record =
             get_profile_registry_record(&tx, &update.write.profile_id)?.ok_or_else(|| {
@@ -1285,6 +1287,36 @@ fn get_profile_registry_record(
     )
     .optional()
     .map_err(|error| persistence_error("get profile registry record", error))
+}
+
+fn validate_profile_model_configuration_in_conn(
+    conn: &Connection,
+    write: &ProfileRegistryWrite,
+) -> CoreResult<()> {
+    let Some(model_config_id) =
+        crate::normalized_profile_model_config_id(&write.active_runtime_settings_json)
+    else {
+        return Ok(());
+    };
+    let exists = conn
+        .query_row(
+            "SELECT 1 FROM model_configurations WHERE model_config_id = ?1",
+            params![model_config_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|error| persistence_error("validate profile model configuration", error))?
+        .is_some();
+    if !exists {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!(
+                "profile registry record {} references missing model configuration {}",
+                write.profile_id, model_config_id
+            ),
+        ));
+    }
+    Ok(())
 }
 
 fn insert_profile_registry_record_in_tx(

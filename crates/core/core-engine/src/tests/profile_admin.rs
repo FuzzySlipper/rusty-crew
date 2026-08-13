@@ -43,12 +43,40 @@ fn normalized_model_deletes_are_revisioned_and_reference_safe() {
             now: "2026-08-13T00:00:00Z".to_string(),
         })
         .unwrap();
-    let mut profile = profile_registry_write("profile-1", "model-config", "unused-session");
-    profile.active_runtime_settings_json = serde_json::json!({
-        "modelConfigId": configuration.model_config_id,
-    });
-    profile.derived_runtime_refs.clear();
-    engine.create_profile_registry_record(&profile).unwrap();
+    let profile_settings = [
+        (
+            "profile-top-camel",
+            serde_json::json!({"modelConfigId": "model-config"}),
+        ),
+        (
+            "profile-top-snake",
+            serde_json::json!({"model_config_id": "model-config"}),
+        ),
+        (
+            "profile-nested-camel-mixed",
+            serde_json::json!({
+                "providerAlias": "legacy-other",
+                "profile": {"modelConfigId": "model-config"},
+            }),
+        ),
+        (
+            "profile-nested-snake-mixed",
+            serde_json::json!({
+                "provider_alias": "legacy-other",
+                "profile": {"model_config_id": "model-config"},
+            }),
+        ),
+        (
+            "profile-legacy-only",
+            serde_json::json!({"providerAlias": "model-config"}),
+        ),
+    ];
+    for (profile_id, settings) in profile_settings {
+        let mut profile = profile_registry_write(profile_id, "legacy-other", "unused-session");
+        profile.active_runtime_settings_json = settings;
+        profile.derived_runtime_refs.clear();
+        engine.create_profile_registry_record(&profile).unwrap();
+    }
 
     let endpoint_error = engine
         .delete_model_endpoint(&rusty_crew_core_protocol::ModelEndpointDelete {
@@ -66,9 +94,21 @@ fn normalized_model_deletes_are_revisioned_and_reference_safe() {
         })
         .unwrap_err();
     assert_eq!(configuration_error.kind, CoreErrorKind::ActionRejected);
-    assert!(configuration_error.message.contains("profile-1"));
+    assert!(configuration_error.message.contains("profile-top-camel"));
+    assert!(configuration_error
+        .message
+        .contains("profile-nested-camel-mixed"));
+    assert!(configuration_error.message.contains("profile-legacy-only"));
 
-    engine.purge_profile(&ProfileId::new("profile-1")).unwrap();
+    for profile_id in [
+        "profile-top-camel",
+        "profile-top-snake",
+        "profile-nested-camel-mixed",
+        "profile-nested-snake-mixed",
+        "profile-legacy-only",
+    ] {
+        engine.purge_profile(&ProfileId::new(profile_id)).unwrap();
+    }
     engine
         .delete_model_configuration(&rusty_crew_core_protocol::ModelConfigurationDelete {
             model_config_id: configuration.model_config_id,
@@ -81,6 +121,21 @@ fn normalized_model_deletes_are_revisioned_and_reference_safe() {
             expected_revision: endpoint.revision,
         })
         .unwrap();
+}
+
+#[test]
+fn normalized_profile_selection_requires_an_existing_model_configuration() {
+    let engine = test_engine();
+    let mut profile = profile_registry_write("missing-model-profile", "legacy", "unused-session");
+    profile.active_runtime_settings_json = serde_json::json!({
+        "providerAlias": "legacy",
+        "profile": {"modelConfigId": "missing-model-config"},
+    });
+    profile.derived_runtime_refs.clear();
+
+    let error = engine.create_profile_registry_record(&profile).unwrap_err();
+    assert_eq!(error.kind, CoreErrorKind::ActionRejected);
+    assert!(error.message.contains("missing-model-config"));
 }
 
 #[test]

@@ -110,45 +110,6 @@ impl CoreEngine {
         &self,
         delete: &ModelConfigurationDelete,
     ) -> CoreResult<ModelConfigurationRecord> {
-        let mut offset = 0_u32;
-        let mut referencing_profiles = Vec::new();
-        loop {
-            let profiles = RuntimeServiceDataStore::list_profile_registry_records(
-                &self.store,
-                &ProfileRegistryQuery {
-                    lifecycle_status: None,
-                    page: Some(QueryPage {
-                        limit: Some(1_000),
-                        offset: Some(offset),
-                    }),
-                },
-            )?;
-            let page_len = profiles.len() as u32;
-            referencing_profiles.extend(
-                profiles
-                    .into_iter()
-                    .filter(|profile| {
-                        profile_registry_model_config_id(profile).as_deref()
-                            == Some(delete.model_config_id.as_str())
-                    })
-                    .map(|profile| profile.profile_id.0),
-            );
-            if page_len < 1_000 {
-                break;
-            }
-            offset = offset.saturating_add(page_len);
-        }
-        if !referencing_profiles.is_empty() {
-            referencing_profiles.sort();
-            return Err(CoreError::new(
-                CoreErrorKind::ActionRejected,
-                format!(
-                    "model configuration {} is still referenced by profile(s): {}",
-                    delete.model_config_id,
-                    referencing_profiles.join(", ")
-                ),
-            ));
-        }
         RuntimeServiceDataStore::delete_model_configuration(&self.store, delete)
     }
 
@@ -345,20 +306,4 @@ fn profile_registry_provider_alias(record: &ProfileRegistryRecord) -> Option<Str
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-}
-
-fn profile_registry_model_config_id(record: &ProfileRegistryRecord) -> Option<String> {
-    let settings = &record.active_runtime_settings_json;
-    let nested = settings.get("profile").unwrap_or(&serde_json::Value::Null);
-    [settings, nested].into_iter().find_map(|scope| {
-        scope
-            .get("modelConfigId")
-            .or_else(|| scope.get("model_config_id"))
-            .or_else(|| scope.get("providerAlias"))
-            .or_else(|| scope.get("provider_alias"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    })
 }

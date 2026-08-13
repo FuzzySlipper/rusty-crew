@@ -17931,6 +17931,135 @@ mod tests {
 
     #[test]
     #[ignore = "requires local PostgreSQL dev database env"]
+    fn postgres_profile_create_and_configuration_delete_are_serialized() {
+        use std::sync::{Arc, Barrier};
+
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("model_profile_delete_race");
+        let store = Arc::new(
+            PostgresBackendStore::connect_with_pool_options(&database_url, &schema, Some(4))
+                .unwrap(),
+        );
+        store
+            .upsert_model_endpoint(&ModelEndpointWrite {
+                endpoint_id: "race-endpoint".into(),
+                status: ModelProviderStatus::Active,
+                display_name: None,
+                description: None,
+                base_url: "http://127.0.0.1:18082/v1".into(),
+                protocol: ModelProviderProtocol::ChatCompletions,
+                wire_dialect: ModelEndpointWireDialect::Standard,
+                auth_scheme: ModelEndpointAuthScheme::None,
+                credential_id: None,
+                prompt_cache_transport: PromptCacheTransport::None,
+                metadata_json: json!({}),
+                expected_revision: None,
+                now: "2026-08-13T00:00:00Z".into(),
+            })
+            .unwrap();
+
+        for iteration in 0..10 {
+            let model_config_id = format!("race-config-{iteration}");
+            let profile_id = format!("race-profile-{iteration}");
+            let configuration = store
+                .upsert_model_configuration(&ModelConfigurationWrite {
+                    model_config_id: model_config_id.clone(),
+                    endpoint_id: "race-endpoint".into(),
+                    status: ModelProviderStatus::Active,
+                    display_name: None,
+                    description: None,
+                    model_id: "race-model".into(),
+                    context_window_tokens: None,
+                    max_output_tokens: None,
+                    temperature_milli: None,
+                    reasoning_effort: None,
+                    reasoning_format: None,
+                    reasoning_history: ChatCompletionsReasoningHistory::ProviderDefault,
+                    reasoning_budget_tokens: None,
+                    thinking_mode: ChatCompletionsThinkingMode::ProviderDefault,
+                    prompt_caching_policy: ChatCompletionsPromptCachingPolicy::Disabled,
+                    capabilities: Default::default(),
+                    metadata_json: json!({}),
+                    expected_revision: None,
+                    now: "2026-08-13T00:00:01Z".into(),
+                })
+                .unwrap();
+            let profile = ProfileRegistryWrite {
+                profile_id: ProfileId::new(&profile_id),
+                lifecycle_status: ProfileRegistryLifecycleStatus::Active,
+                display_name: None,
+                summary: None,
+                default_session_kind: None,
+                agent_id: None,
+                owner_id: None,
+                prompt_soul_markdown: None,
+                prompt_memory_markdown: None,
+                active_runtime_settings_json: json!({
+                    "providerAlias": "legacy-other",
+                    "profile": {"modelConfigId": model_config_id},
+                }),
+                source_asset_refs: Vec::new(),
+                derived_runtime_refs: Vec::new(),
+                import_export: ProfileRegistryImportExportMetadata {
+                    imported_from: None,
+                    imported_at: None,
+                    exported_to: None,
+                    exported_at: None,
+                    metadata_json: json!({}),
+                },
+                now: "2026-08-13T00:00:02Z".into(),
+            };
+            let barrier = Arc::new(Barrier::new(3));
+            let create_store = Arc::clone(&store);
+            let create_barrier = Arc::clone(&barrier);
+            let create = std::thread::spawn(move || {
+                create_barrier.wait();
+                create_store.create_profile_registry_record(&profile)
+            });
+            let delete_store = Arc::clone(&store);
+            let delete_barrier = Arc::clone(&barrier);
+            let delete_model_config_id = model_config_id.clone();
+            let delete = std::thread::spawn(move || {
+                delete_barrier.wait();
+                delete_store.delete_model_configuration(&ModelConfigurationDelete {
+                    model_config_id: delete_model_config_id,
+                    expected_revision: configuration.revision,
+                })
+            });
+            barrier.wait();
+            let create_result = create.join().unwrap();
+            let delete_result = delete.join().unwrap();
+            assert_ne!(create_result.is_ok(), delete_result.is_ok());
+
+            let persisted_profile = store
+                .get_profile_registry_record(&ProfileId::new(&profile_id))
+                .unwrap();
+            let persisted_configuration = store.get_model_configuration(&model_config_id).unwrap();
+            assert_eq!(
+                persisted_profile.is_some(),
+                persisted_configuration.is_some()
+            );
+            if persisted_profile.is_some() {
+                store.purge_profile(&ProfileId::new(&profile_id)).unwrap();
+                store
+                    .delete_model_configuration(&ModelConfigurationDelete {
+                        model_config_id,
+                        expected_revision: persisted_configuration.unwrap().revision,
+                    })
+                    .unwrap();
+            }
+        }
+
+        Arc::try_unwrap(store)
+            .unwrap()
+            .drop_schema_for_test()
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
     fn postgres_model_registry_logical_import_preserves_and_proves_records() {
         let Some(database_url) = postgres_test_database_url() else {
             return;
