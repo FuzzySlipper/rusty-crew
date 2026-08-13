@@ -1864,6 +1864,9 @@
             "required": ["alias", "status"],
             "properties": {
               "alias": { "type": "string" },
+              "model_config_id": { "type": "string" },
+              "endpoint_id": { "type": "string" },
+              "provider_alias": { "type": "string" },
               "status": { "type": "string", "enum": ["active", "disabled", "archived", "missing", "unknown"] },
               "protocol": { "type": "string", "enum": ["responses", "chat_completions"] },
               "provider_kind": { "type": "string" },
@@ -2263,6 +2266,8 @@
             "required": ["brain_module"],
             "properties": {
               "brain_module": { "type": "string" },
+              "model_config_id": { "type": "string" },
+              "endpoint_id": { "type": "string" },
               "provider_alias": { "type": "string" },
               "model": { "type": "string" },
               "protocol": { "type": "string" },

@@ -9221,10 +9221,22 @@
             "null"
           ]
         },
+        "endpointId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "kind": {
           "$ref": "#/$defs/RuntimeActivityKind"
         },
         "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelConfigId": {
           "type": [
             "string",
             "null"
@@ -9615,6 +9627,12 @@
             "null"
           ]
         },
+        "endpointId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "kind": {
           "$ref": "#/$defs/RuntimeActivityKind"
         },
@@ -9622,6 +9640,12 @@
           "type": "string"
         },
         "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelConfigId": {
           "type": [
             "string",
             "null"

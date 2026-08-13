@@ -2140,8 +2140,10 @@ export type RuntimeActivityBegin = {
   activityId: string;
   agentId?: string | null;
   debugDetailId?: string | null;
+  endpointId?: string | null;
   kind: RuntimeActivityKind;
   model?: string | null;
+  modelConfigId?: string | null;
   owner: RuntimeActivityOwner;
   parentActivityId?: string | null;
   phase: string;
@@ -2226,9 +2228,11 @@ export type RuntimeActivityRecord = {
   activityId: string;
   agentId?: string | null;
   debugDetailId?: string | null;
+  endpointId?: string | null;
   kind: RuntimeActivityKind;
   lastProgressAt: string;
   model?: string | null;
+  modelConfigId?: string | null;
   owner: RuntimeActivityOwner;
   parentActivityId?: string | null;
   phase: string;

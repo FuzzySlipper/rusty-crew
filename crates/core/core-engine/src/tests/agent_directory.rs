@@ -78,6 +78,8 @@ fn projects_same_service_direct_and_external_routability() {
             phase: "running".into(),
             summary: None,
             provider_alias: None,
+            model_config_id: None,
+            endpoint_id: None,
             model: None,
             tool_name: None,
             process_id: None,

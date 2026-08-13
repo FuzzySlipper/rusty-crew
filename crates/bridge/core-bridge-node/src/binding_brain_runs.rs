@@ -225,6 +225,8 @@ impl NativeBridgeBinding {
 struct BrainRunIdentity {
     wake_id: String,
     session_id: SessionId,
+    model_config_id: Option<String>,
+    endpoint_id: Option<String>,
     model: Option<String>,
 }
 
@@ -250,6 +252,14 @@ fn parse_brain_run_identity(input_json: &str) -> napi::Result<BrainRunIdentity> 
     Ok(BrainRunIdentity {
         wake_id: required("wakeId")?,
         session_id: SessionId::new(required("sessionId")?),
+        model_config_id: value
+            .pointer("/config/modelConfigId")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        endpoint_id: value
+            .pointer("/config/endpointId")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
         model: value
             .pointer("/config/model")
             .and_then(|value| value.as_str())
@@ -285,6 +295,8 @@ fn begin_native_brain_activities(
             phase: "running".into(),
             summary: Some(format!("{module_id} native brain wake")),
             provider_alias: None,
+            model_config_id: identity.model_config_id.clone(),
+            endpoint_id: identity.endpoint_id.clone(),
             model: identity.model.clone(),
             tool_name: None,
             process_id: None,
@@ -302,6 +314,8 @@ fn begin_native_brain_activities(
             phase: "provider_stream".into(),
             summary: Some(format!("{module_id} provider loop")),
             provider_alias: None,
+            model_config_id: identity.model_config_id.clone(),
+            endpoint_id: identity.endpoint_id.clone(),
             model: identity.model.clone(),
             tool_name: None,
             process_id: None,
@@ -375,6 +389,8 @@ fn prepare_native_brain_drain(
                 phase: "awaiting_host".into(),
                 summary: Some(format!("{module_id} host tool call")),
                 provider_alias: None,
+                model_config_id: None,
+                endpoint_id: None,
                 model: None,
                 tool_name: Some(name.into()),
                 process_id: None,
@@ -892,6 +908,27 @@ fn finish_native_brain_activity_tree(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn brain_run_identity_preserves_model_configuration_and_endpoint() {
+        let identity = parse_brain_run_identity(
+            &serde_json::json!({
+                "wakeId": "wake-model-identity",
+                "sessionId": "session-model-identity",
+                "config": {
+                    "modelConfigId": "config-gpt-test",
+                    "endpointId": "endpoint-openai",
+                    "model": "gpt-test"
+                }
+            })
+            .to_string(),
+        )
+        .expect("parse normalized brain config identity");
+
+        assert_eq!(identity.model_config_id.as_deref(), Some("config-gpt-test"));
+        assert_eq!(identity.endpoint_id.as_deref(), Some("endpoint-openai"));
+        assert_eq!(identity.model.as_deref(), Some("gpt-test"));
+    }
 
     #[test]
     fn host_tool_retry_operation_ids_are_ordered_and_do_not_shadow_the_base_receipt() {
