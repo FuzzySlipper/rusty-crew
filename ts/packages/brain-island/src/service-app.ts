@@ -527,6 +527,7 @@ interface ServiceState {
   readonly inFlightWakes: Set<SessionId>;
   readonly deferredWakeSessions: Set<SessionId>;
   readonly deferredCredentialRuntimeRefreshProfiles: Set<ProfileId>;
+  readonly deferredCredentialRuntimeRefreshClaims: Set<ProfileId>;
   readonly deferredRuntimeActivitySettlements: DeferredRuntimeActivitySettlementQueue;
   readonly runtimePauses: Map<string, RuntimePauseRecord>;
   readonly claimedDeliveryIntentIds: Set<number>;
@@ -1209,6 +1210,7 @@ export async function createRustyCrewServiceApp(
       inFlightWakes: new Set(),
       deferredWakeSessions: new Set(),
       deferredCredentialRuntimeRefreshProfiles: new Set(),
+      deferredCredentialRuntimeRefreshClaims: new Set(),
       deferredRuntimeActivitySettlements:
         new DeferredRuntimeActivitySettlementQueue(),
       runtimePauses: new Map(),
@@ -2534,26 +2536,63 @@ async function refreshNormalizedCredentialRuntimes(
   return { profileIds, ...refresh };
 }
 
+export async function retryDeferredCredentialRuntimeRefreshWithClaim<
+  TProfileId extends string,
+>(input: {
+  profileId: TProfileId | undefined;
+  pendingProfileIds: Set<TProfileId>;
+  claimedProfileIds: Set<TProfileId>;
+  rebuild(profileId: TProfileId): Promise<{
+    status: "completed" | "blocked";
+    reasonCode?: string;
+  }>;
+}): Promise<"completed" | "pending" | "skipped"> {
+  const profileId = input.profileId;
+  if (
+    profileId === undefined ||
+    !input.pendingProfileIds.has(profileId) ||
+    input.claimedProfileIds.has(profileId)
+  ) {
+    return "skipped";
+  }
+
+  // Set membership is claimed before the first await. JavaScript runs this
+  // synchronous section atomically, so concurrent settlements cannot both
+  // start the same deferred rebuild.
+  input.claimedProfileIds.add(profileId);
+  try {
+    const rebuild = await input.rebuild(profileId);
+    if (rebuild.status !== "completed") return "pending";
+    input.pendingProfileIds.delete(profileId);
+    return "completed";
+  } finally {
+    // Keep pending state for blocked results and thrown failures, but always
+    // allow a later settlement to make the next retry claim.
+    input.claimedProfileIds.delete(profileId);
+  }
+}
+
 async function retryDeferredCredentialRuntimeRefresh(
   state: ServiceState,
   profileId: ProfileId | undefined,
 ): Promise<void> {
-  if (
-    profileId === undefined ||
-    !state.deferredCredentialRuntimeRefreshProfiles.has(profileId)
-  ) {
-    return;
-  }
-  const rebuild = await applyServiceRuntimeRebuild(state, {
-    name: "apply_runtime_rebuild",
-    target: { scope: "profile", profileId },
-    actor: { operatorId: "service-credential-admin" },
-    requestId: `credential-refresh-deferred:${profileId}`,
-    reason: "deferred credential refresh after in-flight wake settled",
-    body: {},
+  const outcome = await retryDeferredCredentialRuntimeRefreshWithClaim({
+    profileId,
+    pendingProfileIds: state.deferredCredentialRuntimeRefreshProfiles,
+    claimedProfileIds: state.deferredCredentialRuntimeRefreshClaims,
+    rebuild: async (claimedProfileId) => {
+      const rebuild = await applyServiceRuntimeRebuild(state, {
+        name: "apply_runtime_rebuild",
+        target: { scope: "profile", profileId: claimedProfileId },
+        actor: { operatorId: "service-credential-admin" },
+        requestId: `credential-refresh-deferred:${claimedProfileId}`,
+        reason: "deferred credential refresh after in-flight wake settled",
+        body: {},
+      });
+      return rebuild.apply;
+    },
   });
-  if (rebuild.apply.status !== "completed") return;
-  state.deferredCredentialRuntimeRefreshProfiles.delete(profileId);
+  if (outcome !== "completed" || profileId === undefined) return;
   recordServiceEvent(state, {
     source: "service-host",
     eventType: "credential_runtime_refresh_completed",

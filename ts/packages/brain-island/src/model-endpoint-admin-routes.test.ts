@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { retryDeferredCredentialRuntimeRefreshWithClaim } from "./service-app.js";
 import {
   applyNormalizedCredentialRuntimeRefreshes,
   handleModelRegistryAdminRequest,
@@ -143,6 +144,114 @@ test("normalized credential refresh retries an in-flight shared consumer exactly
     "profile-b": 1,
   });
   assert.equal(deferred.size, 0);
+});
+
+test("deferred credential retry claims serialize concurrent settlements and retain pending state", async () => {
+  const pendingProfileIds = new Set(["profile-shared"]);
+  const claimedProfileIds = new Set<string>();
+  const credentialRevisions = new Map([
+    ["profile-shared", 1],
+    ["profile-unrelated", 1],
+  ]);
+  const completedRebuilds = new Map<string, number>();
+  let activeRebuilds = 0;
+  let maximumActiveRebuilds = 0;
+  let releaseRebuild!: () => void;
+  let rebuildEntered!: () => void;
+  const rebuildStarted = new Promise<void>((resolve) => {
+    rebuildEntered = resolve;
+  });
+  const rebuildRelease = new Promise<void>((resolve) => {
+    releaseRebuild = resolve;
+  });
+  const rebuild = async (profileId: string) => {
+    activeRebuilds += 1;
+    maximumActiveRebuilds = Math.max(maximumActiveRebuilds, activeRebuilds);
+    rebuildEntered();
+    await rebuildRelease;
+    activeRebuilds -= 1;
+    const nextRevision = (credentialRevisions.get(profileId) ?? 0) + 1;
+    credentialRevisions.set(profileId, nextRevision);
+    completedRebuilds.set(
+      profileId,
+      (completedRebuilds.get(profileId) ?? 0) + 1,
+    );
+    return { status: "completed" as const };
+  };
+
+  const firstSettlement = retryDeferredCredentialRuntimeRefreshWithClaim({
+    profileId: "profile-shared",
+    pendingProfileIds,
+    claimedProfileIds,
+    rebuild,
+  });
+  await rebuildStarted;
+  const secondSettlement = retryDeferredCredentialRuntimeRefreshWithClaim({
+    profileId: "profile-shared",
+    pendingProfileIds,
+    claimedProfileIds,
+    rebuild,
+  });
+
+  assert.equal(maximumActiveRebuilds, 1);
+  releaseRebuild();
+  assert.deepEqual(await Promise.all([firstSettlement, secondSettlement]), [
+    "completed",
+    "skipped",
+  ]);
+  assert.equal(credentialRevisions.get("profile-shared"), 2);
+  assert.equal(completedRebuilds.get("profile-shared"), 1);
+  assert.equal(pendingProfileIds.has("profile-shared"), false);
+  assert.equal(claimedProfileIds.size, 0);
+
+  let remainingSessionInFlight = true;
+  pendingProfileIds.add("profile-shared");
+  const blockedRetry = await retryDeferredCredentialRuntimeRefreshWithClaim({
+    profileId: "profile-shared",
+    pendingProfileIds,
+    claimedProfileIds,
+    rebuild: async (profileId) => {
+      if (remainingSessionInFlight) {
+        return {
+          status: "blocked" as const,
+          reasonCode: "runtime_rebuild_in_flight",
+        };
+      }
+      const nextRevision = (credentialRevisions.get(profileId) ?? 0) + 1;
+      credentialRevisions.set(profileId, nextRevision);
+      completedRebuilds.set(
+        profileId,
+        (completedRebuilds.get(profileId) ?? 0) + 1,
+      );
+      return { status: "completed" as const };
+    },
+  });
+  assert.equal(blockedRetry, "pending");
+  assert.equal(pendingProfileIds.has("profile-shared"), true);
+
+  remainingSessionInFlight = false;
+  assert.equal(
+    await retryDeferredCredentialRuntimeRefreshWithClaim({
+      profileId: "profile-shared",
+      pendingProfileIds,
+      claimedProfileIds,
+      rebuild: async (profileId) => {
+        const nextRevision = (credentialRevisions.get(profileId) ?? 0) + 1;
+        credentialRevisions.set(profileId, nextRevision);
+        completedRebuilds.set(
+          profileId,
+          (completedRebuilds.get(profileId) ?? 0) + 1,
+        );
+        return { status: "completed" as const };
+      },
+    }),
+    "completed",
+  );
+  assert.equal(credentialRevisions.get("profile-shared"), 3);
+  assert.equal(completedRebuilds.get("profile-shared"), 2);
+  assert.equal(credentialRevisions.get("profile-unrelated"), 1);
+  assert.equal(pendingProfileIds.size, 0);
+  assert.equal(claimedProfileIds.size, 0);
 });
 
 class MemoryModelRegistry implements ModelEndpointAdminRouteContext {

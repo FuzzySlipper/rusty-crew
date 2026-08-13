@@ -8,7 +8,6 @@ use crate::{
 
 const POSTGRES_LOGICAL_MODEL_TARGET_BACKEND: &str = "postgres";
 const POSTGRES_LOGICAL_MODEL_CAPABILITY: &str = "logical_export_import";
-const POSTGRES_LOGICAL_MODEL_REPOSITORIES: [&str; 2] = ["model_endpoints", "model_configurations"];
 
 pub(super) fn apply_postgres_model_registry(
     tx: &mut Transaction<'_>,
@@ -441,15 +440,12 @@ fn validate_postgres_logical_model_bundle(
     endpoints: &[ModelEndpointRecord],
     configurations: &[ModelConfigurationRecord],
 ) -> CoreResult<()> {
-    if dry_run.target_backend.trim() != POSTGRES_LOGICAL_MODEL_TARGET_BACKEND {
-        return Err(CoreError::new(
-            CoreErrorKind::InvalidInput,
-            format!(
-                "PostgreSQL model registry logical import requires target_backend {}, got {}",
-                POSTGRES_LOGICAL_MODEL_TARGET_BACKEND, dry_run.target_backend
-            ),
-        ));
-    }
+    crate::sqlite_runtime_import::validate_model_registry_logical_import_envelope(
+        bundle,
+        dry_run,
+        POSTGRES_LOGICAL_MODEL_TARGET_BACKEND,
+        "PostgreSQL",
+    )?;
     let supported_capabilities = dry_run
         .supported_capabilities
         .iter()
@@ -469,7 +465,7 @@ fn validate_postgres_logical_model_bundle(
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    let missing_repositories = POSTGRES_LOGICAL_MODEL_REPOSITORIES
+    let missing_repositories = crate::sqlite_runtime_import::MODEL_REGISTRY_LOGICAL_REPOSITORIES
         .iter()
         .copied()
         .filter(|repository_id| !supported_repositories.contains(repository_id))
@@ -492,25 +488,12 @@ fn validate_postgres_logical_model_bundle(
             ),
         ));
     }
-    for repository_id in POSTGRES_LOGICAL_MODEL_REPOSITORIES {
-        let repositories = bundle
+    for repository_id in crate::sqlite_runtime_import::MODEL_REGISTRY_LOGICAL_REPOSITORIES {
+        let repository = bundle
             .repositories
             .iter()
-            .filter(|repository| repository.repository_id == repository_id)
-            .collect::<Vec<_>>();
-        if repositories.is_empty() {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                format!("logical bundle is missing repository {repository_id}"),
-            ));
-        }
-        if repositories.len() != 1 {
-            return Err(CoreError::new(
-                CoreErrorKind::InvalidInput,
-                format!("logical bundle contains duplicate repository {repository_id}"),
-            ));
-        }
-        let repository = repositories[0];
+            .find(|repository| repository.repository_id == repository_id)
+            .expect("model registry envelope validation requires each repository exactly once");
         let mut stable_ids = BTreeSet::new();
         for record in &repository.records {
             if record.stable_id.trim().is_empty() {

@@ -7,6 +7,52 @@
 use super::*;
 use sha2::{Digest, Sha256};
 
+pub(crate) const MODEL_REGISTRY_LOGICAL_REPOSITORIES: [&str; 2] =
+    ["model_endpoints", "model_configurations"];
+pub(crate) const SQLITE_MODEL_REGISTRY_TARGET_BACKEND: &str = "sqlite";
+
+pub(crate) fn validate_model_registry_logical_import_envelope(
+    bundle: &LogicalStorageExportBundle,
+    dry_run: &LogicalStorageImportDryRun,
+    expected_target_backend: &str,
+    backend_label: &str,
+) -> CoreResult<()> {
+    if dry_run.target_backend.trim() != expected_target_backend {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "{backend_label} model registry logical import requires target_backend {expected_target_backend}, got {}",
+                dry_run.target_backend
+            ),
+        ));
+    }
+
+    for repository_id in MODEL_REGISTRY_LOGICAL_REPOSITORIES {
+        let repository_count = bundle
+            .repositories
+            .iter()
+            .filter(|repository| repository.repository_id == repository_id)
+            .count();
+        match repository_count {
+            0 => {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    format!("logical bundle is missing repository {repository_id}"),
+                ));
+            }
+            1 => {}
+            _ => {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    format!("logical bundle contains duplicate repository {repository_id}"),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 impl CoordinationStore {
     pub fn save_import_batch(&self, record: &RuntimeImportBatchRecord) -> CoreResult<()> {
         let conn = self.conn()?;
@@ -201,6 +247,24 @@ pub(crate) fn validate_logical_storage_import(
     let mut accepted_record_keys = BTreeSet::new();
     let mut unsupported_records = 0_u64;
     let mut refused_records = 0_u64;
+    if bundle.repositories.iter().any(|repository| {
+        MODEL_REGISTRY_LOGICAL_REPOSITORIES.contains(&repository.repository_id.as_str())
+    }) {
+        if let Err(error) = validate_model_registry_logical_import_envelope(
+            bundle,
+            dry_run,
+            SQLITE_MODEL_REGISTRY_TARGET_BACKEND,
+            "SQLite",
+        ) {
+            issues.push(logical_import_issue(
+                LogicalStorageImportIssueSeverity::Error,
+                "model_registry_envelope_invalid",
+                None,
+                None,
+                error.message,
+            ));
+        }
+    }
     let record_count = bundle
         .repositories
         .iter()

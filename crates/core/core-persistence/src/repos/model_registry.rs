@@ -87,6 +87,12 @@ impl CoordinationStore {
         bundle: &LogicalStorageExportBundle,
         dry_run: &LogicalStorageImportDryRun,
     ) -> CoreResult<Vec<LogicalStorageApplyProof>> {
+        crate::sqlite_runtime_import::validate_model_registry_logical_import_envelope(
+            bundle,
+            dry_run,
+            crate::sqlite_runtime_import::SQLITE_MODEL_REGISTRY_TARGET_BACKEND,
+            "SQLite",
+        )?;
         let mut conn = self.conn()?;
         let tx = conn
             .transaction()
@@ -1505,6 +1511,22 @@ mod tests {
         }
     }
 
+    fn model_repository(
+        repository_id: &str,
+        records: Vec<LogicalStorageRecord>,
+    ) -> LogicalStorageRepositoryBundle {
+        LogicalStorageRepositoryBundle {
+            repository_id: repository_id.to_string(),
+            schema_version: 1,
+            required_capabilities: vec!["logical_export_import".to_string()],
+            exported_count: records.len() as u64,
+            checksum: Some(
+                crate::sqlite_runtime_import::logical_storage_records_checksum(&records).unwrap(),
+            ),
+            records,
+        }
+    }
+
     fn endpoint_record_with_auth(
         endpoint_id: &str,
         protocol: ModelProviderProtocol,
@@ -1627,6 +1649,21 @@ mod tests {
         assert!(proofs.iter().all(|proof| proof.verified));
         assert_eq!(
             target
+                .list_model_endpoints(&ModelEndpointQuery::default())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            target
+                .list_model_configurations(&ModelConfigurationQuery::default())
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(target.load_import_batches().unwrap().len(), 1);
+        assert_eq!(
+            target
                 .get_model_endpoint("shared")
                 .unwrap()
                 .unwrap()
@@ -1651,6 +1688,161 @@ mod tests {
         drop(target);
         let _ = std::fs::remove_file(source_path);
         let _ = std::fs::remove_file(target_path);
+    }
+
+    #[test]
+    fn model_registry_logical_import_rejects_foreign_target_without_writes() {
+        let (source, source_path) = store();
+        let endpoint_record = source
+            .upsert_model_endpoint(&endpoint("shared", None))
+            .unwrap();
+        let configuration_record = source
+            .upsert_model_configuration(&configuration("model-a", "shared"))
+            .unwrap();
+        let bundle = logical_bundle(
+            std::slice::from_ref(&endpoint_record),
+            std::slice::from_ref(&configuration_record),
+        );
+        let (target, target_path) = store();
+        let dry_run = LogicalStorageImportDryRun {
+            import_batch_id: "foreign-target-model-import".to_string(),
+            target_backend: "postgres".to_string(),
+            validation_time: "2026-08-13T00:01:00Z".to_string(),
+            supported_capabilities: vec!["logical_export_import".to_string()],
+            supported_repositories: vec![
+                "model_endpoints".to_string(),
+                "model_configurations".to_string(),
+            ],
+        };
+
+        let report = target
+            .validate_logical_storage_import(&bundle, &dry_run)
+            .unwrap();
+        assert!(!report.can_apply());
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "model_registry_envelope_invalid"
+                && issue
+                    .message
+                    .contains("requires target_backend sqlite, got postgres")
+        }));
+
+        let error = target
+            .apply_model_registry_logical_import(&bundle, &dry_run)
+            .unwrap_err();
+        assert_eq!(error.kind, CoreErrorKind::InvalidInput);
+        assert!(error
+            .message
+            .contains("requires target_backend sqlite, got postgres"));
+        assert!(target.get_model_endpoint("shared").unwrap().is_none());
+        assert!(target.get_model_configuration("model-a").unwrap().is_none());
+        assert!(target.load_import_batches().unwrap().is_empty());
+
+        drop(source);
+        drop(target);
+        let _ = std::fs::remove_file(source_path);
+        let _ = std::fs::remove_file(target_path);
+    }
+
+    #[test]
+    fn model_registry_logical_import_rejects_duplicate_empty_and_nonempty_repositories_without_writes(
+    ) {
+        let (source, source_path) = store();
+        let endpoint_record = source
+            .upsert_model_endpoint(&endpoint("shared", None))
+            .unwrap();
+        let configuration_record = source
+            .upsert_model_configuration(&configuration("model-a", "shared"))
+            .unwrap();
+        let base_bundle = logical_bundle(
+            std::slice::from_ref(&endpoint_record),
+            std::slice::from_ref(&configuration_record),
+        );
+
+        let mut duplicate_endpoint_record = base_bundle.repositories[0].records[0].clone();
+        duplicate_endpoint_record.stable_id = "duplicate-endpoint".to_string();
+        if let LogicalStorageRecordPayload::ModelEndpoint(endpoint) =
+            &mut duplicate_endpoint_record.payload
+        {
+            endpoint.endpoint_id = "duplicate-endpoint".to_string();
+        }
+        let mut duplicate_configuration_record = base_bundle.repositories[1].records[0].clone();
+        duplicate_configuration_record.stable_id = "model-b".to_string();
+        if let LogicalStorageRecordPayload::ModelConfiguration(configuration) =
+            &mut duplicate_configuration_record.payload
+        {
+            configuration.model_config_id = "model-b".to_string();
+        }
+
+        let duplicate_repositories = vec![
+            (
+                "model_endpoints empty",
+                model_repository("model_endpoints", Vec::new()),
+            ),
+            (
+                "model_endpoints nonempty",
+                model_repository("model_endpoints", vec![duplicate_endpoint_record]),
+            ),
+            (
+                "model_configurations empty",
+                model_repository("model_configurations", Vec::new()),
+            ),
+            (
+                "model_configurations nonempty",
+                model_repository("model_configurations", vec![duplicate_configuration_record]),
+            ),
+        ];
+
+        for (index, (label, duplicate_repository)) in duplicate_repositories.into_iter().enumerate()
+        {
+            let mut bundle = base_bundle.clone();
+            let repository_id = duplicate_repository.repository_id.clone();
+            bundle.repositories.push(duplicate_repository);
+            let (target, target_path) = store();
+            let dry_run = LogicalStorageImportDryRun {
+                import_batch_id: format!("duplicate-model-import-{index}"),
+                target_backend: "sqlite".to_string(),
+                validation_time: "2026-08-13T00:02:00Z".to_string(),
+                supported_capabilities: vec!["logical_export_import".to_string()],
+                supported_repositories: vec![
+                    "model_endpoints".to_string(),
+                    "model_configurations".to_string(),
+                ],
+            };
+
+            let report = target
+                .validate_logical_storage_import(&bundle, &dry_run)
+                .unwrap();
+            assert!(!report.can_apply(), "{label}: {report:#?}");
+            assert!(report.issues.iter().any(|issue| {
+                issue.code == "model_registry_envelope_invalid"
+                    && issue
+                        .message
+                        .contains(&format!("duplicate repository {repository_id}"))
+            }));
+
+            let error = target
+                .apply_model_registry_logical_import(&bundle, &dry_run)
+                .unwrap_err();
+            assert_eq!(error.kind, CoreErrorKind::InvalidInput, "{label}");
+            assert!(error
+                .message
+                .contains(&format!("duplicate repository {repository_id}")));
+            assert!(
+                target.get_model_endpoint("shared").unwrap().is_none(),
+                "{label}"
+            );
+            assert!(
+                target.get_model_configuration("model-a").unwrap().is_none(),
+                "{label}"
+            );
+            assert!(target.load_import_batches().unwrap().is_empty(), "{label}");
+
+            drop(target);
+            let _ = std::fs::remove_file(target_path);
+        }
+
+        drop(source);
+        let _ = std::fs::remove_file(source_path);
     }
 
     #[test]
