@@ -841,6 +841,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   browserResources?: ServiceBrowserResources;
   toolMediaSink?: BrainToolMediaSink;
   narratorImageContextResolver?: NarratorImageContextResolver;
+  onServiceCredentialUpdated?: (credentialId: string) => Promise<void>;
   onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
   const runtimeConfig = await planEffectiveRuntimeConfig(
@@ -959,6 +960,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             browserResources,
             toolMediaSink: input.toolMediaSink,
             narratorImageContextResolver: input.narratorImageContextResolver,
+            onServiceCredentialUpdated: input.onServiceCredentialUpdated,
             localCodeResourcePolicy,
           }),
           {
@@ -1042,6 +1044,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   browserResources?: ServiceBrowserResources;
   toolMediaSink?: BrainToolMediaSink;
   narratorImageContextResolver?: NarratorImageContextResolver;
+  onServiceCredentialUpdated?: (credentialId: string) => Promise<void>;
   onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewBrainRuntimeRebuildResult> {
   const runtimeConfig = await planEffectiveRuntimeConfig(
@@ -1132,6 +1135,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         browserResources,
         toolMediaSink: input.toolMediaSink,
         narratorImageContextResolver: input.narratorImageContextResolver,
+        onServiceCredentialUpdated: input.onServiceCredentialUpdated,
         localCodeResourcePolicy,
       }),
       {
@@ -1450,6 +1454,7 @@ async function createConfiguredBrain(
     browserResources: ServiceBrowserResources;
     toolMediaSink?: BrainToolMediaSink;
     narratorImageContextResolver?: NarratorImageContextResolver;
+    onServiceCredentialUpdated?: (credentialId: string) => Promise<void>;
     localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
 ): Promise<BrainHostExecutor> {
@@ -1476,6 +1481,7 @@ async function createConfiguredBrain(
     providerRequestDebugStore: options.providerRequestDebugStore,
     toolMediaSink: options.toolMediaSink,
     narratorImageContextResolver: options.narratorImageContextResolver,
+    onServiceCredentialUpdated: options.onServiceCredentialUpdated,
   });
 }
 

@@ -4,6 +4,7 @@ import {
   handleModelRegistryAdminRequest,
   modelConfigurationApiRecord,
   modelEndpointApiRecord,
+  normalizedCredentialRefreshProfileIds,
   normalizedModelRefreshProfileIds,
   type ModelEndpointAdminRouteContext,
   type ModelEndpointAdminRouteRequest,
@@ -48,6 +49,41 @@ test("normalized refresh fans endpoint changes out but keeps model changes selec
       profiles,
     }),
     ["profile-model-a"],
+  );
+});
+
+test("normalized credential refresh rebuilds every shared consumer and no unrelated profile", () => {
+  assert.deepEqual(
+    normalizedCredentialRefreshProfileIds({
+      credentialId: "credential-shared",
+      endpoints: [
+        { endpointId: "endpoint-a", credentialId: "credential-shared" },
+        { endpointId: "endpoint-b", credentialId: "credential-shared" },
+        { endpointId: "endpoint-other", credentialId: "credential-other" },
+      ],
+      configurations: [
+        { modelConfigId: "model-a", endpointId: "endpoint-a" },
+        { modelConfigId: "model-b", endpointId: "endpoint-b" },
+        { modelConfigId: "model-other", endpointId: "endpoint-other" },
+      ],
+      profiles: [
+        {
+          profileId: "profile-b",
+          activeRuntimeSettingsJson: { modelConfigId: "model-b" },
+        },
+        {
+          profileId: "profile-other",
+          activeRuntimeSettingsJson: { modelConfigId: "model-other" },
+        },
+        {
+          profileId: "profile-a",
+          activeRuntimeSettingsJson: {
+            profile: { modelConfigId: "model-a" },
+          },
+        },
+      ],
+    }),
+    ["profile-a", "profile-b"],
   );
 });
 

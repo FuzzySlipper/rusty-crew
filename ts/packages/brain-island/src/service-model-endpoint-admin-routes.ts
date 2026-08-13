@@ -108,6 +108,44 @@ export function normalizedModelRefreshProfileIds(input: {
     .sort();
 }
 
+export function normalizedCredentialRefreshProfileIds(input: {
+  credentialId: string;
+  endpoints: readonly Pick<
+    NativeModelEndpointRecord,
+    "endpointId" | "credentialId"
+  >[];
+  configurations: readonly Pick<
+    NativeModelConfigurationRecord,
+    "modelConfigId" | "endpointId"
+  >[];
+  profiles: readonly {
+    profileId: string;
+    activeRuntimeSettingsJson?: unknown;
+  }[];
+}): string[] {
+  const endpointIds = new Set(
+    input.endpoints
+      .filter((endpoint) => endpoint.credentialId === input.credentialId)
+      .map((endpoint) => endpoint.endpointId),
+  );
+  const modelConfigIds = new Set(
+    input.configurations
+      .filter((configuration) => endpointIds.has(configuration.endpointId))
+      .map((configuration) => configuration.modelConfigId),
+  );
+  return input.profiles
+    .filter((profile) => {
+      const settings = refreshRecord(profile.activeRuntimeSettingsJson);
+      const nested = refreshRecord(settings.profile);
+      const modelConfigId =
+        refreshString(settings.modelConfigId) ??
+        refreshString(nested.modelConfigId);
+      return modelConfigId !== undefined && modelConfigIds.has(modelConfigId);
+    })
+    .map((profile) => profile.profileId)
+    .sort();
+}
+
 function refreshRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }

@@ -264,6 +264,82 @@ test("Responses narrator host forwards the versioned Roleplay adapter context", 
   );
 });
 
+test("normalized OAuth refresh persists then fans out the shared credential revision", async () => {
+  const calls: string[] = [];
+  const bridge = {
+    startBrainRun: async (
+      input: Parameters<NativeBridgeModule["startBrainRun"]>[0],
+    ) => ({ moduleId: input.moduleId, wakeId: input.providerInput.wakeId }),
+    drainBrainRun: async () => ({
+      items: [],
+      toolRequests: [],
+      terminal: true,
+      credentialSecretUpdate: {
+        providerAlias: "credential-shared",
+        secret: "oauth-secret-v2",
+      },
+    }),
+    getServiceCredential: async () => ({
+      credentialId: "credential-shared",
+      displayName: "Shared OAuth",
+      providerKind: "openai",
+      credentialKind: "openai_oauth",
+      credential: {
+        hasSecret: true,
+        kind: "openai_oauth",
+        revision: 4,
+      },
+      linkedProviderAliases: [],
+      revision: 4,
+      createdAt: "2026-08-13T00:00:00Z",
+      updatedAt: "2026-08-13T00:00:00Z",
+    }),
+    upsertServiceCredential: async (write: { expectedRevision?: number }) => {
+      assert.equal(write.expectedRevision, 4);
+      calls.push("persist:5");
+      return {};
+    },
+  } as unknown as NativeBridgeModule;
+  const context = {
+    bridge,
+    profile: {
+      profile: {
+        profileId: "responses-oauth-profile" as ProfileId,
+        modelConfig: {
+          modelConfigId: "model-shared",
+          modelConfigRevision: 2,
+          endpointId: "endpoint-shared",
+          endpointRevision: 3,
+          credentialId: "credential-shared",
+          credentialRevision: 4,
+          credentialKind: "openai_oauth",
+          provider: "openai",
+          modelName: "gpt-test",
+          api: "responses",
+          responsesDialect: "openai_stateful",
+        },
+      },
+      skills: [],
+      toolSelection: { toolProfile: { tools: [] } },
+    },
+    onServiceCredentialUpdated: async (credentialId: string) => {
+      assert.equal(credentialId, "credential-shared");
+      calls.push("refresh:credential-shared");
+    },
+  } as unknown as BrainHostContext;
+  const brain = await createOpenAiResponsesBrainHost(context, {
+    mode: "live",
+    baseUrl: "https://example.test/v1",
+    authKind: "openai_oauth",
+    providerAlias: "credential-shared",
+    oauthCredentialSecret: "oauth-secret-v1",
+  });
+
+  await brain.wake({ ...responsesWake(), continuationState: undefined });
+
+  assert.deepEqual(calls, ["persist:5", "refresh:credential-shared"]);
+});
+
 test("missing Responses narrator metadata remains explicitly degraded", () => {
   assert.deepEqual(
     roleplayCompactionDomainContext(

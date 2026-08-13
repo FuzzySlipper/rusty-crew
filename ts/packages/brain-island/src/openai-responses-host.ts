@@ -116,6 +116,7 @@ async function persistOpenAiResponsesCredentialSecretUpdate(
       expectedRevision: credential.revision,
       now: new Date().toISOString(),
     });
+    await context.onServiceCredentialUpdated?.(credentialId);
     if (
       currentConfig.mode === "live" &&
       currentConfig.authKind === "openai_oauth"

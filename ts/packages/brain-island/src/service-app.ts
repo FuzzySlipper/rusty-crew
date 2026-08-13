@@ -124,6 +124,7 @@ import {
 } from "./service-model-provider-routes.js";
 import {
   handleModelRegistryAdminRequest,
+  normalizedCredentialRefreshProfileIds,
   normalizedModelRefreshProfileIds,
   type ModelEndpointAdminRouteContext,
 } from "./service-model-endpoint-admin-routes.js";
@@ -1146,6 +1147,11 @@ export async function createRustyCrewServiceApp(
       browserResources,
       toolMediaSink: toolMediaAttachments,
       narratorImageContextResolver: toolMediaAttachments,
+      onServiceCredentialUpdated: async (credentialId) => {
+        const state = liveState;
+        if (state === undefined) return;
+        await refreshNormalizedCredentialRuntimes(state, credentialId);
+      },
       onBrainWakeResult: (observation) => {
         const state = liveState;
         if (state === undefined) return;
@@ -2128,8 +2134,14 @@ async function handleHttpRequest(
           state.bridge.listServiceCredentials(query),
         getServiceCredential: (credentialId) =>
           state.bridge.getServiceCredential(credentialId),
-        upsertServiceCredential: (write) =>
-          state.bridge.upsertServiceCredential(write),
+        upsertServiceCredential: async (write) => {
+          const credential = await state.bridge.upsertServiceCredential(write);
+          await refreshNormalizedCredentialRuntimes(
+            state,
+            credential.credentialId,
+          );
+          return credential;
+        },
         deleteServiceCredential: (deleteRequest) =>
           state.bridge.deleteServiceCredential(deleteRequest),
         listModelProviders: (query) => state.bridge.listModelProviders(query),
@@ -2470,35 +2482,18 @@ async function refreshNormalizedCredentialRuntimes(
   credentialId: string,
 ): Promise<{ profileIds: string[] }> {
   const endpoints = await state.bridge.listModelEndpoints({ limit: 1_000 });
-  const endpointIds = new Set(
-    endpoints
-      .filter((endpoint) => endpoint.credentialId === credentialId)
-      .map((endpoint) => endpoint.endpointId),
-  );
-  const configurations = (
-    await state.bridge.listModelConfigurations({
-      limit: 1_000,
-    })
-  ).filter((configuration) => endpointIds.has(configuration.endpointId));
+  const configurations = await state.bridge.listModelConfigurations({
+    limit: 1_000,
+  });
   const profiles = await state.bridge.listProfileRegistryRecords({
     limit: 1_000,
   });
-  const modelConfigIds = new Set(
-    configurations.map((configuration) => configuration.modelConfigId),
-  );
-  const profileIds = profiles
-    .filter((profile) => {
-      const settings = isRecord(profile.activeRuntimeSettingsJson)
-        ? profile.activeRuntimeSettingsJson
-        : {};
-      const nested = isRecord(settings.profile) ? settings.profile : {};
-      const modelConfigId =
-        optionalString(settings.modelConfigId) ??
-        optionalString(nested.modelConfigId);
-      return modelConfigId !== undefined && modelConfigIds.has(modelConfigId);
-    })
-    .map((profile) => profile.profileId)
-    .sort();
+  const profileIds = normalizedCredentialRefreshProfileIds({
+    credentialId,
+    endpoints,
+    configurations,
+    profiles,
+  });
   for (const profileId of profileIds) {
     await applyServiceRuntimeRebuild(state, {
       name: "apply_runtime_rebuild",
@@ -4046,6 +4041,9 @@ async function applyServiceRuntimeConfigFromDisk(
     browserResources: state.browserResources,
     toolMediaSink: state.toolMediaAttachments,
     narratorImageContextResolver: state.toolMediaAttachments,
+    onServiceCredentialUpdated: async (credentialId) => {
+      await refreshNormalizedCredentialRuntimes(state, credentialId);
+    },
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });
@@ -4088,6 +4086,9 @@ async function rebuildServiceBrainRuntime(
     browserResources: state.browserResources,
     toolMediaSink: state.toolMediaAttachments,
     narratorImageContextResolver: state.toolMediaAttachments,
+    onServiceCredentialUpdated: async (credentialId) => {
+      await refreshNormalizedCredentialRuntimes(state, credentialId);
+    },
     onBrainWakeResult: (observation) =>
       recordResponsesWakeMetrics(state, observation),
   });

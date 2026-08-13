@@ -24,4 +24,5 @@ export interface BrainHostContext {
   providerRequestDebugStore?: ProviderRequestDebugStore;
   toolMediaSink?: BrainToolMediaSink;
   narratorImageContextResolver?: NarratorImageContextResolver;
+  onServiceCredentialUpdated?: (credentialId: string) => Promise<void>;
 }
