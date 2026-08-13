@@ -30,7 +30,9 @@ brain must be compatible with the protocol or registration fails.
 OAuth provider flow and `openrouter` enables guarded Anthropic prompt caching.
 The other values are routing/diagnostic labels retained for existing
 configurations. The admin API rejects unrecognized values rather than silently
-accepting an ambiguous free-form label.
+accepting an ambiguous free-form label on create or update. Read responses keep
+`providerKind` open as a string so historical records with earlier free-form
+values remain visible and can be migrated through the admin API.
 
 Current green paths are:
 

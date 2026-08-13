@@ -56,6 +56,18 @@ assert.deepEqual(schema("ModelProviderProtocol").enum, [
 assert.deepEqual(schema("ModelProviderKind").enum, [
   ...MODEL_PROVIDER_KIND_VALUES,
 ]);
+assert.deepEqual(schema("ModelProviderWrite").properties?.providerKind, {
+  $ref: "#/components/schemas/ModelProviderKind",
+  default: "custom",
+});
+assert.equal(
+  schema("ModelProviderRecord").properties?.providerKind?.type,
+  "string",
+);
+assert.equal(
+  schema("ModelProviderRecord").properties?.providerKind?.$ref,
+  undefined,
+);
 assert.deepEqual(schema("ChatCompletionsDialect").enum, [
   ...CHAT_COMPLETIONS_DIALECT_VALUES,
 ]);

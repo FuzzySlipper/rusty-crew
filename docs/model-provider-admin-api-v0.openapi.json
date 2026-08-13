@@ -1407,7 +1407,8 @@
             "$ref": "#/components/schemas/ModelProviderProtocol"
           },
           "providerKind": {
-            "$ref": "#/components/schemas/ModelProviderKind"
+            "type": "string",
+            "description": "Provider classification read from persistence. New writes are restricted to ModelProviderKind, but reads remain open so legacy records with historical classifications can be listed and retrieved for migration."
           },
           "displayName": {
             "type": "string"

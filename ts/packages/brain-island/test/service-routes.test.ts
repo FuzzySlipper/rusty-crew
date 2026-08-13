@@ -1246,6 +1246,7 @@ test("model provider admin routes list, project records, and report revision con
   const context = modelProviderRouteContext([
     modelProviderRecord({
       alias: "deepseek-flash",
+      providerKind: "legacy-certification",
       temperatureMilli: 500,
       revision: 2,
     }),
@@ -1283,7 +1284,21 @@ test("model provider admin routes list, project records, and report revision con
   assert.equal(listData.limit, 5);
   assert.equal(listData.offset, 1);
   assert.equal(listData.items[0]?.alias, "deepseek-flash");
+  assert.equal(listData.items[0]?.providerKind, "legacy-certification");
   assert.equal(listData.items[0]?.temperature, 0.5);
+
+  const fetched = await handleModelProviderAdminRequest(
+    {
+      method: "GET",
+      url: "http://local/v1/admin/model-providers/deepseek-flash",
+      requestId: "req-model-provider",
+    },
+    context,
+  );
+  const fetchedData = okData<
+    NativeModelProviderRecord & { temperature?: number }
+  >(fetched);
+  assert.equal(fetchedData.providerKind, "legacy-certification");
 
   const conflict = await handleModelProviderAdminRequest(
     {
