@@ -2118,6 +2118,15 @@ errors = "core_protocol::CoreError"
 summary = "Read one normalized model transport endpoint by stable id."
 
 [[operation]]
+name = "delete_model_endpoint"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelEndpointDelete"
+output = "core_protocol::ModelEndpointRecord"
+errors = "core_protocol::CoreError"
+summary = "Hard-delete an unreferenced normalized model endpoint with revision fencing."
+
+[[operation]]
 name = "upsert_model_configuration"
 surface = "stable"
 direction = "ts_to_rust"
@@ -2143,6 +2152,15 @@ input = "model_config_id: String"
 output = "Option<core_protocol::ModelConfigurationRecord>"
 errors = "core_protocol::CoreError"
 summary = "Read one normalized model configuration by stable id."
+
+[[operation]]
+name = "delete_model_configuration"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelConfigurationDelete"
+output = "core_protocol::ModelConfigurationRecord"
+errors = "core_protocol::CoreError"
+summary = "Hard-delete an unreferenced normalized model configuration with revision fencing."
 
 [[operation]]
 name = "list_model_providers"

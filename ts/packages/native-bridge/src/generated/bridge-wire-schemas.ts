@@ -5820,6 +5820,12 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "endpointId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "kind": {
             "enum": [
               "dispatch",
@@ -5836,6 +5842,12 @@ export const bridgeWireSchemaArtifact = {
             "type": "string"
           },
           "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modelConfigId": {
             "type": [
               "string",
               "null"
@@ -25408,6 +25420,12 @@ export const bridgeWireSchemaArtifact = {
                       "null"
                     ]
                   },
+                  "endpointId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "kind": {
                     "enum": [
                       "dispatch",
@@ -25424,6 +25442,12 @@ export const bridgeWireSchemaArtifact = {
                     "type": "string"
                   },
                   "model": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "modelConfigId": {
                     "type": [
                       "string",
                       "null"
@@ -25622,6 +25646,12 @@ export const bridgeWireSchemaArtifact = {
                       "null"
                     ]
                   },
+                  "endpointId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "kind": {
                     "enum": [
                       "dispatch",
@@ -25638,6 +25668,12 @@ export const bridgeWireSchemaArtifact = {
                     "type": "string"
                   },
                   "model": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "modelConfigId": {
                     "type": [
                       "string",
                       "null"
@@ -25836,6 +25872,12 @@ export const bridgeWireSchemaArtifact = {
             "null"
           ]
         },
+        "endpointId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "kind": {
           "enum": [
             "dispatch",
@@ -25852,6 +25894,12 @@ export const bridgeWireSchemaArtifact = {
           "type": "string"
         },
         "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "modelConfigId": {
           "type": [
             "string",
             "null"

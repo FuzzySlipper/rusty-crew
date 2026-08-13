@@ -1660,6 +1660,17 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn delete_model_endpoint(
+        &self,
+        delete: &ModelEndpointDelete,
+    ) -> CoreResult<ModelEndpointRecord> {
+        match self {
+            Self::Sqlite(store) => store.delete_model_endpoint(delete),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.delete_model_endpoint(delete),
+        }
+    }
+
     pub fn upsert_model_configuration(
         &self,
         write: &ModelConfigurationWrite,
@@ -1690,6 +1701,17 @@ impl CoreCoordinationStore {
             Self::Sqlite(store) => store.list_model_configurations(query),
             #[cfg(feature = "postgres")]
             Self::Postgres(store) => store.list_model_configurations(query),
+        }
+    }
+
+    pub fn delete_model_configuration(
+        &self,
+        delete: &ModelConfigurationDelete,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        match self {
+            Self::Sqlite(store) => store.delete_model_configuration(delete),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.delete_model_configuration(delete),
         }
     }
 
@@ -3642,6 +3664,13 @@ impl ServiceDataRepositorySet<'_> {
         self.store.list_model_endpoints(query)
     }
 
+    pub fn delete_model_endpoint(
+        &self,
+        delete: &ModelEndpointDelete,
+    ) -> CoreResult<ModelEndpointRecord> {
+        self.store.delete_model_endpoint(delete)
+    }
+
     pub fn upsert_model_configuration(
         &self,
         write: &ModelConfigurationWrite,
@@ -3661,6 +3690,13 @@ impl ServiceDataRepositorySet<'_> {
         query: &ModelConfigurationQuery,
     ) -> CoreResult<Vec<ModelConfigurationRecord>> {
         self.store.list_model_configurations(query)
+    }
+
+    pub fn delete_model_configuration(
+        &self,
+        delete: &ModelConfigurationDelete,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        self.store.delete_model_configuration(delete)
     }
 
     pub fn upsert_model_provider(

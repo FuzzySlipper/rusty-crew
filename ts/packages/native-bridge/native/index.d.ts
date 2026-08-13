@@ -44,9 +44,11 @@ export declare class NativeBridgeBinding {
   upsertModelEndpointJson(writeJson: string): string
   listModelEndpointsJson(queryJson: string): string
   getModelEndpointJson(endpointId: string): string
+  deleteModelEndpointJson(deleteJson: string): string
   upsertModelConfigurationJson(writeJson: string): string
   listModelConfigurationsJson(queryJson: string): string
   getModelConfigurationJson(modelConfigId: string): string
+  deleteModelConfigurationJson(deleteJson: string): string
   upsertModelProviderJson(writeJson: string): string
   listModelProvidersJson(queryJson: string): string
   getModelProviderJson(alias: string): string

@@ -199,6 +199,57 @@
             "$ref": "#/components/responses/ModelEndpointRevisionConflictEnvelope"
           }
         }
+      },
+      "delete": {
+        "operationId": "deleteModelEndpoint",
+        "summary": "Permanently delete an unused normalized model endpoint",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/EndpointId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NormalizedModelDeleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted normalized model endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelEndpointWriteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
       }
     },
     "/v1/admin/model-configurations": {
@@ -389,6 +440,57 @@
           },
           "409": {
             "$ref": "#/components/responses/ModelConfigurationRevisionConflictEnvelope"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteModelConfiguration",
+        "summary": "Permanently delete an unused normalized model configuration",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ModelConfigId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NormalizedModelDeleteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deleted normalized model configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelConfigurationWriteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/responses/ErrorEnvelope"
           }
         }
       }
@@ -1911,6 +2013,19 @@
         },
         "additionalProperties": false
       },
+      "NormalizedModelDeleteRequest": {
+        "type": "object",
+        "required": [
+          "expectedRevision"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
       "ModelEndpointPatch": {
         "type": "object",
         "properties": {
@@ -2351,6 +2466,8 @@
           "model_configuration_not_found",
           "model_endpoint_revision_mismatch",
           "model_configuration_revision_mismatch",
+          "model_endpoint_in_use",
+          "model_configuration_in_use",
           "model_endpoint_admin_method_not_allowed"
         ]
       },

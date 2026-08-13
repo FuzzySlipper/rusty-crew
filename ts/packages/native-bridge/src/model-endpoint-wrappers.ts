@@ -10,8 +10,10 @@ import type { NativeBridgeModule } from "./public-api.js";
 import {
   toNativeModelConfigurationRecord,
   toNativeModelEndpointRecord,
+  toRawModelConfigurationDelete,
   toRawModelConfigurationQuery,
   toRawModelConfigurationWrite,
+  toRawModelEndpointDelete,
   toRawModelEndpointQuery,
   toRawModelEndpointWrite,
   type RawModelConfigurationRecord,
@@ -22,9 +24,11 @@ export interface NormalizedModelNativeBridgeBinding {
   upsertModelEndpointJson(writeJson: string): string;
   listModelEndpointsJson(queryJson: string): string;
   getModelEndpointJson(endpointId: string): string;
+  deleteModelEndpointJson(deleteJson: string): string;
   upsertModelConfigurationJson(writeJson: string): string;
   listModelConfigurationsJson(queryJson: string): string;
   getModelConfigurationJson(modelConfigId: string): string;
+  deleteModelConfigurationJson(deleteJson: string): string;
 }
 
 export type NativeBridgeBindingWithNormalizedModelMethods =
@@ -34,9 +38,11 @@ type NormalizedModelMethodName =
   | "upsertModelEndpoint"
   | "listModelEndpoints"
   | "getModelEndpoint"
+  | "deleteModelEndpoint"
   | "upsertModelConfiguration"
   | "listModelConfigurations"
-  | "getModelConfiguration";
+  | "getModelConfiguration"
+  | "deleteModelConfiguration";
 
 export function createNativeBridgeNormalizedModelMethods(
   binding: NativeBridgeBindingWithNormalizedModelMethods,
@@ -81,6 +87,19 @@ export function createNativeBridgeNormalizedModelMethods(
           )
         : undefined;
     },
+    deleteModelEndpoint: async (deleteRequest) =>
+      toNativeModelEndpointRecord(
+        validateBridgeValue<RawModelEndpointRecord>({
+          operation: "delete_model_endpoint",
+          direction: "rust_to_ts",
+          schema: rawModelEndpointRecordSchema,
+          value: JSON.parse(
+            binding.deleteModelEndpointJson(
+              JSON.stringify(toRawModelEndpointDelete(deleteRequest)),
+            ),
+          ),
+        }),
+      ),
     upsertModelConfiguration: async (write) =>
       toNativeModelConfigurationRecord(
         validateBridgeValue<RawModelConfigurationRecord>({
@@ -120,5 +139,18 @@ export function createNativeBridgeNormalizedModelMethods(
           )
         : undefined;
     },
+    deleteModelConfiguration: async (deleteRequest) =>
+      toNativeModelConfigurationRecord(
+        validateBridgeValue<RawModelConfigurationRecord>({
+          operation: "delete_model_configuration",
+          direction: "rust_to_ts",
+          schema: rawModelConfigurationRecordSchema,
+          value: JSON.parse(
+            binding.deleteModelConfigurationJson(
+              JSON.stringify(toRawModelConfigurationDelete(deleteRequest)),
+            ),
+          ),
+        }),
+      ),
   };
 }

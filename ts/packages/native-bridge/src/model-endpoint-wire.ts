@@ -1,9 +1,11 @@
 import type {
   NativeModelCapabilities,
   NativeModelConfigurationQuery,
+  NativeModelConfigurationDelete,
   NativeModelConfigurationRecord,
   NativeModelConfigurationWrite,
   NativeModelEndpointQuery,
+  NativeModelEndpointDelete,
   NativeModelEndpointRecord,
   NativeModelEndpointWrite,
 } from "./model-endpoint-public-api.js";
@@ -53,6 +55,11 @@ export interface RawModelEndpointQuery {
   status?: NativeModelEndpointQuery["status"];
   limit?: number;
   offset?: number;
+}
+
+export interface RawModelEndpointDelete {
+  endpoint_id: string;
+  expected_revision: number;
 }
 
 export interface RawModelConfigurationRecord {
@@ -108,6 +115,29 @@ export interface RawModelConfigurationQuery {
   status?: NativeModelConfigurationQuery["status"];
   limit?: number;
   offset?: number;
+}
+
+export interface RawModelConfigurationDelete {
+  model_config_id: string;
+  expected_revision: number;
+}
+
+export function toRawModelEndpointDelete(
+  deleteRequest: NativeModelEndpointDelete,
+): RawModelEndpointDelete {
+  return {
+    endpoint_id: deleteRequest.endpointId,
+    expected_revision: deleteRequest.expectedRevision,
+  };
+}
+
+export function toRawModelConfigurationDelete(
+  deleteRequest: NativeModelConfigurationDelete,
+): RawModelConfigurationDelete {
+  return {
+    model_config_id: deleteRequest.modelConfigId,
+    expected_revision: deleteRequest.expectedRevision,
+  };
 }
 
 function toNativeModelCapabilities(

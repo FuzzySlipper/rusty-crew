@@ -2034,7 +2034,7 @@ async function handleHttpRequest(
   if (route?.id === "admin.model_registry") {
     const method = (request.method ?? "GET").toUpperCase();
     const body =
-      method === "POST" || method === "PATCH"
+      method === "POST" || method === "PATCH" || method === "DELETE"
         ? await readJsonBody(request)
         : undefined;
     const normalizedModelBridge = state.bridge as NativeBridgeModule &
@@ -2043,9 +2043,11 @@ async function handleHttpRequest(
         | "upsertModelEndpoint"
         | "listModelEndpoints"
         | "getModelEndpoint"
+        | "deleteModelEndpoint"
         | "upsertModelConfiguration"
         | "listModelConfigurations"
         | "getModelConfiguration"
+        | "deleteModelConfiguration"
       >;
     return handleModelRegistryAdminRequest(
       {
@@ -2061,12 +2063,16 @@ async function handleHttpRequest(
           normalizedModelBridge.listModelEndpoints(query),
         getModelEndpoint: (endpointId) =>
           normalizedModelBridge.getModelEndpoint(endpointId),
+        deleteModelEndpoint: (deleteRequest) =>
+          normalizedModelBridge.deleteModelEndpoint(deleteRequest),
         upsertModelConfiguration: (write) =>
           normalizedModelBridge.upsertModelConfiguration(write),
         listModelConfigurations: (query) =>
           normalizedModelBridge.listModelConfigurations(query),
         getModelConfiguration: (modelConfigId) =>
           normalizedModelBridge.getModelConfiguration(modelConfigId),
+        deleteModelConfiguration: (deleteRequest) =>
+          normalizedModelBridge.deleteModelConfiguration(deleteRequest),
         refreshAfterWrite: (input) =>
           refreshNormalizedModelRuntimes(state, input),
         now: state.now,

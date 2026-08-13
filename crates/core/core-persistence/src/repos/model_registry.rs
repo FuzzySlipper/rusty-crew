@@ -280,6 +280,60 @@ impl CoordinationStore {
             .map_err(|error| persistence_error("load model endpoints", error))
     }
 
+    pub fn delete_model_endpoint(
+        &self,
+        delete: &ModelEndpointDelete,
+    ) -> CoreResult<ModelEndpointRecord> {
+        delete.validate()?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start model endpoint delete", error))?;
+        let existing = get_model_endpoint_in_conn(&tx, &delete.endpoint_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("model endpoint {} not found", delete.endpoint_id),
+            )
+        })?;
+        validate_registry_revision(
+            "model endpoint",
+            &delete.endpoint_id,
+            Some(delete.expected_revision),
+            Some(existing.revision),
+        )?;
+        let configuration_count: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM model_configurations WHERE endpoint_id=?1",
+                params![delete.endpoint_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| persistence_error("count endpoint model configurations", error))?;
+        if configuration_count != 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "model endpoint {} is still referenced by {configuration_count} model configuration(s)",
+                    delete.endpoint_id
+                ),
+            ));
+        }
+        let changed = tx
+            .execute(
+                "DELETE FROM model_endpoints WHERE endpoint_id=?1 AND revision=?2",
+                params![delete.endpoint_id, delete.expected_revision as i64],
+            )
+            .map_err(|error| persistence_error("delete model endpoint", error))?;
+        if changed != 1 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!("model endpoint {} changed concurrently", delete.endpoint_id),
+            ));
+        }
+        tx.commit()
+            .map_err(|error| persistence_error("commit model endpoint delete", error))?;
+        Ok(existing)
+    }
+
     pub fn upsert_model_configuration(
         &self,
         write: &ModelConfigurationWrite,
@@ -378,6 +432,53 @@ impl CoordinationStore {
             .map_err(|error| persistence_error("query model configurations", error))?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|error| persistence_error("load model configurations", error))
+    }
+
+    pub fn delete_model_configuration(
+        &self,
+        delete: &ModelConfigurationDelete,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        delete.validate()?;
+        let mut conn = self.conn()?;
+        let tx = conn
+            .transaction()
+            .map_err(|error| persistence_error("start model configuration delete", error))?;
+        let existing =
+            get_model_configuration_in_conn(&tx, &delete.model_config_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("model configuration {} not found", delete.model_config_id),
+                )
+            })?;
+        validate_registry_revision(
+            "model configuration",
+            &delete.model_config_id,
+            Some(delete.expected_revision),
+            Some(existing.revision),
+        )?;
+        let changed = tx
+            .execute(
+                "DELETE FROM model_configurations WHERE model_config_id=?1 AND revision=?2",
+                params![delete.model_config_id, delete.expected_revision as i64],
+            )
+            .map_err(|error| persistence_error("delete model configuration", error))?;
+        if changed != 1 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "model configuration {} changed concurrently",
+                    delete.model_config_id
+                ),
+            ));
+        }
+        tx.execute(
+            "DELETE FROM model_providers WHERE alias=?1",
+            params![delete.model_config_id],
+        )
+        .map_err(|error| persistence_error("delete legacy model provider shadow", error))?;
+        tx.commit()
+            .map_err(|error| persistence_error("commit model configuration delete", error))?;
+        Ok(existing)
     }
 
     pub fn backfill_legacy_model_registry(
@@ -1537,6 +1638,63 @@ mod tests {
             legacy_id_mappings: Vec::new(),
             profile_asset_refs: Vec::new(),
         }
+    }
+
+    #[test]
+    fn normalized_model_deletes_require_current_revisions_and_no_dependents() {
+        let (store, path) = store();
+        let endpoint = store
+            .upsert_model_endpoint(&endpoint("shared", None))
+            .unwrap();
+        let configuration = store
+            .upsert_model_configuration(&configuration("model-a", "shared"))
+            .unwrap();
+
+        let in_use = store
+            .delete_model_endpoint(&ModelEndpointDelete {
+                endpoint_id: endpoint.endpoint_id.clone(),
+                expected_revision: endpoint.revision,
+            })
+            .unwrap_err();
+        assert_eq!(in_use.kind, CoreErrorKind::ActionRejected);
+
+        let stale = store
+            .delete_model_configuration(&ModelConfigurationDelete {
+                model_config_id: configuration.model_config_id.clone(),
+                expected_revision: configuration.revision + 1,
+            })
+            .unwrap_err();
+        assert_eq!(stale.kind, CoreErrorKind::ActionRejected);
+        assert!(stale.message.contains("revision mismatch"));
+
+        store
+            .delete_model_configuration(&ModelConfigurationDelete {
+                model_config_id: configuration.model_config_id.clone(),
+                expected_revision: configuration.revision,
+            })
+            .unwrap();
+        assert!(store
+            .get_model_configuration(&configuration.model_config_id)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .get_model_provider(&configuration.model_config_id)
+            .unwrap()
+            .is_none());
+
+        store
+            .delete_model_endpoint(&ModelEndpointDelete {
+                endpoint_id: endpoint.endpoint_id.clone(),
+                expected_revision: endpoint.revision,
+            })
+            .unwrap();
+        assert!(store
+            .get_model_endpoint(&endpoint.endpoint_id)
+            .unwrap()
+            .is_none());
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

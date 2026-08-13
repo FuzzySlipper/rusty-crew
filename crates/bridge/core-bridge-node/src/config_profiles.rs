@@ -157,6 +157,13 @@ impl NativeBridge {
         self.engine()?.list_model_endpoints(query)
     }
 
+    pub fn delete_model_endpoint(
+        &self,
+        delete: &ModelEndpointDelete,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ModelEndpointRecord> {
+        self.engine()?.delete_model_endpoint(delete)
+    }
+
     pub fn upsert_model_configuration(
         &self,
         write: &ModelConfigurationWrite,
@@ -176,6 +183,13 @@ impl NativeBridge {
         query: &ModelConfigurationQuery,
     ) -> CoreResult<Vec<rusty_crew_core_bridge_api::ModelConfigurationRecord>> {
         self.engine()?.list_model_configurations(query)
+    }
+
+    pub fn delete_model_configuration(
+        &self,
+        delete: &ModelConfigurationDelete,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ModelConfigurationRecord> {
+        self.engine()?.delete_model_configuration(delete)
     }
 
     pub fn upsert_model_provider(

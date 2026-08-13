@@ -1922,6 +1922,12 @@ pub struct ModelEndpointWrite {
     pub now: IsoTimestamp,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointDelete {
+    pub endpoint_id: String,
+    pub expected_revision: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct ModelEndpointQuery {
     pub endpoint_id: Option<String>,
@@ -1964,6 +1970,12 @@ impl ModelEndpointWrite {
             &self.metadata_json,
         )?;
         validate_timestamp("model endpoint now", &self.now)
+    }
+}
+
+impl ModelEndpointDelete {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_normalized_id("model endpoint endpoint_id", &self.endpoint_id)
     }
 }
 
@@ -2033,6 +2045,12 @@ pub struct ModelConfigurationWrite {
     pub metadata_json: Value,
     pub expected_revision: Option<u64>,
     pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelConfigurationDelete {
+    pub model_config_id: String,
+    pub expected_revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
@@ -2122,6 +2140,12 @@ impl ModelConfigurationWrite {
             self.thinking_mode,
             self.prompt_caching_policy,
         )
+    }
+}
+
+impl ModelConfigurationDelete {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_normalized_id("model configuration model_config_id", &self.model_config_id)
     }
 }
 

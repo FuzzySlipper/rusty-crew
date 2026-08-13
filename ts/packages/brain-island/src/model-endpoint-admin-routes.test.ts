@@ -13,9 +13,11 @@ import {
 } from "./service-model-endpoint-admin-routes.js";
 import type {
   NativeModelConfigurationQuery,
+  NativeModelConfigurationDelete,
   NativeModelConfigurationRecord,
   NativeModelConfigurationWrite,
   NativeModelEndpointQuery,
+  NativeModelEndpointDelete,
   NativeModelEndpointRecord,
   NativeModelEndpointWrite,
 } from "./model-endpoint-admin-contract.js";
@@ -320,6 +322,30 @@ class MemoryModelRegistry implements ModelEndpointAdminRouteContext {
     return this.endpoints.get(endpointId);
   }
 
+  async deleteModelEndpoint(
+    deleteRequest: NativeModelEndpointDelete,
+  ): Promise<NativeModelEndpointRecord> {
+    const current = this.endpoints.get(deleteRequest.endpointId);
+    if (current === undefined) {
+      throw new Error(`model endpoint ${deleteRequest.endpointId} not found`);
+    }
+    if (current.revision !== deleteRequest.expectedRevision) {
+      throw new Error(
+        `model endpoint ${deleteRequest.endpointId} revision mismatch: expected ${deleteRequest.expectedRevision}, found ${current.revision}`,
+      );
+    }
+    const references = [...this.configurations.values()].filter(
+      (configuration) => configuration.endpointId === deleteRequest.endpointId,
+    );
+    if (references.length > 0) {
+      throw new Error(
+        `model endpoint ${deleteRequest.endpointId} is still referenced by ${references.length} model configuration(s)`,
+      );
+    }
+    this.endpoints.delete(deleteRequest.endpointId);
+    return current;
+  }
+
   async upsertModelConfiguration(
     write: NativeModelConfigurationWrite,
   ): Promise<NativeModelConfigurationRecord> {
@@ -394,6 +420,24 @@ class MemoryModelRegistry implements ModelEndpointAdminRouteContext {
     modelConfigId: string,
   ): Promise<NativeModelConfigurationRecord | undefined> {
     return this.configurations.get(modelConfigId);
+  }
+
+  async deleteModelConfiguration(
+    deleteRequest: NativeModelConfigurationDelete,
+  ): Promise<NativeModelConfigurationRecord> {
+    const current = this.configurations.get(deleteRequest.modelConfigId);
+    if (current === undefined) {
+      throw new Error(
+        `model configuration ${deleteRequest.modelConfigId} not found`,
+      );
+    }
+    if (current.revision !== deleteRequest.expectedRevision) {
+      throw new Error(
+        `model configuration ${deleteRequest.modelConfigId} revision mismatch: expected ${deleteRequest.expectedRevision}, found ${current.revision}`,
+      );
+    }
+    this.configurations.delete(deleteRequest.modelConfigId);
+    return current;
   }
 
   forceEndpointRevision(endpointId: string, revision: number): void {
@@ -547,6 +591,45 @@ test("normalized model endpoint and configuration CRUD keeps the public shape cl
     } as NativeModelConfigurationRecord & Record<string, unknown>),
     configuration,
   );
+
+  const endpointInUse = await handleModelRegistryAdminRequest(
+    request("DELETE", "/v1/admin/model-endpoints/openai-main", {
+      expectedRevision: 2,
+    }),
+    context,
+  );
+  assert.equal(endpointInUse.status, 409);
+  assert.equal(
+    responseError(endpointInUse).reason_code,
+    "model_endpoint_in_use",
+  );
+
+  const configurationDelete = await handleModelRegistryAdminRequest(
+    request("DELETE", "/v1/admin/model-configurations/gpt-main", {
+      expectedRevision: 2,
+    }),
+    context,
+  );
+  assert.equal(
+    responseData<{ configuration: NativeModelConfigurationRecord }>(
+      configurationDelete,
+    ).configuration.modelConfigId,
+    "gpt-main",
+  );
+
+  const endpointDelete = await handleModelRegistryAdminRequest(
+    request("DELETE", "/v1/admin/model-endpoints/openai-main", {
+      expectedRevision: 2,
+    }),
+    context,
+  );
+  assert.equal(
+    responseData<{ endpoint: NativeModelEndpointRecord }>(endpointDelete)
+      .endpoint.endpointId,
+    "openai-main",
+  );
+  assert.equal(context.configurations.size, 0);
+  assert.equal(context.endpoints.size, 0);
 });
 
 test("normalized model registry rejects closed-enum and legacy secret fields", async () => {

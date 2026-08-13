@@ -285,6 +285,65 @@ impl PostgresBackendStore {
             .collect()
     }
 
+    pub fn delete_model_endpoint(
+        &self,
+        delete: &ModelEndpointDelete,
+    ) -> CoreResult<ModelEndpointRecord> {
+        delete.validate()?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client
+            .transaction()
+            .map_err(|error| postgres_error("start PostgreSQL model endpoint delete", error))?;
+        let existing = get_endpoint(&mut tx, &schema, &delete.endpoint_id)?.ok_or_else(|| {
+            CoreError::new(
+                CoreErrorKind::NotFound,
+                format!("model endpoint {} not found", delete.endpoint_id),
+            )
+        })?;
+        validate_revision(
+            "model endpoint",
+            &delete.endpoint_id,
+            Some(delete.expected_revision),
+            Some(existing.revision),
+        )?;
+        let configuration_count: i64 = tx
+            .query_one(
+                &format!("SELECT COUNT(*) FROM {schema}.model_configurations WHERE endpoint_id=$1"),
+                &[&delete.endpoint_id],
+            )
+            .map_err(|error| {
+                postgres_error("count PostgreSQL endpoint model configurations", error)
+            })?
+            .get(0);
+        if configuration_count != 0 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "model endpoint {} is still referenced by {configuration_count} model configuration(s)",
+                    delete.endpoint_id
+                ),
+            ));
+        }
+        let changed = tx
+            .execute(
+                &format!(
+                    "DELETE FROM {schema}.model_endpoints WHERE endpoint_id=$1 AND revision=$2"
+                ),
+                &[&delete.endpoint_id, &(delete.expected_revision as i64)],
+            )
+            .map_err(|error| postgres_error("delete PostgreSQL model endpoint", error))?;
+        if changed != 1 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!("model endpoint {} changed concurrently", delete.endpoint_id),
+            ));
+        }
+        tx.commit()
+            .map_err(|error| postgres_error("commit PostgreSQL model endpoint delete", error))?;
+        Ok(existing)
+    }
+
     pub fn upsert_model_configuration(
         &self,
         write: &ModelConfigurationWrite,
@@ -409,6 +468,57 @@ impl PostgresBackendStore {
             .iter()
             .map(|row| parse_json(row.get::<_, String>(0), "model configuration record_json"))
             .collect()
+    }
+
+    pub fn delete_model_configuration(
+        &self,
+        delete: &ModelConfigurationDelete,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        delete.validate()?;
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL model configuration delete", error)
+        })?;
+        let existing =
+            get_configuration(&mut tx, &schema, &delete.model_config_id)?.ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    format!("model configuration {} not found", delete.model_config_id),
+                )
+            })?;
+        validate_revision(
+            "model configuration",
+            &delete.model_config_id,
+            Some(delete.expected_revision),
+            Some(existing.revision),
+        )?;
+        let changed = tx
+            .execute(
+                &format!(
+                    "DELETE FROM {schema}.model_configurations WHERE model_config_id=$1 AND revision=$2"
+                ),
+                &[&delete.model_config_id, &(delete.expected_revision as i64)],
+            )
+            .map_err(|error| postgres_error("delete PostgreSQL model configuration", error))?;
+        if changed != 1 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!(
+                    "model configuration {} changed concurrently",
+                    delete.model_config_id
+                ),
+            ));
+        }
+        tx.execute(
+            &format!("DELETE FROM {schema}.model_providers WHERE alias=$1"),
+            &[&delete.model_config_id],
+        )
+        .map_err(|error| postgres_error("delete PostgreSQL legacy model provider shadow", error))?;
+        tx.commit().map_err(|error| {
+            postgres_error("commit PostgreSQL model configuration delete", error)
+        })?;
+        Ok(existing)
     }
 
     pub fn backfill_legacy_model_registry(

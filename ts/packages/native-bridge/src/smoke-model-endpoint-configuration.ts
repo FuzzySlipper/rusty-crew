@@ -69,6 +69,13 @@ const binding: NormalizedModelNativeBridgeBinding = {
   getModelEndpointJson(endpointId) {
     return endpointId === "missing" ? "null" : JSON.stringify(endpointRecord);
   },
+  deleteModelEndpointJson(inputJson) {
+    assert.deepEqual(parsedInput(inputJson), {
+      endpoint_id: "endpoint-openai",
+      expected_revision: 3,
+    });
+    return JSON.stringify(endpointRecord);
+  },
   upsertModelConfigurationJson(inputJson) {
     const input = parsedInput(inputJson);
     assert.equal(input.model_config_id, "config-gpt-5");
@@ -90,6 +97,13 @@ const binding: NormalizedModelNativeBridgeBinding = {
     return modelConfigId === "missing"
       ? "null"
       : JSON.stringify(configurationRecord);
+  },
+  deleteModelConfigurationJson(inputJson) {
+    assert.deepEqual(parsedInput(inputJson), {
+      model_config_id: "config-gpt-5",
+      expected_revision: 2,
+    });
+    return JSON.stringify(configurationRecord);
   },
 };
 
@@ -116,6 +130,15 @@ const endpoints = await methods.listModelEndpoints({
 });
 assert.equal(endpoints.length, 1);
 assert.equal(await methods.getModelEndpoint("missing"), undefined);
+assert.equal(
+  (
+    await methods.deleteModelEndpoint({
+      endpointId: "endpoint-openai",
+      expectedRevision: 3,
+    })
+  ).endpointId,
+  "endpoint-openai",
+);
 
 const configuration = await methods.upsertModelConfiguration({
   modelConfigId: "config-gpt-5",
@@ -134,5 +157,14 @@ const configurations = await methods.listModelConfigurations({
 });
 assert.equal(configurations.length, 1);
 assert.equal(await methods.getModelConfiguration("missing"), undefined);
+assert.equal(
+  (
+    await methods.deleteModelConfiguration({
+      modelConfigId: "config-gpt-5",
+      expectedRevision: 2,
+    })
+  ).modelConfigId,
+  "config-gpt-5",
+);
 
 console.log("normalized model endpoint/configuration bridge smoke passed");

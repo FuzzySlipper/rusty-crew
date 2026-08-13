@@ -302,6 +302,16 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn delete_model_endpoint_json(&self, delete_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let delete = parse_json::<ModelEndpointDelete>(&delete_json, "model endpoint delete")?;
+        let record = bridge
+            .delete_model_endpoint(&delete)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "deleted model endpoint record")
+    }
+
+    #[napi]
     pub fn upsert_model_configuration_json(&self, write_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write =
@@ -330,6 +340,17 @@ impl NativeBridgeBinding {
             .get_model_configuration(&model_config_id)
             .map_err(to_napi_error)?;
         serialize_json(&record, "model configuration record")
+    }
+
+    #[napi]
+    pub fn delete_model_configuration_json(&self, delete_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let delete =
+            parse_json::<ModelConfigurationDelete>(&delete_json, "model configuration delete")?;
+        let record = bridge
+            .delete_model_configuration(&delete)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "deleted model configuration record")
     }
 
     #[napi]

@@ -28,9 +28,11 @@ import {
   type ModelEndpointStatus,
   type ModelEndpointWireDialect,
   type NativeModelConfigurationQuery,
+  type NativeModelConfigurationDelete,
   type NativeModelConfigurationRecord,
   type NativeModelConfigurationWrite,
   type NativeModelEndpointQuery,
+  type NativeModelEndpointDelete,
   type NativeModelEndpointRecord,
   type NativeModelEndpointWrite,
 } from "./model-endpoint-admin-contract.js";
@@ -44,7 +46,7 @@ export interface ModelEndpointAdminRouteRequest {
 }
 
 /**
- * This is deliberately the six-method native bridge seam. The generated
+ * This is deliberately the normalized model native bridge seam. The generated
  * native package owns the concrete declarations; keeping the route context
  * narrow lets the HTTP surface compile while that generated surface changes
  * in lockstep with the Rust bridge manifest.
@@ -59,6 +61,9 @@ export interface ModelEndpointAdminRouteContext {
   getModelEndpoint(
     endpointId: string,
   ): Promise<NativeModelEndpointRecord | undefined>;
+  deleteModelEndpoint(
+    deleteRequest: NativeModelEndpointDelete,
+  ): Promise<NativeModelEndpointRecord>;
   upsertModelConfiguration(
     write: NativeModelConfigurationWrite,
   ): Promise<NativeModelConfigurationRecord>;
@@ -68,6 +73,9 @@ export interface ModelEndpointAdminRouteContext {
   getModelConfiguration(
     modelConfigId: string,
   ): Promise<NativeModelConfigurationRecord | undefined>;
+  deleteModelConfiguration(
+    deleteRequest: NativeModelConfigurationDelete,
+  ): Promise<NativeModelConfigurationRecord>;
   refreshAfterWrite?(input: {
     kind: "endpoint" | "configuration";
     id: string;
@@ -238,6 +246,9 @@ export async function handleModelEndpointAdminRequest(
     }
     return endpointWrite(request, context, endpointId, existing);
   }
+  if (method === "DELETE" && endpointId !== undefined) {
+    return endpointDelete(request, endpointId, context);
+  }
   return methodNotAllowed(request.requestId);
 }
 
@@ -292,6 +303,9 @@ export async function handleModelConfigurationAdminRequest(
       );
     }
     return configurationWrite(request, context, modelConfigId, existing);
+  }
+  if (method === "DELETE" && modelConfigId !== undefined) {
+    return configurationDelete(request, modelConfigId, context);
   }
   return methodNotAllowed(request.requestId);
 }
@@ -520,6 +534,139 @@ async function configurationWrite(
           : modelConfigurationApiRecord(current),
         "configuration",
       );
+    }
+    return bridgeFailure(
+      request.requestId,
+      MODEL_ENDPOINT_ADMIN_REASON_CODES.invalidConfiguration,
+      error,
+    );
+  }
+}
+
+async function endpointDelete(
+  request: ModelEndpointAdminRouteRequest,
+  endpointId: string,
+  context: ModelEndpointAdminRouteContext,
+): Promise<AdminRouteResult> {
+  const existing = await context.getModelEndpoint(endpointId);
+  if (existing === undefined) {
+    return notFound(
+      request.requestId,
+      MODEL_ENDPOINT_ADMIN_REASON_CODES.endpointNotFound,
+      `model endpoint ${endpointId} was not found`,
+    );
+  }
+  let expectedRevision: number;
+  try {
+    expectedRevision = requiredRevision(
+      request.body,
+      "model endpoint expectedRevision",
+    );
+  } catch (error) {
+    return validationFailure(
+      request.requestId,
+      MODEL_ENDPOINT_ADMIN_REASON_CODES.invalidEndpoint,
+      errorMessage(error, "invalid model endpoint delete"),
+    );
+  }
+  try {
+    const endpoint = await context.deleteModelEndpoint({
+      endpointId,
+      expectedRevision,
+    });
+    return successRoute(request.requestId, {
+      endpoint: modelEndpointApiRecord(endpoint),
+    });
+  } catch (error) {
+    const mismatch = revisionMismatch(error, "model endpoint", endpointId);
+    if (mismatch !== undefined) {
+      return revisionConflict(
+        request.requestId,
+        MODEL_ENDPOINT_ADMIN_REASON_CODES.endpointRevisionMismatch,
+        `model endpoint ${endpointId} revision mismatch: expected ${mismatch.expected}, found ${mismatch.found}`,
+        mismatch.expected,
+        mismatch.found,
+        modelEndpointApiRecord(existing),
+        "endpoint",
+      );
+    }
+    if (errorMessage(error, "").includes("still referenced")) {
+      return failure(409, request.requestId, {
+        code: "conflict",
+        reason_code: MODEL_ENDPOINT_ADMIN_REASON_CODES.endpointInUse,
+        message: errorMessage(error, `model endpoint ${endpointId} is in use`),
+        retryable: false,
+      });
+    }
+    return bridgeFailure(
+      request.requestId,
+      MODEL_ENDPOINT_ADMIN_REASON_CODES.invalidEndpoint,
+      error,
+    );
+  }
+}
+
+async function configurationDelete(
+  request: ModelEndpointAdminRouteRequest,
+  modelConfigId: string,
+  context: ModelEndpointAdminRouteContext,
+): Promise<AdminRouteResult> {
+  const existing = await context.getModelConfiguration(modelConfigId);
+  if (existing === undefined) {
+    return notFound(
+      request.requestId,
+      MODEL_ENDPOINT_ADMIN_REASON_CODES.configurationNotFound,
+      `model configuration ${modelConfigId} was not found`,
+    );
+  }
+  let expectedRevision: number;
+  try {
+    expectedRevision = requiredRevision(
+      request.body,
+      "model configuration expectedRevision",
+    );
+  } catch (error) {
+    return validationFailure(
+      request.requestId,
+      MODEL_ENDPOINT_ADMIN_REASON_CODES.invalidConfiguration,
+      errorMessage(error, "invalid model configuration delete"),
+    );
+  }
+  try {
+    const configuration = await context.deleteModelConfiguration({
+      modelConfigId,
+      expectedRevision,
+    });
+    return successRoute(request.requestId, {
+      configuration: modelConfigurationApiRecord(configuration),
+    });
+  } catch (error) {
+    const mismatch = revisionMismatch(
+      error,
+      "model configuration",
+      modelConfigId,
+    );
+    if (mismatch !== undefined) {
+      return revisionConflict(
+        request.requestId,
+        MODEL_ENDPOINT_ADMIN_REASON_CODES.configurationRevisionMismatch,
+        `model configuration ${modelConfigId} revision mismatch: expected ${mismatch.expected}, found ${mismatch.found}`,
+        mismatch.expected,
+        mismatch.found,
+        modelConfigurationApiRecord(existing),
+        "configuration",
+      );
+    }
+    if (errorMessage(error, "").includes("still referenced")) {
+      return failure(409, request.requestId, {
+        code: "conflict",
+        reason_code: MODEL_ENDPOINT_ADMIN_REASON_CODES.configurationInUse,
+        message: errorMessage(
+          error,
+          `model configuration ${modelConfigId} is in use`,
+        ),
+        retryable: false,
+      });
     }
     return bridgeFailure(
       request.requestId,
@@ -1198,6 +1345,15 @@ function optionalRevision(
   fieldName: string,
 ): number | undefined {
   return optionalU32(value, fieldName, false);
+}
+
+function requiredRevision(bodyValue: unknown, fieldName: string): number {
+  const body = requiredRecord(bodyValue, "delete request body");
+  const revision = optionalRevision(body.expectedRevision, fieldName);
+  if (revision === undefined) {
+    throw new Error(`${fieldName} is required`);
+  }
+  return revision;
 }
 
 function optionalQueryId(

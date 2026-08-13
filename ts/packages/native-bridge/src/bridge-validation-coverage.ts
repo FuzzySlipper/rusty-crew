@@ -15,12 +15,12 @@ export interface RustBridgeValidationFixtureSummary {
   }>;
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 304;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 306;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 44;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 200;
 const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 304;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 306;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 0;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
@@ -32,6 +32,8 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "get_model_provider",
   "get_model_endpoint",
   "get_model_configuration",
+  "delete_model_endpoint",
+  "delete_model_configuration",
   "get_service_credential",
   "get_service_credential_secret",
   "delete_service_credential",

@@ -78,6 +78,7 @@ test("context diagnostics expose a present credential with a missing secret", as
 test("context diagnostics label a legacy-only provider selection as compatibility identity", async () => {
   const context = contextForCredentialLookup(async () => undefined);
   context.bridge.getProfileRegistryRecord = async () => ({
+    ...registryRecord(),
     activeRuntimeSettingsJson: { providerAlias: "legacy-diagnostics" },
   });
   context.bridge.getModelProvider = async () =>

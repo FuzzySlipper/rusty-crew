@@ -117,6 +117,8 @@ export const MODEL_ENDPOINT_ADMIN_REASON_CODES = {
   configurationNotFound: "model_configuration_not_found",
   endpointRevisionMismatch: "model_endpoint_revision_mismatch",
   configurationRevisionMismatch: "model_configuration_revision_mismatch",
+  endpointInUse: "model_endpoint_in_use",
+  configurationInUse: "model_configuration_in_use",
   methodNotAllowed: "model_endpoint_admin_method_not_allowed",
 } as const;
 
@@ -182,6 +184,11 @@ export interface NativeModelEndpointWrite {
   now: string;
 }
 
+export interface NativeModelEndpointDelete {
+  endpointId: string;
+  expectedRevision: number;
+}
+
 export interface NativeModelEndpointQuery {
   endpointId?: string;
   status?: ModelEndpointStatus;
@@ -232,6 +239,11 @@ export interface NativeModelConfigurationWrite {
   metadataJson?: unknown;
   expectedRevision?: number;
   now: string;
+}
+
+export interface NativeModelConfigurationDelete {
+  modelConfigId: string;
+  expectedRevision: number;
 }
 
 export interface NativeModelConfigurationQuery {

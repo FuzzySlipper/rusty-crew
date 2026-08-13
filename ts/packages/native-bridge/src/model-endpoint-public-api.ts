@@ -72,6 +72,11 @@ export interface NativeModelEndpointQuery {
   offset?: number;
 }
 
+export interface NativeModelEndpointDelete {
+  endpointId: string;
+  expectedRevision: number;
+}
+
 export interface NativeModelConfigurationRecord {
   modelConfigId: string;
   endpointId: string;
@@ -125,6 +130,11 @@ export interface NativeModelConfigurationQuery {
   offset?: number;
 }
 
+export interface NativeModelConfigurationDelete {
+  modelConfigId: string;
+  expectedRevision: number;
+}
+
 export interface NativeModelEndpointBridgeMethods {
   upsertModelEndpoint(
     write: NativeModelEndpointWrite,
@@ -135,6 +145,9 @@ export interface NativeModelEndpointBridgeMethods {
   getModelEndpoint(
     endpointId: string,
   ): Promise<NativeModelEndpointRecord | undefined>;
+  deleteModelEndpoint(
+    deleteRequest: NativeModelEndpointDelete,
+  ): Promise<NativeModelEndpointRecord>;
   upsertModelConfiguration(
     write: NativeModelConfigurationWrite,
   ): Promise<NativeModelConfigurationRecord>;
@@ -144,4 +157,7 @@ export interface NativeModelEndpointBridgeMethods {
   getModelConfiguration(
     modelConfigId: string,
   ): Promise<NativeModelConfigurationRecord | undefined>;
+  deleteModelConfiguration(
+    deleteRequest: NativeModelConfigurationDelete,
+  ): Promise<NativeModelConfigurationRecord>;
 }

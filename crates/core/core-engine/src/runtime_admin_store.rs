@@ -1,11 +1,12 @@
 use rusty_crew_core_persistence::*;
 use rusty_crew_core_protocol::{
-    CoreResult, IsoTimestamp, ModelConfigurationQuery, ModelConfigurationRecord,
-    ModelConfigurationWrite, ModelEndpointQuery, ModelEndpointRecord, ModelEndpointWrite,
-    ModelProviderCredentialLink, ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink,
-    ModelProviderQuery, ModelProviderRecord, ModelProviderWrite, ProfileId, ProfilePurgeReport,
-    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ServiceCredentialDelete,
-    ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite,
+    CoreResult, IsoTimestamp, ModelConfigurationDelete, ModelConfigurationQuery,
+    ModelConfigurationRecord, ModelConfigurationWrite, ModelEndpointDelete, ModelEndpointQuery,
+    ModelEndpointRecord, ModelEndpointWrite, ModelProviderCredentialLink,
+    ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink, ModelProviderQuery,
+    ModelProviderRecord, ModelProviderWrite, ProfileId, ProfilePurgeReport, ProfileRegistryRecord,
+    ProfileRegistryUpdate, ProfileRegistryWrite, ServiceCredentialDelete, ServiceCredentialQuery,
+    ServiceCredentialRecord, ServiceCredentialWrite,
 };
 
 pub(crate) trait RuntimeStorageAdminStore {
@@ -54,6 +55,10 @@ pub(crate) trait RuntimeServiceDataStore {
         &self,
         query: &ModelEndpointQuery,
     ) -> CoreResult<Vec<ModelEndpointRecord>>;
+    fn delete_model_endpoint(
+        &self,
+        delete: &ModelEndpointDelete,
+    ) -> CoreResult<ModelEndpointRecord>;
     fn upsert_model_configuration(
         &self,
         write: &ModelConfigurationWrite,
@@ -66,6 +71,10 @@ pub(crate) trait RuntimeServiceDataStore {
         &self,
         query: &ModelConfigurationQuery,
     ) -> CoreResult<Vec<ModelConfigurationRecord>>;
+    fn delete_model_configuration(
+        &self,
+        delete: &ModelConfigurationDelete,
+    ) -> CoreResult<ModelConfigurationRecord>;
     fn upsert_model_provider(&self, write: &ModelProviderWrite) -> CoreResult<ModelProviderRecord>;
     fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>>;
     fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>>;
@@ -202,6 +211,13 @@ impl RuntimeServiceDataStore for CoreCoordinationStore {
         self.service_data().list_model_endpoints(query)
     }
 
+    fn delete_model_endpoint(
+        &self,
+        delete: &ModelEndpointDelete,
+    ) -> CoreResult<ModelEndpointRecord> {
+        self.service_data().delete_model_endpoint(delete)
+    }
+
     fn upsert_model_configuration(
         &self,
         write: &ModelConfigurationWrite,
@@ -221,6 +237,13 @@ impl RuntimeServiceDataStore for CoreCoordinationStore {
         query: &ModelConfigurationQuery,
     ) -> CoreResult<Vec<ModelConfigurationRecord>> {
         self.service_data().list_model_configurations(query)
+    }
+
+    fn delete_model_configuration(
+        &self,
+        delete: &ModelConfigurationDelete,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        self.service_data().delete_model_configuration(delete)
     }
 
     fn upsert_model_provider(&self, write: &ModelProviderWrite) -> CoreResult<ModelProviderRecord> {

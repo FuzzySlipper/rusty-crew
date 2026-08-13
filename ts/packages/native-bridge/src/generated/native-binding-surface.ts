@@ -44,9 +44,11 @@ export interface NativeBridgeBinding {
   upsertModelEndpointJson(writeJson: string): string
   listModelEndpointsJson(queryJson: string): string
   getModelEndpointJson(endpointId: string): string
+  deleteModelEndpointJson(deleteJson: string): string
   upsertModelConfigurationJson(writeJson: string): string
   listModelConfigurationsJson(queryJson: string): string
   getModelConfigurationJson(modelConfigId: string): string
+  deleteModelConfigurationJson(deleteJson: string): string
   upsertModelProviderJson(writeJson: string): string
   listModelProvidersJson(queryJson: string): string
   getModelProviderJson(alias: string): string
@@ -937,7 +939,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 304,
+  "manifestOperationCount": 306,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1284,6 +1286,14 @@ export const nativeBridgeBindingSurface = {
       "operationName": "get_model_endpoint"
     },
     {
+      "name": "deleteModelEndpointJson",
+      "parameterSource": "deleteJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "delete_model_endpoint"
+    },
+    {
       "name": "upsertModelConfigurationJson",
       "parameterSource": "writeJson: string",
       "parameterCount": 1,
@@ -1306,6 +1316,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "get_model_configuration"
+    },
+    {
+      "name": "deleteModelConfigurationJson",
+      "parameterSource": "deleteJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "delete_model_configuration"
     },
     {
       "name": "upsertModelProviderJson",
