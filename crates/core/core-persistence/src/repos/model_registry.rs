@@ -2,6 +2,9 @@
 
 use super::super::*;
 
+pub(crate) const LEGACY_MISSING_BASE_URL_METADATA_KEY: &str = "legacyBaseUrlMissing";
+pub(crate) const LEGACY_MISSING_BASE_URL_SENTINEL: &str = "http://legacy-unconfigured.invalid";
+
 pub(crate) fn migrate_v75_add_model_registry(tx: &rusqlite::Transaction<'_>) -> CoreResult<()> {
     tx.execute_batch(
         "CREATE TABLE model_endpoints (
@@ -591,16 +594,12 @@ pub(crate) fn sync_legacy_provider_to_normalized_in_tx(
 fn normalized_records_from_provider(
     provider: &ModelProviderRecord,
 ) -> CoreResult<(ModelEndpointRecord, ModelConfigurationRecord)> {
-    let base_url = provider
-        .base_url
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            CoreError::new(
-                CoreErrorKind::InvalidInput,
-                "legacy base_url is not representable",
-            )
-        })?;
+    let mut endpoint_metadata = serde_json::Map::new();
+    endpoint_metadata.insert(
+        "legacyVendorLabel".to_string(),
+        JsonValue::String(provider.provider_kind.clone()),
+    );
+    let base_url = legacy_endpoint_base_url(provider, &mut endpoint_metadata);
     let wire_dialect = match provider.protocol {
         ModelProviderProtocol::Responses => match provider.responses_dialect {
             Some(ResponsesProviderDialect::OpenaiStateful) => {
@@ -646,11 +645,6 @@ fn normalized_records_from_provider(
             ))
         }
     };
-    let mut endpoint_metadata = serde_json::Map::new();
-    endpoint_metadata.insert(
-        "legacyVendorLabel".to_string(),
-        JsonValue::String(provider.provider_kind.clone()),
-    );
     let endpoint = ModelEndpointRecord {
         endpoint_id: provider.alias.clone(),
         status: provider.status,
@@ -1155,11 +1149,12 @@ pub(crate) fn joined_provider_projection(
         ModelEndpointWireDialect::Meta => Some(ResponsesProviderDialect::Meta),
         _ => None,
     };
-    let chat_completions_dialect = match endpoint.wire_dialect {
-        ModelEndpointWireDialect::Kimi => ChatCompletionsWireDialect::Kimi,
-        ModelEndpointWireDialect::Glm => ChatCompletionsWireDialect::Glm,
-        ModelEndpointWireDialect::Qwen => ChatCompletionsWireDialect::Qwen,
-        ModelEndpointWireDialect::Deepseek => ChatCompletionsWireDialect::Deepseek,
+    let chat_completions_dialect = match (endpoint.protocol, endpoint.wire_dialect) {
+        (ModelProviderProtocol::Responses, _) => ChatCompletionsWireDialect::Standard,
+        (_, ModelEndpointWireDialect::Kimi) => ChatCompletionsWireDialect::Kimi,
+        (_, ModelEndpointWireDialect::Glm) => ChatCompletionsWireDialect::Glm,
+        (_, ModelEndpointWireDialect::Qwen) => ChatCompletionsWireDialect::Qwen,
+        (_, ModelEndpointWireDialect::Deepseek) => ChatCompletionsWireDialect::Deepseek,
         _ => ChatCompletionsWireDialect::Standard,
     };
     ModelProviderRecord {
@@ -1169,7 +1164,7 @@ pub(crate) fn joined_provider_projection(
         provider_kind,
         display_name: configuration.display_name.clone(),
         description: configuration.description.clone(),
-        base_url: Some(endpoint.base_url.clone()),
+        base_url: projected_legacy_base_url(endpoint),
         model_id: configuration.model_id.clone(),
         context_window_tokens: configuration.context_window_tokens,
         max_output_tokens: configuration.max_output_tokens,
@@ -1188,6 +1183,39 @@ pub(crate) fn joined_provider_projection(
         revision: configuration.revision,
         created_at: configuration.created_at.clone(),
         updated_at: configuration.updated_at.clone(),
+    }
+}
+
+pub(crate) fn legacy_endpoint_base_url(
+    provider: &ModelProviderRecord,
+    metadata: &mut serde_json::Map<String, JsonValue>,
+) -> String {
+    match provider
+        .base_url
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(base_url) => base_url.clone(),
+        None => {
+            metadata.insert(
+                LEGACY_MISSING_BASE_URL_METADATA_KEY.to_string(),
+                JsonValue::Bool(true),
+            );
+            LEGACY_MISSING_BASE_URL_SENTINEL.to_string()
+        }
+    }
+}
+
+pub(crate) fn projected_legacy_base_url(endpoint: &ModelEndpointRecord) -> Option<String> {
+    if endpoint
+        .metadata_json
+        .get(LEGACY_MISSING_BASE_URL_METADATA_KEY)
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+    {
+        None
+    } else {
+        Some(endpoint.base_url.clone())
     }
 }
 
@@ -1509,6 +1537,73 @@ mod tests {
             legacy_id_mappings: Vec::new(),
             profile_asset_refs: Vec::new(),
         }
+    }
+
+    #[test]
+    fn legacy_projection_preserves_missing_base_url_as_explicit_endpoint_metadata() {
+        let (store, path) = store();
+        store
+            .upsert_model_endpoint(&endpoint("legacy", None))
+            .unwrap();
+        store
+            .upsert_model_configuration(&configuration("legacy", "legacy"))
+            .unwrap();
+        let mut provider = store.get_model_provider("legacy").unwrap().unwrap();
+        provider.base_url = None;
+
+        let (normalized_endpoint, normalized_configuration) =
+            normalized_records_from_provider(&provider).unwrap();
+        assert_eq!(
+            normalized_endpoint.base_url,
+            LEGACY_MISSING_BASE_URL_SENTINEL
+        );
+        assert_eq!(
+            normalized_endpoint
+                .metadata_json
+                .get(LEGACY_MISSING_BASE_URL_METADATA_KEY),
+            Some(&JsonValue::Bool(true))
+        );
+        let joined = joined_provider_projection(
+            &normalized_endpoint,
+            &normalized_configuration,
+            provider.credential.clone(),
+        );
+        assert_eq!(joined.base_url, None);
+        assert!(provider_projection_differences(&provider, &joined).is_empty());
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn responses_projection_ignores_legacy_chat_completions_dialect() {
+        let (store, path) = store();
+        store
+            .upsert_model_endpoint(&endpoint("responses", None))
+            .unwrap();
+        store
+            .upsert_model_configuration(&configuration("responses", "responses"))
+            .unwrap();
+        let mut provider = store.get_model_provider("responses").unwrap().unwrap();
+        provider.protocol = ModelProviderProtocol::Responses;
+        provider.responses_dialect = Some(ResponsesProviderDialect::Deepseek);
+        provider.chat_completions_dialect = ChatCompletionsWireDialect::Standard;
+
+        let (normalized_endpoint, normalized_configuration) =
+            normalized_records_from_provider(&provider).unwrap();
+        let joined = joined_provider_projection(
+            &normalized_endpoint,
+            &normalized_configuration,
+            provider.credential.clone(),
+        );
+        assert_eq!(
+            joined.chat_completions_dialect,
+            ChatCompletionsWireDialect::Standard
+        );
+        assert!(provider_projection_differences(&provider, &joined).is_empty());
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 
     fn model_repository(

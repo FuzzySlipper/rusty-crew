@@ -92,7 +92,7 @@ pub enum LogicalTurnResolutionAction {
     Cancel,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LogicalTurnBindingSnapshot {
     pub profile_id: ProfileId,
@@ -115,6 +115,71 @@ pub struct LogicalTurnBindingSnapshot {
     pub credential_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_revision: Option<u64>,
+}
+
+impl<'de> Deserialize<'de> for LogicalTurnBindingSnapshot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PersistedBindingSnapshot {
+            profile_id: ProfileId,
+            profile_revision: u64,
+            prompt_fingerprint: String,
+            tool_selection_fingerprint: String,
+            tool_registry_revision: String,
+            brain_module_id: String,
+            brain_strategy_id: String,
+            model_config_id: Option<String>,
+            model_config_revision: Option<u64>,
+            endpoint_id: Option<String>,
+            endpoint_revision: Option<u64>,
+            provider_alias: Option<String>,
+            provider_revision: Option<u64>,
+            provider_fingerprint: String,
+            credential_id: Option<String>,
+            credential_revision: Option<u64>,
+        }
+
+        let persisted = PersistedBindingSnapshot::deserialize(deserializer)?;
+        let model_config_id = persisted
+            .model_config_id
+            .or_else(|| persisted.provider_alias.clone())
+            .ok_or_else(|| serde::de::Error::missing_field("modelConfigId"))?;
+        let endpoint_id = persisted
+            .endpoint_id
+            .or_else(|| persisted.provider_alias.clone())
+            .ok_or_else(|| serde::de::Error::missing_field("endpointId"))?;
+        let model_config_revision = persisted
+            .model_config_revision
+            .or(persisted.provider_revision)
+            .unwrap_or_default();
+        let endpoint_revision = persisted
+            .endpoint_revision
+            .or(persisted.provider_revision)
+            .unwrap_or_default();
+
+        Ok(Self {
+            profile_id: persisted.profile_id,
+            profile_revision: persisted.profile_revision,
+            prompt_fingerprint: persisted.prompt_fingerprint,
+            tool_selection_fingerprint: persisted.tool_selection_fingerprint,
+            tool_registry_revision: persisted.tool_registry_revision,
+            brain_module_id: persisted.brain_module_id,
+            brain_strategy_id: persisted.brain_strategy_id,
+            model_config_id,
+            model_config_revision,
+            endpoint_id,
+            endpoint_revision,
+            provider_alias: persisted.provider_alias,
+            provider_revision: persisted.provider_revision,
+            provider_fingerprint: persisted.provider_fingerprint,
+            credential_id: persisted.credential_id,
+            credential_revision: persisted.credential_revision,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -694,5 +759,29 @@ mod tests {
             event.progress_classification,
             LogicalTurnProgressClassification::ToolProgress
         );
+    }
+
+    #[test]
+    fn binding_snapshot_hydrates_from_legacy_provider_identity() {
+        let binding: LogicalTurnBindingSnapshot = serde_json::from_value(serde_json::json!({
+            "profileId": "profile-1",
+            "profileRevision": 2,
+            "promptFingerprint": "prompt-1",
+            "toolSelectionFingerprint": "tools-1",
+            "toolRegistryRevision": "registry-1",
+            "brainModuleId": "brain-1",
+            "brainStrategyId": "strategy-1",
+            "providerAlias": "legacy-provider",
+            "providerRevision": 7,
+            "providerFingerprint": "provider-1"
+        }))
+        .unwrap();
+
+        assert_eq!(binding.model_config_id, "legacy-provider");
+        assert_eq!(binding.model_config_revision, 7);
+        assert_eq!(binding.endpoint_id, "legacy-provider");
+        assert_eq!(binding.endpoint_revision, 7);
+        assert_eq!(binding.provider_alias.as_deref(), Some("legacy-provider"));
+        assert_eq!(binding.provider_revision, Some(7));
     }
 }

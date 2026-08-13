@@ -951,15 +951,20 @@ fn sync_configuration_shadow<C: GenericClient>(
         ModelEndpointWireDialect::Meta => Some(ResponsesProviderDialect::Meta),
         _ => None,
     };
-    let chat_completions_dialect = match endpoint.wire_dialect {
-        ModelEndpointWireDialect::Kimi => {
+    let chat_completions_dialect = match (endpoint.protocol, endpoint.wire_dialect) {
+        (ModelProviderProtocol::Responses, _) => {
+            rusty_crew_core_protocol::ChatCompletionsWireDialect::Standard
+        }
+        (_, ModelEndpointWireDialect::Kimi) => {
             rusty_crew_core_protocol::ChatCompletionsWireDialect::Kimi
         }
-        ModelEndpointWireDialect::Glm => rusty_crew_core_protocol::ChatCompletionsWireDialect::Glm,
-        ModelEndpointWireDialect::Qwen => {
+        (_, ModelEndpointWireDialect::Glm) => {
+            rusty_crew_core_protocol::ChatCompletionsWireDialect::Glm
+        }
+        (_, ModelEndpointWireDialect::Qwen) => {
             rusty_crew_core_protocol::ChatCompletionsWireDialect::Qwen
         }
-        ModelEndpointWireDialect::Deepseek => {
+        (_, ModelEndpointWireDialect::Deepseek) => {
             rusty_crew_core_protocol::ChatCompletionsWireDialect::Deepseek
         }
         _ => rusty_crew_core_protocol::ChatCompletionsWireDialect::Standard,
@@ -971,7 +976,7 @@ fn sync_configuration_shadow<C: GenericClient>(
         provider_kind,
         display_name: configuration.display_name.clone(),
         description: configuration.description.clone(),
-        base_url: Some(endpoint.base_url.clone()),
+        base_url: crate::repos::model_registry::projected_legacy_base_url(endpoint),
         model_id: configuration.model_id.clone(),
         context_window_tokens: configuration.context_window_tokens,
         max_output_tokens: configuration.max_output_tokens,
@@ -1122,16 +1127,12 @@ pub(super) fn sync_legacy_provider_to_normalized_in_tx(
 fn normalized_from_provider(
     provider: &ModelProviderRecord,
 ) -> CoreResult<(ModelEndpointRecord, ModelConfigurationRecord)> {
-    let base_url = provider
-        .base_url
-        .clone()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            CoreError::new(
-                CoreErrorKind::InvalidInput,
-                "legacy base_url is not representable",
-            )
-        })?;
+    let mut metadata = serde_json::Map::new();
+    metadata.insert(
+        "legacyVendorLabel".to_string(),
+        serde_json::Value::String(provider.provider_kind.clone()),
+    );
+    let base_url = crate::repos::model_registry::legacy_endpoint_base_url(provider, &mut metadata);
     let wire_dialect = match provider.protocol {
         ModelProviderProtocol::Responses => match provider.responses_dialect {
             Some(ResponsesProviderDialect::OpenaiStateful) => {
@@ -1187,11 +1188,6 @@ fn normalized_from_provider(
             ))
         }
     };
-    let mut metadata = serde_json::Map::new();
-    metadata.insert(
-        "legacyVendorLabel".to_string(),
-        serde_json::Value::String(provider.provider_kind.clone()),
-    );
     let endpoint = ModelEndpointRecord {
         endpoint_id: provider.alias.clone(),
         status: provider.status,
