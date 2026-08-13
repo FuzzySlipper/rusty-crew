@@ -105,7 +105,7 @@ impl CoordinationStore {
 
         for endpoint in &endpoints {
             endpoint.validate()?;
-            validate_import_endpoint_credential_in_tx(&tx, endpoint)?;
+            validate_import_endpoint_credential(&tx, endpoint)?;
             match get_model_endpoint_in_conn(&tx, &endpoint.endpoint_id)? {
                 Some(existing) if existing == *endpoint => {}
                 Some(_) => {
@@ -416,14 +416,14 @@ pub(crate) fn logical_model_records(
     Ok((endpoints, configurations))
 }
 
-fn validate_import_endpoint_credential_in_tx(
-    tx: &rusqlite::Transaction<'_>,
+pub(crate) fn validate_import_endpoint_credential(
+    conn: &Connection,
     endpoint: &ModelEndpointRecord,
 ) -> CoreResult<()> {
     let Some(credential_id) = endpoint.credential_id.as_deref() else {
         return Ok(());
     };
-    let (kind, has_secret) = tx
+    let (kind, has_secret) = conn
         .query_row(
             "SELECT credential_kind, secret_ciphertext IS NOT NULL
              FROM service_credentials WHERE credential_id=?1",
@@ -1505,6 +1505,48 @@ mod tests {
         }
     }
 
+    fn endpoint_record_with_auth(
+        endpoint_id: &str,
+        protocol: ModelProviderProtocol,
+        wire_dialect: ModelEndpointWireDialect,
+        auth_scheme: ModelEndpointAuthScheme,
+        credential_id: &str,
+    ) -> ModelEndpointRecord {
+        ModelEndpointRecord {
+            endpoint_id: endpoint_id.to_string(),
+            status: ModelProviderStatus::Active,
+            display_name: Some("Secured endpoint".to_string()),
+            description: None,
+            base_url: "http://127.0.0.1:8080/v1".to_string(),
+            protocol,
+            wire_dialect,
+            auth_scheme,
+            credential_id: Some(credential_id.to_string()),
+            prompt_cache_transport: PromptCacheTransport::None,
+            metadata_json: json!({}),
+            revision: 1,
+            created_at: "2026-08-13T00:00:00Z".to_string(),
+            updated_at: "2026-08-13T00:00:00Z".to_string(),
+        }
+    }
+
+    fn service_credential(
+        credential_id: &str,
+        credential_kind: ModelProviderCredentialKind,
+        secret: Option<&str>,
+    ) -> ServiceCredentialWrite {
+        ServiceCredentialWrite {
+            credential_id: credential_id.to_string(),
+            display_name: "Import credential".to_string(),
+            provider_kind: "test".to_string(),
+            credential_kind,
+            secret: secret.map(str::to_string),
+            clear_secret: false,
+            expected_revision: None,
+            now: "2026-08-13T00:00:00Z".to_string(),
+        }
+    }
+
     #[test]
     fn normalized_registries_have_independent_cas_and_secret_free_shadows() {
         let (store, path) = store();
@@ -1677,6 +1719,128 @@ mod tests {
         configuration_record.endpoint_id = "shared".to_string();
         drop(target);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn model_registry_logical_dry_run_requires_model_repository_checksums() {
+        let (source, source_path) = store();
+        let endpoint_record = source
+            .upsert_model_endpoint(&endpoint("shared", None))
+            .unwrap();
+        let mut bundle = logical_bundle(std::slice::from_ref(&endpoint_record), &[]);
+        bundle.repositories[0].checksum = None;
+        let (target, target_path) = store();
+        let report = target
+            .validate_logical_storage_import(
+                &bundle,
+                &LogicalStorageImportDryRun {
+                    import_batch_id: "missing-model-checksum".to_string(),
+                    target_backend: "sqlite".to_string(),
+                    validation_time: "2026-08-13T00:01:00Z".to_string(),
+                    supported_capabilities: vec!["logical_export_import".to_string()],
+                    supported_repositories: vec![
+                        "model_endpoints".to_string(),
+                        "model_configurations".to_string(),
+                    ],
+                },
+            )
+            .unwrap();
+
+        assert!(!report.can_apply());
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "model_repository_checksum_missing"
+                && issue.repository_id.as_deref() == Some("model_endpoints")
+        }));
+
+        drop(source);
+        drop(target);
+        let _ = std::fs::remove_file(source_path);
+        let _ = std::fs::remove_file(target_path);
+    }
+
+    #[test]
+    fn model_registry_logical_dry_run_matches_apply_for_target_credentials() {
+        let cases = [
+            (
+                "missing credential",
+                endpoint_record_with_auth(
+                    "secured",
+                    ModelProviderProtocol::ChatCompletions,
+                    ModelEndpointWireDialect::Standard,
+                    ModelEndpointAuthScheme::BearerApiKey,
+                    "missing-credential",
+                ),
+                None,
+                "model_endpoint_credential_missing",
+            ),
+            (
+                "credential without secret",
+                endpoint_record_with_auth(
+                    "secured",
+                    ModelProviderProtocol::ChatCompletions,
+                    ModelEndpointWireDialect::Standard,
+                    ModelEndpointAuthScheme::BearerApiKey,
+                    "empty-credential",
+                ),
+                Some(service_credential(
+                    "empty-credential",
+                    ModelProviderCredentialKind::ApiKey,
+                    None,
+                )),
+                "model_endpoint_credential_secret_missing",
+            ),
+            (
+                "incompatible credential kind",
+                endpoint_record_with_auth(
+                    "secured",
+                    ModelProviderProtocol::Responses,
+                    ModelEndpointWireDialect::OpenaiStateless,
+                    ModelEndpointAuthScheme::OpenAiCodexOauth,
+                    "api-key-credential",
+                ),
+                Some(service_credential(
+                    "api-key-credential",
+                    ModelProviderCredentialKind::ApiKey,
+                    Some("sk-target"),
+                )),
+                "model_endpoint_credential_auth_kind_mismatch",
+            ),
+        ];
+
+        for (index, (_label, endpoint_record, credential, issue_code)) in
+            cases.into_iter().enumerate()
+        {
+            let (target, target_path) = store();
+            if let Some(credential) = credential {
+                target.upsert_service_credential(&credential).unwrap();
+            }
+            let bundle = logical_bundle(std::slice::from_ref(&endpoint_record), &[]);
+            let dry_run = LogicalStorageImportDryRun {
+                import_batch_id: format!("credential-import-{index}"),
+                target_backend: "sqlite".to_string(),
+                validation_time: "2026-08-13T00:01:00Z".to_string(),
+                supported_capabilities: vec!["logical_export_import".to_string()],
+                supported_repositories: vec![
+                    "model_endpoints".to_string(),
+                    "model_configurations".to_string(),
+                ],
+            };
+
+            let report = target
+                .validate_logical_storage_import(&bundle, &dry_run)
+                .unwrap();
+            assert!(!report.can_apply(), "{_label}: {report:#?}");
+            assert!(report.issues.iter().any(|issue| issue.code == issue_code));
+            assert!(target
+                .apply_model_registry_logical_import(&bundle, &dry_run)
+                .unwrap_err()
+                .message
+                .contains("dry-run did not pass"));
+            assert!(target.get_model_endpoint("secured").unwrap().is_none());
+
+            drop(target);
+            let _ = std::fs::remove_file(target_path);
+        }
     }
 
     #[test]

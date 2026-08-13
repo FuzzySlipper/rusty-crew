@@ -560,25 +560,45 @@ export async function rustyViewSessionContextUsage(
     optionalString(settings.providerAlias) ??
     optionalString(settings.provider_alias) ??
     "default";
-  const provider = await (
-    modelConfigId === undefined
-      ? context.bridge.getModelProvider(providerAlias)
-      : normalizedDiagnosticProvider(context.bridge, modelConfigId)
-  ).catch((error) => {
-    diagnostics.push({
-      severity: "warning",
-      code: "model_selection_read_failed",
-      message: errorMessage(error, "model selection read failed"),
-    });
-    return undefined;
-  });
-  if (provider === undefined) {
+  const providerResolution =
+    await (async (): Promise<DiagnosticProviderResolution> => {
+      if (modelConfigId !== undefined) {
+        return normalizedDiagnosticProvider(context.bridge, modelConfigId);
+      }
+      try {
+        const provider = await context.bridge.getModelProvider(providerAlias);
+        return {
+          provider,
+          selectionState:
+            provider === undefined ? "selection_missing" : "available",
+          diagnostics: [],
+        };
+      } catch (error) {
+        return {
+          provider: undefined,
+          selectionState: "unavailable",
+          diagnostics: [
+            {
+              severity: "warning",
+              code: "model_selection_read_failed",
+              message: errorMessage(error, "model selection read failed"),
+            },
+          ],
+        };
+      }
+    })();
+  diagnostics.push(...providerResolution.diagnostics);
+  const provider = providerResolution.provider;
+  if (
+    provider === undefined &&
+    providerResolution.selectionState === "selection_missing"
+  ) {
     diagnostics.push({
       severity: "error",
       code: "model_selection_missing",
       message: `model selection ${modelConfigId ?? providerAlias} was not found`,
     });
-  } else if (provider.status !== "active") {
+  } else if (provider !== undefined && provider.status !== "active") {
     diagnostics.push({
       severity: "warning",
       code: "model_selection_not_active",
@@ -1031,59 +1051,190 @@ function providerBrainBackend(
     : "chat-completions";
 }
 
+type DiagnosticProviderResolution = {
+  provider: NativeModelProviderRecord | undefined;
+  selectionState:
+    | "available"
+    | "selection_missing"
+    | "dependency_missing"
+    | "unavailable";
+  diagnostics: SessionContextUsageResult["diagnostics"];
+};
+
 async function normalizedDiagnosticProvider(
   bridge: NativeBridgeModule,
   modelConfigId: string,
-): Promise<NativeModelProviderRecord | undefined> {
-  const configuration = await bridge.getModelConfiguration(modelConfigId);
-  if (configuration === undefined) return undefined;
-  const endpoint = await bridge.getModelEndpoint(configuration.endpointId);
-  if (endpoint === undefined) return undefined;
-  const credential =
-    endpoint.credentialId === undefined
-      ? undefined
-      : await bridge.getServiceCredential(endpoint.credentialId);
+): Promise<DiagnosticProviderResolution> {
+  let configuration: Awaited<
+    ReturnType<NativeBridgeModule["getModelConfiguration"]>
+  >;
+  try {
+    if (typeof bridge.getModelConfiguration !== "function") {
+      return {
+        provider: undefined,
+        selectionState: "unavailable",
+        diagnostics: [modelDependencyReaderUnavailable("model configuration")],
+      };
+    }
+    configuration = await bridge.getModelConfiguration(modelConfigId);
+  } catch (error) {
+    return {
+      provider: undefined,
+      selectionState: "unavailable",
+      diagnostics: [
+        modelDependencyReaderUnavailable("model configuration", error),
+      ],
+    };
+  }
+  if (configuration === undefined) {
+    return {
+      provider: undefined,
+      selectionState: "selection_missing",
+      diagnostics: [],
+    };
+  }
+
+  let endpoint: Awaited<ReturnType<NativeBridgeModule["getModelEndpoint"]>>;
+  try {
+    if (typeof bridge.getModelEndpoint !== "function") {
+      return {
+        provider: undefined,
+        selectionState: "unavailable",
+        diagnostics: [modelDependencyReaderUnavailable("model endpoint")],
+      };
+    }
+    endpoint = await bridge.getModelEndpoint(configuration.endpointId);
+  } catch (error) {
+    return {
+      provider: undefined,
+      selectionState: "unavailable",
+      diagnostics: [modelDependencyReaderUnavailable("model endpoint", error)],
+    };
+  }
+  if (endpoint === undefined) {
+    return {
+      provider: undefined,
+      selectionState: "dependency_missing",
+      diagnostics: [
+        {
+          severity: "error",
+          code: "model_endpoint_missing",
+          message: `model configuration ${modelConfigId} references missing endpoint ${configuration.endpointId}`,
+        },
+      ],
+    };
+  }
+
+  const credentialId = endpoint.credentialId;
+  let credential: Awaited<
+    ReturnType<NativeBridgeModule["getServiceCredential"]>
+  > = undefined;
+  let credentialReadState: "available" | "missing" | "unavailable" =
+    credentialId === undefined ? "available" : "missing";
+  const dependencyDiagnostics: SessionContextUsageResult["diagnostics"] = [];
+  if (credentialId !== undefined) {
+    if (typeof bridge.getServiceCredential !== "function") {
+      credentialReadState = "unavailable";
+      dependencyDiagnostics.push(
+        modelDependencyReaderUnavailable("service credential"),
+      );
+    } else {
+      try {
+        credential = await bridge.getServiceCredential(credentialId);
+        credentialReadState =
+          credential === undefined ? "missing" : "available";
+      } catch (error) {
+        credentialReadState = "unavailable";
+        dependencyDiagnostics.push(
+          modelDependencyReaderUnavailable("service credential", error),
+        );
+      }
+    }
+  }
+  if (endpoint.authScheme !== "none" && credentialId === undefined) {
+    dependencyDiagnostics.push({
+      severity: "error",
+      code: "model_endpoint_credential_missing",
+      message: `model endpoint ${endpoint.endpointId} requires ${endpoint.authScheme} but has no credential`,
+    });
+  } else if (credentialReadState === "missing") {
+    dependencyDiagnostics.push({
+      severity: "error",
+      code: "service_credential_missing",
+      message: `model endpoint ${endpoint.endpointId} references missing credential ${credentialId}`,
+    });
+  } else if (
+    endpoint.authScheme !== "none" &&
+    credential?.credential.hasSecret === false
+  ) {
+    dependencyDiagnostics.push({
+      severity: "error",
+      code: "service_credential_secret_missing",
+      message: `credential ${credential.credentialId} has no secret for ${endpoint.authScheme}`,
+    });
+  }
+
   return {
-    alias: configuration.modelConfigId,
-    status: configuration.status,
-    protocol: endpoint.protocol,
-    providerKind: "compatibility-only",
-    displayName: configuration.displayName,
-    description: configuration.description,
-    baseUrl: endpoint.baseUrl,
-    modelId: configuration.modelId,
-    contextWindowTokens: configuration.contextWindowTokens,
-    maxOutputTokens: configuration.maxOutputTokens,
-    temperatureMilli: configuration.temperatureMilli,
-    reasoningEffort: configuration.reasoningEffort,
-    reasoningFormat: configuration.reasoningFormat,
-    responsesDialect:
-      endpoint.protocol === "responses"
-        ? (endpoint.wireDialect as never)
-        : undefined,
-    chatCompletionsDialect:
-      endpoint.protocol === "chat_completions"
-        ? (endpoint.wireDialect as never)
-        : "standard",
-    thinkingMode: configuration.thinkingMode,
-    reasoningHistory: configuration.reasoningHistory,
-    reasoningBudgetTokens: configuration.reasoningBudgetTokens,
-    promptCaching: configuration.promptCachingPolicy,
-    credentialId: endpoint.credentialId,
-    credential: {
-      hasSecret: credential?.credential.hasSecret ?? false,
-      kind: credential?.credentialKind,
-      revision: credential?.revision,
+    provider: {
+      alias: configuration.modelConfigId,
+      status: configuration.status,
+      protocol: endpoint.protocol,
+      providerKind: "compatibility-only",
+      displayName: configuration.displayName,
+      description: configuration.description,
+      baseUrl: endpoint.baseUrl,
+      modelId: configuration.modelId,
+      contextWindowTokens: configuration.contextWindowTokens,
+      maxOutputTokens: configuration.maxOutputTokens,
+      temperatureMilli: configuration.temperatureMilli,
+      reasoningEffort: configuration.reasoningEffort,
+      reasoningFormat: configuration.reasoningFormat,
+      responsesDialect:
+        endpoint.protocol === "responses"
+          ? (endpoint.wireDialect as never)
+          : undefined,
+      chatCompletionsDialect:
+        endpoint.protocol === "chat_completions"
+          ? (endpoint.wireDialect as never)
+          : "standard",
+      thinkingMode: configuration.thinkingMode,
+      reasoningHistory: configuration.reasoningHistory,
+      reasoningBudgetTokens: configuration.reasoningBudgetTokens,
+      promptCaching: configuration.promptCachingPolicy,
+      credentialId,
+      credential: {
+        hasSecret: credential?.credential.hasSecret ?? false,
+        kind: credential?.credentialKind,
+        revision: credential?.revision,
+      },
+      metadataJson: {
+        endpointId: endpoint.endpointId,
+        endpointRevision: endpoint.revision,
+        credentialId,
+        credentialRevision: credential?.revision,
+        credentialReadState,
+      },
+      revision: configuration.revision,
+      createdAt: configuration.createdAt,
+      updatedAt: configuration.updatedAt,
     },
-    metadataJson: {
-      endpointId: endpoint.endpointId,
-      endpointRevision: endpoint.revision,
-      credentialId: credential?.credentialId,
-      credentialRevision: credential?.revision,
-    },
-    revision: configuration.revision,
-    createdAt: configuration.createdAt,
-    updatedAt: configuration.updatedAt,
+    selectionState: "available",
+    diagnostics: dependencyDiagnostics,
+  };
+}
+
+function modelDependencyReaderUnavailable(
+  dependency: string,
+  error?: unknown,
+): SessionContextUsageResult["diagnostics"][number] {
+  const detail =
+    error === undefined
+      ? "reader was not supplied"
+      : `reader failed: ${errorMessage(error, "unknown reader failure")}`;
+  return {
+    severity: "warning",
+    code: "model_dependency_validation_unavailable",
+    message: `model ${dependency} dependency validation is unavailable; ${detail}`,
   };
 }
 

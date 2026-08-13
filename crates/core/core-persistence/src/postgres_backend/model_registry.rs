@@ -1,7 +1,14 @@
 //! PostgreSQL normalized model endpoint and configuration repositories.
 
 use super::*;
-use crate::{LogicalStorageApplyProof, LogicalStorageExportBundle, LogicalStorageImportDryRun};
+use crate::{
+    LogicalStorageApplyProof, LogicalStorageExportBundle, LogicalStorageImportDryRun,
+    LogicalStorageRecordPayload,
+};
+
+const POSTGRES_LOGICAL_MODEL_TARGET_BACKEND: &str = "postgres";
+const POSTGRES_LOGICAL_MODEL_CAPABILITY: &str = "logical_export_import";
+const POSTGRES_LOGICAL_MODEL_REPOSITORIES: [&str; 2] = ["model_endpoints", "model_configurations"];
 
 pub(super) fn apply_postgres_model_registry(
     tx: &mut Transaction<'_>,
@@ -56,7 +63,7 @@ impl PostgresBackendStore {
         }
         let (mut endpoints, mut configurations) =
             crate::repos::model_registry::logical_model_records(bundle)?;
-        validate_postgres_logical_model_bundle(bundle, &endpoints, &configurations)?;
+        validate_postgres_logical_model_bundle(bundle, dry_run, &endpoints, &configurations)?;
         endpoints.sort_by(|left, right| left.endpoint_id.cmp(&right.endpoint_id));
         configurations.sort_by(|left, right| left.model_config_id.cmp(&right.model_config_id));
         let schema = self.quoted_schema();
@@ -430,9 +437,52 @@ impl PostgresBackendStore {
 
 fn validate_postgres_logical_model_bundle(
     bundle: &LogicalStorageExportBundle,
+    dry_run: &LogicalStorageImportDryRun,
     endpoints: &[ModelEndpointRecord],
     configurations: &[ModelConfigurationRecord],
 ) -> CoreResult<()> {
+    if dry_run.target_backend.trim() != POSTGRES_LOGICAL_MODEL_TARGET_BACKEND {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "PostgreSQL model registry logical import requires target_backend {}, got {}",
+                POSTGRES_LOGICAL_MODEL_TARGET_BACKEND, dry_run.target_backend
+            ),
+        ));
+    }
+    let supported_capabilities = dry_run
+        .supported_capabilities
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    if !supported_capabilities.contains(POSTGRES_LOGICAL_MODEL_CAPABILITY) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "PostgreSQL model registry logical import requires declared capability {}",
+                POSTGRES_LOGICAL_MODEL_CAPABILITY
+            ),
+        ));
+    }
+    let supported_repositories = dry_run
+        .supported_repositories
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let missing_repositories = POSTGRES_LOGICAL_MODEL_REPOSITORIES
+        .iter()
+        .copied()
+        .filter(|repository_id| !supported_repositories.contains(repository_id))
+        .collect::<Vec<_>>();
+    if !missing_repositories.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "PostgreSQL model registry logical import requires declared repository support: {}",
+                missing_repositories.join(", ")
+            ),
+        ));
+    }
     if bundle.bundle_version != 1 {
         return Err(CoreError::new(
             CoreErrorKind::InvalidInput,
@@ -442,17 +492,61 @@ fn validate_postgres_logical_model_bundle(
             ),
         ));
     }
-    for repository_id in ["model_endpoints", "model_configurations"] {
-        let repository = bundle
+    for repository_id in POSTGRES_LOGICAL_MODEL_REPOSITORIES {
+        let repositories = bundle
             .repositories
             .iter()
-            .find(|repository| repository.repository_id == repository_id)
-            .ok_or_else(|| {
-                CoreError::new(
+            .filter(|repository| repository.repository_id == repository_id)
+            .collect::<Vec<_>>();
+        if repositories.is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("logical bundle is missing repository {repository_id}"),
+            ));
+        }
+        if repositories.len() != 1 {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("logical bundle contains duplicate repository {repository_id}"),
+            ));
+        }
+        let repository = repositories[0];
+        let mut stable_ids = BTreeSet::new();
+        for record in &repository.records {
+            if record.stable_id.trim().is_empty() {
+                return Err(CoreError::new(
                     CoreErrorKind::InvalidInput,
-                    format!("logical bundle is missing repository {repository_id}"),
-                )
-            })?;
+                    format!("repository {repository_id} contains a record without a stable_id"),
+                ));
+            }
+            if !stable_ids.insert(record.stable_id.as_str()) {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    format!(
+                        "repository {repository_id} contains duplicate stable_id {}",
+                        record.stable_id
+                    ),
+                ));
+            }
+            match (repository_id, &record.payload) {
+                ("model_endpoints", LogicalStorageRecordPayload::ModelEndpoint(endpoint))
+                    if record.record_version == 1 && record.stable_id == endpoint.endpoint_id => {}
+                (
+                    "model_configurations",
+                    LogicalStorageRecordPayload::ModelConfiguration(configuration),
+                ) if record.record_version == 1
+                    && record.stable_id == configuration.model_config_id =>
+                {}
+                _ => {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        format!(
+                            "repository {repository_id} contains a record with invalid stable_id, payload, or record version"
+                        ),
+                    ))
+                }
+            }
+        }
         if repository.schema_version != 1
             || repository.exported_count != repository.records.len() as u64
         {
@@ -461,9 +555,45 @@ fn validate_postgres_logical_model_bundle(
                 format!("repository {repository_id} version/count proof failed"),
             ));
         }
+        if !repository
+            .required_capabilities
+            .iter()
+            .any(|capability| capability == POSTGRES_LOGICAL_MODEL_CAPABILITY)
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "repository {repository_id} must require capability {}",
+                    POSTGRES_LOGICAL_MODEL_CAPABILITY
+                ),
+            ));
+        }
+        let missing_capabilities = repository
+            .required_capabilities
+            .iter()
+            .filter(|capability| !supported_capabilities.contains(capability.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing_capabilities.is_empty() {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "target backend {} is missing required capabilities for repository {}: {}",
+                    dry_run.target_backend,
+                    repository_id,
+                    missing_capabilities.join(", ")
+                ),
+            ));
+        }
+        let Some(declared_checksum) = repository.checksum.as_deref() else {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!("repository {repository_id} requires a checksum proof"),
+            ));
+        };
         let checksum =
             crate::sqlite_runtime_import::logical_storage_records_checksum(&repository.records)?;
-        if repository.checksum.as_deref() != Some(checksum.as_str()) {
+        if declared_checksum != checksum {
             return Err(CoreError::new(
                 CoreErrorKind::InvalidInput,
                 format!("repository {repository_id} checksum proof failed"),

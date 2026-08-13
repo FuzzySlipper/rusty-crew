@@ -189,15 +189,18 @@ async function registryAdminRecord(
     runtimeConfig.profilesDir,
   );
   const runtime = runtimeConfigReadbackFromRegistry(record, runtimeConfig);
-  const modelDependencies = await resolveAdminModelDependencies(
+  const modelDependencyResolution = await resolveAdminModelDependencies(
+    record.profileId,
     runtime.modelConfigId,
     bridge,
   );
-  const modelDiagnostics = adminModelDependencyDiagnostics(
-    record.profileId,
-    runtime.modelConfigId,
-    modelDependencies,
-  );
+  const modelDiagnostics = modelDependencyResolution.validationAvailable
+    ? adminModelDependencyDiagnostics(
+        record.profileId,
+        runtime.modelConfigId,
+        modelDependencyResolution.dependencies,
+      )
+    : [];
   return {
     source: "registry",
     profileId: record.profileId,
@@ -209,7 +212,9 @@ async function registryAdminRecord(
     ownerId: record.ownerId,
     modelConfigId: runtime.modelConfigId,
     providerAlias: runtime.providerAlias,
-    ...(modelDependencies === undefined ? {} : { modelDependencies }),
+    ...(modelDependencyResolution.dependencies === undefined
+      ? {}
+      : { modelDependencies: modelDependencyResolution.dependencies }),
     externalMessageDeliveryPolicy: runtime.externalMessageDeliveryPolicy,
     localToolProfileId: runtime.localToolProfileId,
     toolPolicy: runtime.toolPolicy,
@@ -227,40 +232,133 @@ async function registryAdminRecord(
     sourceAssetStatuses,
     diagnostics: [
       ...driftDiagnostics(record.profileId, sourceAssetStatuses),
+      ...modelDependencyResolution.diagnostics,
       ...modelDiagnostics,
     ],
     fallbackStatus: "registry_authoritative",
   };
 }
 
+interface AdminModelDependencyResolution {
+  dependencies?: AdminProfileModelDependencies;
+  validationAvailable: boolean;
+  diagnostics: NativeRuntimeConfigDiagnostic[];
+}
+
 async function resolveAdminModelDependencies(
+  profileId: string,
   modelConfigId: string | undefined,
   bridge: BuildAdminProfileRegistryDiagnosticsInput["bridge"],
-): Promise<AdminProfileModelDependencies | undefined> {
-  if (
-    modelConfigId === undefined ||
-    bridge.getModelConfiguration === undefined
-  ) {
-    return undefined;
+): Promise<AdminModelDependencyResolution> {
+  if (modelConfigId === undefined) {
+    return { validationAvailable: true, diagnostics: [] };
   }
-  const configuration = await bridge.getModelConfiguration(modelConfigId);
-  if (configuration === undefined) return {};
-  if (bridge.getModelEndpoint === undefined) return { configuration };
-  const endpoint = await bridge.getModelEndpoint(configuration.endpointId);
-  if (endpoint === undefined) return { configuration };
-  if (
-    endpoint.credentialId === undefined ||
-    bridge.getServiceCredential === undefined
-  ) {
-    return { configuration, endpoint };
+
+  const unavailable = (dependency: string, error?: unknown) => ({
+    validationAvailable: false,
+    diagnostics: [
+      modelDependencyReaderUnavailableDiagnostic(
+        profileId,
+        modelConfigId,
+        dependency,
+        error,
+      ),
+    ],
+  });
+
+  if (bridge.getModelConfiguration === undefined) {
+    return unavailable("model configuration");
   }
-  const credential = await bridge.getServiceCredential(endpoint.credentialId);
+
+  let configuration: NativeModelConfigurationRecord | undefined;
+  try {
+    configuration = await bridge.getModelConfiguration(modelConfigId);
+  } catch (error) {
+    return unavailable("model configuration", error);
+  }
+  if (configuration === undefined) {
+    return {
+      dependencies: {},
+      validationAvailable: true,
+      diagnostics: [],
+    };
+  }
+
+  if (bridge.getModelEndpoint === undefined) {
+    return {
+      dependencies: { configuration },
+      ...unavailable("model endpoint"),
+    };
+  }
+
+  let endpoint: NativeModelEndpointRecord | undefined;
+  try {
+    endpoint = await bridge.getModelEndpoint(configuration.endpointId);
+  } catch (error) {
+    return {
+      dependencies: { configuration },
+      ...unavailable("model endpoint", error),
+    };
+  }
+  if (endpoint === undefined) {
+    return {
+      dependencies: { configuration },
+      validationAvailable: true,
+      diagnostics: [],
+    };
+  }
+
+  if (endpoint.credentialId === undefined) {
+    return {
+      dependencies: { configuration, endpoint },
+      validationAvailable: true,
+      diagnostics: [],
+    };
+  }
+  if (bridge.getServiceCredential === undefined) {
+    return {
+      dependencies: { configuration, endpoint },
+      ...unavailable("service credential"),
+    };
+  }
+
+  let credential: NativeServiceCredentialRecord | undefined;
+  try {
+    credential = await bridge.getServiceCredential(endpoint.credentialId);
+  } catch (error) {
+    return {
+      dependencies: { configuration, endpoint },
+      ...unavailable("service credential", error),
+    };
+  }
   return {
-    configuration,
-    endpoint,
-    ...(credential === undefined
-      ? {}
-      : { credential: redactedCredentialDependency(credential) }),
+    dependencies: {
+      configuration,
+      endpoint,
+      ...(credential === undefined
+        ? {}
+        : { credential: redactedCredentialDependency(credential) }),
+    },
+    validationAvailable: true,
+    diagnostics: [],
+  };
+}
+
+function modelDependencyReaderUnavailableDiagnostic(
+  profileId: string,
+  modelConfigId: string,
+  dependency: string,
+  error?: unknown,
+): NativeRuntimeConfigDiagnostic {
+  const detail =
+    error === undefined
+      ? "reader was not supplied"
+      : `reader failed: ${errorMessage(error, "unknown reader failure")}`;
+  return {
+    severity: "warning",
+    code: "model_dependency_validation_unavailable",
+    path: `profiles.${profileId}.modelConfigId`,
+    message: `model ${dependency} dependency validation is unavailable for ${modelConfigId}; ${detail}`,
   };
 }
 
@@ -595,4 +693,10 @@ function profileIdsFromRuntimeConfig(
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() !== ""
+    ? error.message
+    : fallback;
 }

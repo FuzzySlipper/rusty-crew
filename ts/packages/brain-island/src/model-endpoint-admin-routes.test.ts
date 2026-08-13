@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  applyNormalizedCredentialRuntimeRefreshes,
   handleModelRegistryAdminRequest,
   modelConfigurationApiRecord,
   modelEndpointApiRecord,
@@ -85,6 +86,63 @@ test("normalized credential refresh rebuilds every shared consumer and no unrela
     }),
     ["profile-a", "profile-b"],
   );
+});
+
+test("normalized credential refresh retries an in-flight shared consumer exactly once", async () => {
+  const runtimeCredentialRevisions = new Map([
+    ["profile-a", 1],
+    ["profile-b", 1],
+    ["profile-other", 1],
+  ]);
+  const rebuildCounts = new Map<string, number>();
+  const deferred = new Set<string>();
+  let profileBInFlight = true;
+  const rebuild = async (profileId: string) => {
+    if (profileId === "profile-b" && profileBInFlight) {
+      return {
+        status: "blocked" as const,
+        reasonCode: "runtime_rebuild_in_flight",
+      };
+    }
+    rebuildCounts.set(profileId, (rebuildCounts.get(profileId) ?? 0) + 1);
+    runtimeCredentialRevisions.set(profileId, 2);
+    return { status: "completed" as const };
+  };
+  const complete = (profileId: string) => deferred.delete(profileId);
+
+  const initial = await applyNormalizedCredentialRuntimeRefreshes({
+    profileIds: ["profile-a", "profile-b"],
+    rebuild,
+    defer: (profileId) => deferred.add(profileId),
+    complete,
+  });
+  assert.deepEqual(initial, {
+    refreshedProfileIds: ["profile-a"],
+    deferredProfileIds: ["profile-b"],
+  });
+  assert.deepEqual([...deferred], ["profile-b"]);
+
+  profileBInFlight = false;
+  const retry = await applyNormalizedCredentialRuntimeRefreshes({
+    profileIds: [...deferred],
+    rebuild,
+    defer: (profileId) => deferred.add(profileId),
+    complete,
+  });
+  assert.deepEqual(retry, {
+    refreshedProfileIds: ["profile-b"],
+    deferredProfileIds: [],
+  });
+  assert.deepEqual(Object.fromEntries(runtimeCredentialRevisions), {
+    "profile-a": 2,
+    "profile-b": 2,
+    "profile-other": 1,
+  });
+  assert.deepEqual(Object.fromEntries(rebuildCounts), {
+    "profile-a": 1,
+    "profile-b": 1,
+  });
+  assert.equal(deferred.size, 0);
 });
 
 class MemoryModelRegistry implements ModelEndpointAdminRouteContext {

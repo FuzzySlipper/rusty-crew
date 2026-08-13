@@ -1014,6 +1014,12 @@ impl PostgresBackendStore {
             Some(existing.revision),
         )?;
         reject_linked_postgres_service_credential_mutation(&existing, "delete")?;
+        reject_postgres_model_endpoint_credential_mutation(
+            &mut tx,
+            &schema,
+            &delete.credential_id,
+            "delete",
+        )?;
         let changed = tx
             .execute(
                 &format!(
@@ -1824,6 +1830,12 @@ fn upsert_service_credential_in_tx(
     if let Some(existing) = existing {
         if write.clear_secret {
             reject_linked_postgres_service_credential_mutation(existing, "clear")?;
+            reject_postgres_model_endpoint_credential_mutation(
+                tx,
+                schema,
+                &write.credential_id,
+                "clear",
+            )?;
         }
         for alias in &existing.linked_provider_aliases {
             let provider = get_model_provider_in_client(tx, schema, alias)?.ok_or_else(|| {
@@ -1938,6 +1950,41 @@ fn reject_linked_postgres_service_credential_mutation(
             "cannot {action} service credential {} while linked to model providers: {}",
             credential.credential_id,
             credential.linked_provider_aliases.join(", ")
+        ),
+    ))
+}
+
+fn reject_postgres_model_endpoint_credential_mutation<C: GenericClient>(
+    client: &mut C,
+    schema: &str,
+    credential_id: &str,
+    action: &str,
+) -> CoreResult<()> {
+    let endpoint_ids = client
+        .query(
+            &format!(
+                "SELECT endpoint_id FROM {schema}.model_endpoints
+                  WHERE credential_id = $1 ORDER BY endpoint_id"
+            ),
+            &[&credential_id],
+        )
+        .map_err(|error| {
+            postgres_error(
+                "list PostgreSQL model endpoints linked to service credential",
+                error,
+            )
+        })?
+        .into_iter()
+        .map(|row| row.get::<_, String>(0))
+        .collect::<Vec<_>>();
+    if endpoint_ids.is_empty() {
+        return Ok(());
+    }
+    Err(CoreError::new(
+        CoreErrorKind::ActionRejected,
+        format!(
+            "cannot {action} service credential {credential_id} while linked to model endpoints: {}",
+            endpoint_ids.join(", ")
         ),
     ))
 }

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { CoreEvent, SessionState } from "@rusty-crew/contracts";
+import type {
+  CoreEvent,
+  ProfileId,
+  SessionId,
+  SessionState,
+} from "@rusty-crew/contracts";
 
 import {
   appendCoreEventsToChatLog,
@@ -79,6 +84,11 @@ test("dispatch preserves cancellation without a completed terminal fallback", as
   const chatEvents: Array<{ kind: string; payload: unknown }> = [];
   const settled: Array<{ status: string }> = [];
   const finished: Array<{ status: string }> = [];
+  const postWakeSettlements: Array<{
+    sessionId: string;
+    profileId?: string;
+    stillInFlight: boolean;
+  }> = [];
   let postTurnCount = 0;
   const context = {
     bridge: {
@@ -105,6 +115,19 @@ test("dispatch preserves cancellation without a completed terminal fallback", as
     },
     inFlightWakes: new Set(),
     deferredWakeSessions: new Set(),
+    afterWakeSettled: async ({
+      sessionId,
+      profileId,
+    }: {
+      sessionId: SessionId;
+      profileId?: ProfileId;
+    }) => {
+      postWakeSettlements.push({
+        sessionId,
+        profileId,
+        stillInFlight: context.inFlightWakes.has(sessionId),
+      });
+    },
     toolCallDebugStore: {},
     brainForProfile: () => ({}),
     configuredSessionForRuntimeSession: () => undefined,
@@ -166,6 +189,13 @@ test("dispatch preserves cancellation without a completed terminal fallback", as
     ["cancelled"],
   );
   assert.equal(postTurnCount, 0);
+  assert.deepEqual(postWakeSettlements, [
+    {
+      sessionId: "session-1",
+      profileId: "profile-1",
+      stillInFlight: false,
+    },
+  ]);
   assert.equal(
     chatEvents.some((event) => event.kind === "assistant_message_completed"),
     false,

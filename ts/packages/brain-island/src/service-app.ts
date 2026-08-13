@@ -123,6 +123,7 @@ import {
   type ModelProviderWriteRefreshResult,
 } from "./service-model-provider-routes.js";
 import {
+  applyNormalizedCredentialRuntimeRefreshes,
   handleModelRegistryAdminRequest,
   normalizedCredentialRefreshProfileIds,
   normalizedModelRefreshProfileIds,
@@ -525,6 +526,7 @@ interface ServiceState {
   readonly timers: Set<NodeJS.Timeout>;
   readonly inFlightWakes: Set<SessionId>;
   readonly deferredWakeSessions: Set<SessionId>;
+  readonly deferredCredentialRuntimeRefreshProfiles: Set<ProfileId>;
   readonly deferredRuntimeActivitySettlements: DeferredRuntimeActivitySettlementQueue;
   readonly runtimePauses: Map<string, RuntimePauseRecord>;
   readonly claimedDeliveryIntentIds: Set<number>;
@@ -1206,6 +1208,7 @@ export async function createRustyCrewServiceApp(
       timers: new Set(),
       inFlightWakes: new Set(),
       deferredWakeSessions: new Set(),
+      deferredCredentialRuntimeRefreshProfiles: new Set(),
       deferredRuntimeActivitySettlements:
         new DeferredRuntimeActivitySettlementQueue(),
       runtimePauses: new Map(),
@@ -2480,7 +2483,11 @@ async function refreshNormalizedModelRuntimes(
 async function refreshNormalizedCredentialRuntimes(
   state: ServiceState,
   credentialId: string,
-): Promise<{ profileIds: string[] }> {
+): Promise<{
+  profileIds: string[];
+  refreshedProfileIds: string[];
+  deferredProfileIds: string[];
+}> {
   const endpoints = await state.bridge.listModelEndpoints({ limit: 1_000 });
   const configurations = await state.bridge.listModelConfigurations({
     limit: 1_000,
@@ -2494,17 +2501,64 @@ async function refreshNormalizedCredentialRuntimes(
     configurations,
     profiles,
   });
-  for (const profileId of profileIds) {
-    await applyServiceRuntimeRebuild(state, {
-      name: "apply_runtime_rebuild",
-      target: { scope: "profile", profileId },
-      actor: { operatorId: "service-credential-admin" },
-      requestId: `credential-refresh:${credentialId}:${profileId}`,
-      reason: `credential ${credentialId} updated`,
-      body: {},
-    });
+  const refresh = await applyNormalizedCredentialRuntimeRefreshes({
+    profileIds,
+    rebuild: async (profileId) => {
+      const rebuild = await applyServiceRuntimeRebuild(state, {
+        name: "apply_runtime_rebuild",
+        target: { scope: "profile", profileId },
+        actor: { operatorId: "service-credential-admin" },
+        requestId: `credential-refresh:${credentialId}:${profileId}`,
+        reason: `credential ${credentialId} updated`,
+        body: {},
+      });
+      return rebuild.apply;
+    },
+    defer: (profileId) => {
+      state.deferredCredentialRuntimeRefreshProfiles.add(
+        profileId as ProfileId,
+      );
+      recordServiceEvent(state, {
+        source: "service-host",
+        eventType: "credential_runtime_refresh_deferred",
+        severity: "warning",
+        summary: `Credential ${credentialId} runtime refresh for profile ${profileId} was deferred until its in-flight wake settles.`,
+      });
+    },
+    complete: (profileId) => {
+      state.deferredCredentialRuntimeRefreshProfiles.delete(
+        profileId as ProfileId,
+      );
+    },
+  });
+  return { profileIds, ...refresh };
+}
+
+async function retryDeferredCredentialRuntimeRefresh(
+  state: ServiceState,
+  profileId: ProfileId | undefined,
+): Promise<void> {
+  if (
+    profileId === undefined ||
+    !state.deferredCredentialRuntimeRefreshProfiles.has(profileId)
+  ) {
+    return;
   }
-  return { profileIds };
+  const rebuild = await applyServiceRuntimeRebuild(state, {
+    name: "apply_runtime_rebuild",
+    target: { scope: "profile", profileId },
+    actor: { operatorId: "service-credential-admin" },
+    requestId: `credential-refresh-deferred:${profileId}`,
+    reason: "deferred credential refresh after in-flight wake settled",
+    body: {},
+  });
+  if (rebuild.apply.status !== "completed") return;
+  state.deferredCredentialRuntimeRefreshProfiles.delete(profileId);
+  recordServiceEvent(state, {
+    source: "service-host",
+    eventType: "credential_runtime_refresh_completed",
+    summary: `Deferred credential runtime refresh completed for profile ${profileId}.`,
+  });
 }
 
 function modelProviderRefreshCommandName(
@@ -6749,6 +6803,8 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
     bridge: state.bridge,
     inFlightWakes: state.inFlightWakes,
     deferredWakeSessions: state.deferredWakeSessions,
+    afterWakeSettled: ({ profileId }) =>
+      retryDeferredCredentialRuntimeRefresh(state, profileId),
     toolCallDebugStore: state.toolCallDebugStore,
     brainForProfile: (profileId) =>
       state.runtimeConfigApplyResult.brainHandlesByProfileId[profileId],

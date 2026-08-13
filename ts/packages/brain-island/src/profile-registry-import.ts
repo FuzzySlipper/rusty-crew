@@ -103,6 +103,7 @@ export async function buildProfileRegistryImportPlan(
     ...profileFieldDiagnostics(source),
     ...activationDiagnostics(mode, input),
     ...(await modelDependencyDiagnostics(source.profile, input.bridge)),
+    ...(await modelDependencyArtifactDiagnostics(source, input.bridge)),
   ];
   if (input.runtimeConfig && input.bridge) {
     const profiles = mergeProfileForValidation(
@@ -257,6 +258,276 @@ async function modelDependencyDiagnostics(
     });
   }
   return diagnostics;
+}
+
+interface LoadedDependencyArtifact {
+  path: string;
+  value?: unknown;
+  error?: string;
+}
+
+async function modelDependencyArtifactDiagnostics(
+  source: LoadedProfileConfigSource,
+  bridge: BuildProfileRegistryImportPlanInput["bridge"],
+): Promise<NativeRuntimeConfigDiagnostic[]> {
+  const paths = {
+    configuration: join(
+      source.profileDir,
+      "dependencies",
+      "model-configuration.json",
+    ),
+    endpoint: join(source.profileDir, "dependencies", "model-endpoint.json"),
+    credential: join(
+      source.profileDir,
+      "dependencies",
+      "credential-reference.json",
+    ),
+    checksums: join(source.profileDir, "checksums.json"),
+  };
+  const [configuration, endpoint, credential, checksums] = await Promise.all([
+    readDependencyArtifact(paths.configuration),
+    readDependencyArtifact(paths.endpoint),
+    readDependencyArtifact(paths.credential),
+    readDependencyArtifact(paths.checksums),
+  ]);
+  const artifacts = { configuration, endpoint, credential, checksums };
+  if (Object.values(artifacts).every((artifact) => artifact === undefined)) {
+    return [];
+  }
+
+  const diagnostics: NativeRuntimeConfigDiagnostic[] = [];
+  for (const artifact of Object.values(artifacts)) {
+    if (artifact?.error !== undefined) {
+      diagnostics.push({
+        severity: "error",
+        code: "model_dependency_artifact_invalid",
+        path: relative(source.profileDir, artifact.path),
+        message: artifact.error,
+      });
+    }
+  }
+  if (diagnostics.length > 0) return diagnostics;
+  if (source.profile.modelConfigId === undefined) {
+    if (
+      configuration?.value !== undefined ||
+      endpoint?.value !== undefined ||
+      credential?.value !== undefined
+    ) {
+      diagnostics.push({
+        severity: "error",
+        code: "model_dependency_artifact_reference_mismatch",
+        path: "dependencies",
+        message:
+          "portable model dependency artifacts were supplied for a profile without modelConfigId",
+      });
+    }
+    return diagnostics;
+  }
+  if (configuration?.value === undefined || endpoint?.value === undefined) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_dependency_artifact_missing",
+      path: "dependencies",
+      message:
+        "portable model dependencies require both model-configuration.json and model-endpoint.json",
+    });
+    return diagnostics;
+  }
+  if (checksums?.value === undefined) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_dependency_artifact_checksum_missing",
+      path: "checksums.json",
+      message:
+        "portable model dependency artifacts require checksums.json proof",
+    });
+  }
+  if (
+    bridge?.getModelConfiguration === undefined ||
+    bridge.getModelEndpoint === undefined ||
+    bridge.getServiceCredential === undefined
+  ) {
+    return [
+      {
+        severity: "error",
+        code: "model_dependency_artifact_validation_unavailable",
+        path: "dependencies",
+        message:
+          "portable model dependency artifacts require configuration, endpoint, and credential readers",
+      },
+    ];
+  }
+
+  const expectedConfiguration = asRecord(configuration.value);
+  const expectedEndpoint = asRecord(endpoint.value);
+  const modelConfigId = stringField(expectedConfiguration, "modelConfigId");
+  const endpointId = stringField(expectedConfiguration, "endpointId");
+  const exportedEndpointId = stringField(expectedEndpoint, "endpointId");
+  if (
+    modelConfigId === undefined ||
+    endpointId === undefined ||
+    exportedEndpointId !== endpointId ||
+    modelConfigId !== source.profile.modelConfigId
+  ) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_dependency_artifact_reference_mismatch",
+      path: "dependencies",
+      message:
+        "portable model dependency artifact identities do not match the imported profile reference chain",
+    });
+    return diagnostics;
+  }
+
+  const currentConfiguration =
+    await bridge.getModelConfiguration(modelConfigId);
+  const currentEndpoint = await bridge.getModelEndpoint(endpointId);
+  compareDependencyArtifact(
+    diagnostics,
+    "model_configuration",
+    configuration.value,
+    currentConfiguration,
+  );
+  compareDependencyArtifact(
+    diagnostics,
+    "model_endpoint",
+    endpoint.value,
+    currentEndpoint,
+  );
+
+  const credentialId = stringField(expectedEndpoint, "credentialId");
+  if (credentialId !== undefined) {
+    if (credential?.value === undefined) {
+      diagnostics.push({
+        severity: "error",
+        code: "model_dependency_artifact_missing",
+        path: "dependencies/credential-reference.json",
+        message: `endpoint ${endpointId} requires credential reference ${credentialId}`,
+      });
+    } else {
+      const expectedCredential = asRecord(credential.value);
+      if (stringField(expectedCredential, "credentialId") !== credentialId) {
+        diagnostics.push({
+          severity: "error",
+          code: "model_dependency_artifact_reference_mismatch",
+          path: "dependencies/credential-reference.json",
+          message: `credential dependency does not match endpoint reference ${credentialId}`,
+        });
+      } else {
+        const currentCredential =
+          await bridge.getServiceCredential(credentialId);
+        compareDependencyArtifact(
+          diagnostics,
+          "credential_reference",
+          credential.value,
+          currentCredential === undefined
+            ? undefined
+            : {
+                credentialId: currentCredential.credentialId,
+                displayName: currentCredential.displayName,
+                credentialKind: currentCredential.credentialKind,
+                revision: currentCredential.revision,
+                hasSecret: currentCredential.credential.hasSecret,
+              },
+        );
+      }
+    }
+  }
+
+  validateDeclaredDependencyChecksums(diagnostics, checksums?.value, artifacts);
+  return diagnostics;
+}
+
+async function readDependencyArtifact(
+  path: string,
+): Promise<LoadedDependencyArtifact | undefined> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return undefined;
+    return { path, error: `could not read dependency artifact ${path}` };
+  }
+  try {
+    return { path, value: JSON.parse(raw) as unknown };
+  } catch {
+    return { path, error: `dependency artifact ${path} is not valid JSON` };
+  }
+}
+
+function compareDependencyArtifact(
+  diagnostics: NativeRuntimeConfigDiagnostic[],
+  kind: string,
+  expected: unknown,
+  current: unknown,
+): void {
+  if (
+    current === undefined ||
+    dependencyChecksum(expected) !== dependencyChecksum(current)
+  ) {
+    diagnostics.push({
+      severity: "error",
+      code: "model_dependency_artifact_drift",
+      path: `dependencies/${kind}`,
+      message: `${kind} does not match the exported dependency snapshot`,
+    });
+  }
+}
+
+function validateDeclaredDependencyChecksums(
+  diagnostics: NativeRuntimeConfigDiagnostic[],
+  checksumsValue: unknown,
+  artifacts: Record<string, LoadedDependencyArtifact | undefined>,
+): void {
+  if (checksumsValue === undefined) return;
+  const dependencyChecksums = asRecord(
+    asRecord(checksumsValue).modelDependencies,
+  );
+  for (const [artifactKey, checksumKey] of [
+    ["configuration", "modelConfiguration"],
+    ["endpoint", "modelEndpoint"],
+    ["credential", "credentialReference"],
+  ] as const) {
+    const artifact = artifacts[artifactKey]?.value;
+    const declared = stringField(dependencyChecksums, checksumKey);
+    if (artifact !== undefined && declared !== dependencyChecksum(artifact)) {
+      diagnostics.push({
+        severity: "error",
+        code: "model_dependency_artifact_checksum_mismatch",
+        path: `checksums.json:modelDependencies.${checksumKey}`,
+        message: `declared ${checksumKey} checksum does not match its dependency artifact`,
+      });
+    }
+  }
+}
+
+function dependencyChecksum(value: unknown): string {
+  return `sha256:${createHash("sha256").update(stableJson(value)).digest("hex")}`;
+}
+
+function stableJson(value: unknown): string {
+  if (value === undefined) return "null";
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringField(
+  value: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  return typeof value[key] === "string" ? value[key] : undefined;
 }
 
 function activeRuntimeSettingsJson(

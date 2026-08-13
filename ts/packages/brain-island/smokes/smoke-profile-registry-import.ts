@@ -109,6 +109,51 @@ backgroundReview:
       modelConfigId: "normalized-model",
     }),
   );
+  mkdirSync(join(profilesDir, "dependencies"), { recursive: true });
+  writeFileSync(
+    join(profilesDir, "dependencies", "model-configuration.json"),
+    JSON.stringify({
+      modelConfigId: "normalized-model",
+      endpointId: "normalized-endpoint",
+      status: "active",
+      modelId: "normalized/model",
+      reasoningHistory: "provider_default",
+      thinkingMode: "provider_default",
+      promptCachingPolicy: "disabled",
+      capabilities: { version: 1, imageInput: false },
+      metadataJson: {},
+      revision: 1,
+      createdAt: "2026-06-26T08:00:00Z",
+      updatedAt: "2026-06-26T08:00:00Z",
+    }),
+  );
+  writeFileSync(
+    join(profilesDir, "dependencies", "model-endpoint.json"),
+    JSON.stringify({
+      endpointId: "normalized-endpoint",
+      status: "active",
+      baseUrl: "https://example.invalid/v1",
+      protocol: "responses",
+      wireDialect: "openai_stateful",
+      authScheme: "openai_codex_oauth",
+      credentialId: "oauth-credential",
+      promptCacheTransport: "none",
+      metadataJson: {},
+      revision: 3,
+      createdAt: "2026-06-26T08:00:00Z",
+      updatedAt: "2026-06-26T08:00:00Z",
+    }),
+  );
+  writeFileSync(
+    join(profilesDir, "dependencies", "credential-reference.json"),
+    JSON.stringify({
+      credentialId: "oauth-credential",
+      displayName: "OAuth credential",
+      credentialKind: "openai_oauth",
+      revision: 4,
+      hasSecret: false,
+    }),
+  );
 
   const bridge = await loadNativeBridge();
   const runtimeConfig: RustyCrewRuntimeConfig = {
@@ -339,6 +384,12 @@ backgroundReview:
   assert.equal(
     normalizedPlan.diagnostics.some(
       (diagnostic) => diagnostic.code === "service_credential_secret_missing",
+    ),
+    true,
+  );
+  assert.equal(
+    normalizedPlan.diagnostics.some(
+      (diagnostic) => diagnostic.code === "model_dependency_artifact_drift",
     ),
     true,
   );

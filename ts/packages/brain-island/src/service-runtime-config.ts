@@ -1413,25 +1413,18 @@ function brainModuleDiagnostics(input: {
             temperatureMilli:
               input.profile.profile.modelConfig.temperatureMilli,
           }),
-      ...(input.profile.profile.modelConfig.apiKeyEnv === undefined
-        ? {
-            credential: {
-              credentialId: input.profile.profile.modelConfig.credentialId,
-              revision: input.profile.profile.modelConfig.credentialRevision,
-              hasSecret:
-                input.profile.profile.modelConfig.credentialKind !== undefined,
-              kind: input.profile.profile.modelConfig.credentialKind,
-            },
-          }
-        : {
-            credential: {
-              credentialId: input.profile.profile.modelConfig.credentialId,
-              revision: input.profile.profile.modelConfig.credentialRevision,
-              hasSecret: true,
-              secretRef: input.profile.profile.modelConfig.apiKeyEnv,
-              kind: input.profile.profile.modelConfig.credentialKind,
-            },
-          }),
+      credential: {
+        credentialId: input.profile.profile.modelConfig.credentialId,
+        revision: input.profile.profile.modelConfig.credentialRevision,
+        // apiKeyEnv is populated only when the immutable model snapshot was
+        // resolved with actual secret material. Credential kind alone only
+        // proves that a credential record exists.
+        hasSecret: input.profile.profile.modelConfig.apiKeyEnv !== undefined,
+        ...(input.profile.profile.modelConfig.apiKeyEnv === undefined
+          ? {}
+          : { secretRef: input.profile.profile.modelConfig.apiKeyEnv }),
+        kind: input.profile.profile.modelConfig.credentialKind,
+      },
     },
     ...(input.profile.profile.contextPolicy === undefined
       ? {}

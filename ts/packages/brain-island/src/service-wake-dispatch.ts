@@ -86,6 +86,10 @@ export interface ServiceWakeDispatchContext {
   >;
   inFlightWakes: Set<SessionId>;
   deferredWakeSessions: Set<SessionId>;
+  afterWakeSettled?(input: {
+    sessionId: SessionId;
+    profileId?: ProfileId;
+  }): Promise<void>;
   toolCallDebugStore: ToolCallDebugStore;
   brainForProfile(profileId: ProfileId): BrainImplementationHandle | undefined;
   configuredSessionForRuntimeSession(
@@ -555,6 +559,24 @@ export async function dispatchWake(
       }
     }
     context.inFlightWakes.delete(sessionId);
+    if (context.afterWakeSettled !== undefined) {
+      try {
+        await context.afterWakeSettled({
+          sessionId,
+          profileId: activeWake?.session.profileId,
+        });
+      } catch (error: unknown) {
+        context.recordEvent({
+          source: "service-host",
+          eventType: "post_wake_settlement_failed",
+          severity: "error",
+          summary: errorMessage(
+            error,
+            `post-wake settlement for ${sessionId} failed`,
+          ),
+        });
+      }
+    }
     if (context.deferredWakeSessions.delete(sessionId)) {
       queueMicrotask(() => {
         void dispatchWake(

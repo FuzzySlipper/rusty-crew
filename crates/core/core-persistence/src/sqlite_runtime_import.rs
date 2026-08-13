@@ -206,6 +206,34 @@ pub(crate) fn validate_logical_storage_import(
         .iter()
         .map(|repository| repository.records.len() as u64)
         .sum();
+    let mut logical_record_counts = BTreeMap::<(String, String), u64>::new();
+    for repository in &bundle.repositories {
+        for record in &repository.records {
+            *logical_record_counts
+                .entry((repository.repository_id.clone(), record.stable_id.clone()))
+                .or_default() += 1;
+        }
+    }
+    let duplicate_logical_record_keys = logical_record_counts
+        .into_iter()
+        .filter_map(|(key, count)| {
+            if count > 1 {
+                issues.push(logical_import_issue(
+                    LogicalStorageImportIssueSeverity::Error,
+                    "duplicate_logical_record",
+                    Some(key.0.clone()),
+                    Some(key.1.clone()),
+                    format!(
+                        "logical record key ({}, {}) appears {count} times",
+                        key.0, key.1
+                    ),
+                ));
+                Some(key)
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeSet<_>>();
     let supported_capabilities = if dry_run.supported_capabilities.is_empty() {
         sqlite_storage_capabilities()
             .into_iter()
@@ -320,6 +348,25 @@ pub(crate) fn validate_logical_storage_import(
             ));
         }
 
+        if matches!(
+            repository.repository_id.as_str(),
+            "model_endpoints" | "model_configurations"
+        ) && repository.checksum.is_none()
+        {
+            refused_records += repository.records.len() as u64;
+            repository_integrity_refused = true;
+            issues.push(logical_import_issue(
+                LogicalStorageImportIssueSeverity::Error,
+                "model_repository_checksum_missing",
+                Some(repository.repository_id.clone()),
+                None,
+                format!(
+                    "model repository {} must include a checksum",
+                    repository.repository_id
+                ),
+            ));
+        }
+
         if let Some(expected_checksum) = repository.checksum.as_deref() {
             let actual_checksum = logical_storage_records_checksum(&repository.records)?;
             if expected_checksum != actual_checksum {
@@ -345,8 +392,33 @@ pub(crate) fn validate_logical_storage_import(
         }
 
         for record in &repository.records {
+            if duplicate_logical_record_keys
+                .contains(&(repository.repository_id.clone(), record.stable_id.clone()))
+            {
+                refused_records += 1;
+                continue;
+            }
             match validate_logical_storage_record(repository, record, &dry_run.validation_time) {
                 Ok(()) => {
+                    if let LogicalStorageRecordPayload::ModelEndpoint(endpoint) = &record.payload {
+                        if let Err(error) =
+                            crate::repos::model_registry::validate_import_endpoint_credential(
+                                conn, endpoint,
+                            )
+                        {
+                            if !matches!(
+                                &error.kind,
+                                CoreErrorKind::NotFound | CoreErrorKind::InvalidInput
+                            ) {
+                                return Err(error);
+                            }
+                            refused_records += 1;
+                            issues.push(logical_model_endpoint_credential_issue(
+                                repository, record, error,
+                            ));
+                            continue;
+                        }
+                    }
                     accepted_records += 1;
                     accepted_record_keys
                         .insert((repository.repository_id.clone(), record.stable_id.clone()));
@@ -700,6 +772,30 @@ fn logical_import_issue(
     }
 }
 
+fn logical_model_endpoint_credential_issue(
+    repository: &LogicalStorageRepositoryBundle,
+    record: &LogicalStorageRecord,
+    error: CoreError,
+) -> LogicalStorageImportIssue {
+    let code = match error.kind {
+        CoreErrorKind::NotFound => "model_endpoint_credential_missing",
+        CoreErrorKind::InvalidInput if error.message.contains("has no secret") => {
+            "model_endpoint_credential_secret_missing"
+        }
+        CoreErrorKind::InvalidInput if error.message.contains("auth scheme is incompatible") => {
+            "model_endpoint_credential_auth_kind_mismatch"
+        }
+        _ => "model_endpoint_credential_validation_failed",
+    };
+    logical_import_issue(
+        LogicalStorageImportIssueSeverity::Error,
+        code,
+        Some(repository.repository_id.clone()),
+        Some(record.stable_id.clone()),
+        error.message,
+    )
+}
+
 fn row_to_import_batch(row: &rusqlite::Row<'_>) -> rusqlite::Result<RuntimeImportBatchRecord> {
     Ok(RuntimeImportBatchRecord {
         import_batch_id: row.get(0)?,
@@ -764,5 +860,96 @@ fn runtime_object_kind_from_str(raw: &str) -> rusqlite::Result<RuntimeObjectKind
                 format!("unknown runtime object kind {other}"),
             )),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn store() -> (CoordinationStore, PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "rusty-crew-runtime-import-{}.sqlite3",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        (CoordinationStore::open_file(&path).unwrap(), path)
+    }
+
+    #[test]
+    fn logical_import_rejects_duplicate_repository_stable_ids() {
+        let records = vec![
+            LogicalStorageRecord {
+                stable_id: "duplicate".to_string(),
+                record_version: 1,
+                exported_at: "2026-08-13T00:00:00Z".to_string(),
+                payload: LogicalStorageRecordPayload::TypedJson {
+                    object_kind: "test_record".to_string(),
+                    payload_json: json!({"value": 1}),
+                },
+            },
+            LogicalStorageRecord {
+                stable_id: "duplicate".to_string(),
+                record_version: 1,
+                exported_at: "2026-08-13T00:00:00Z".to_string(),
+                payload: LogicalStorageRecordPayload::TypedJson {
+                    object_kind: "test_record".to_string(),
+                    payload_json: json!({"value": 2}),
+                },
+            },
+        ];
+        let bundle = LogicalStorageExportBundle {
+            bundle_version: 1,
+            export_id: "duplicate-record-export".to_string(),
+            exported_at: "2026-08-13T00:00:00Z".to_string(),
+            service_version: Some("test".to_string()),
+            source: LogicalStorageExportSource {
+                backend: "sqlite".to_string(),
+                backend_label: "test".to_string(),
+                source_instance_id: None,
+                snapshot_ref: None,
+            },
+            schema_version: 1,
+            module_versions: Vec::new(),
+            capability_snapshot: Vec::new(),
+            repositories: vec![LogicalStorageRepositoryBundle {
+                repository_id: "test_records".to_string(),
+                schema_version: 1,
+                required_capabilities: vec!["logical_export_import".to_string()],
+                exported_count: records.len() as u64,
+                checksum: Some(logical_storage_records_checksum(&records).unwrap()),
+                records,
+            }],
+            legacy_id_mappings: Vec::new(),
+            profile_asset_refs: Vec::new(),
+        };
+        let dry_run = LogicalStorageImportDryRun {
+            import_batch_id: "duplicate-record-import".to_string(),
+            target_backend: "sqlite".to_string(),
+            validation_time: "2026-08-13T00:01:00Z".to_string(),
+            supported_capabilities: vec!["logical_export_import".to_string()],
+            supported_repositories: vec!["test_records".to_string()],
+        };
+        let (store, path) = store();
+
+        let report = store
+            .validate_logical_storage_import(&bundle, &dry_run)
+            .unwrap();
+        assert!(!report.can_apply());
+        assert_eq!(report.accepted_records, 0);
+        assert_eq!(report.refused_records, 2);
+        assert!(report.issues.iter().any(|issue| {
+            issue.code == "duplicate_logical_record"
+                && issue.repository_id.as_deref() == Some("test_records")
+                && issue.record_id.as_deref() == Some("duplicate")
+        }));
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
     }
 }

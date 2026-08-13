@@ -146,6 +146,41 @@ export function normalizedCredentialRefreshProfileIds(input: {
     .sort();
 }
 
+export async function applyNormalizedCredentialRuntimeRefreshes(input: {
+  profileIds: readonly string[];
+  rebuild(profileId: string): Promise<{
+    status: "completed" | "blocked";
+    reasonCode?: string;
+  }>;
+  defer(profileId: string): void;
+  complete(profileId: string): void;
+}): Promise<{
+  refreshedProfileIds: string[];
+  deferredProfileIds: string[];
+}> {
+  const refreshedProfileIds: string[] = [];
+  const deferredProfileIds: string[] = [];
+  for (const profileId of input.profileIds) {
+    const result = await input.rebuild(profileId);
+    if (
+      result.status === "blocked" &&
+      result.reasonCode === "runtime_rebuild_in_flight"
+    ) {
+      input.defer(profileId);
+      deferredProfileIds.push(profileId);
+      continue;
+    }
+    if (result.status !== "completed") {
+      throw new Error(
+        `credential runtime refresh for profile ${profileId} was blocked: ${result.reasonCode ?? "unknown"}`,
+      );
+    }
+    input.complete(profileId);
+    refreshedProfileIds.push(profileId);
+  }
+  return { refreshedProfileIds, deferredProfileIds };
+}
+
 function refreshRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }

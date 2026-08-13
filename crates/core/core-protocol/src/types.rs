@@ -2235,7 +2235,8 @@ fn validate_model_endpoint_fields(
     auth_scheme.validate_protocol(protocol)?;
     validate_credential_binding(auth_scheme, credential_id)?;
     prompt_cache_transport.validate_protocol(protocol)?;
-    validate_object_metadata("model endpoint metadata_json", metadata_json)
+    validate_object_metadata("model endpoint metadata_json", metadata_json)?;
+    validate_secret_free_model_endpoint_metadata(metadata_json)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2501,7 +2502,72 @@ fn validate_base_url(value: &str) -> CoreResult<()> {
             "model endpoint base_url must use http:// or https://",
         ));
     }
+    let authority_and_path = value
+        .strip_prefix("http://")
+        .or_else(|| value.strip_prefix("https://"))
+        .expect("scheme was validated above");
+    let authority = authority_and_path.split('/').next().unwrap_or_default();
+    if authority.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model endpoint base_url must include a host",
+        ));
+    }
+    if authority.contains('@') {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model endpoint base_url must not include user information",
+        ));
+    }
+    if value.contains('?') || value.contains('#') {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model endpoint base_url must not include a query or fragment",
+        ));
+    }
     Ok(())
+}
+
+fn validate_secret_free_model_endpoint_metadata(value: &Value) -> CoreResult<()> {
+    fn visit(value: &Value, path: &str) -> CoreResult<()> {
+        match value {
+            Value::Object(entries) => {
+                for (key, entry) in entries {
+                    let normalized = key.to_ascii_lowercase().replace('-', "_");
+                    let compact = normalized
+                        .chars()
+                        .filter(|character| character.is_ascii_alphanumeric())
+                        .collect::<String>();
+                    if compact.contains("secret")
+                        || compact.contains("password")
+                        || compact.contains("passwd")
+                        || compact.contains("apikey")
+                        || compact.contains("authorization")
+                        || compact.contains("cookie")
+                        || compact == "token"
+                        || compact.ends_with("token")
+                    {
+                        return Err(CoreError::new(
+                            CoreErrorKind::InvalidInput,
+                            format!(
+                                "model endpoint metadata_json must not contain secret-bearing key {path}.{key}"
+                            ),
+                        ));
+                    }
+                    visit(entry, &format!("{path}.{key}"))?;
+                }
+            }
+            Value::Array(entries) => {
+                for (index, entry) in entries.iter().enumerate() {
+                    visit(entry, &format!("{path}[{index}]"))?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    visit(value, "metadata_json")
 }
 
 fn validate_optional_short_text(label: &str, value: Option<&str>) -> CoreResult<()> {
@@ -3238,6 +3304,49 @@ mod tests {
             .validate()
             .expect_err("OAuth must require a credential reference");
         assert!(error.message.contains("credential_id"));
+    }
+
+    #[test]
+    fn model_endpoint_rejects_secret_bearing_urls_and_metadata() {
+        let mut endpoint = ModelEndpointWrite {
+            endpoint_id: "safe-endpoint".to_string(),
+            status: ModelEndpointStatus::Active,
+            display_name: None,
+            description: None,
+            base_url: "https://api.example.test/v1".to_string(),
+            protocol: ModelEndpointProtocol::ChatCompletions,
+            wire_dialect: ModelEndpointWireDialect::Standard,
+            auth_scheme: ModelEndpointAuthScheme::None,
+            credential_id: None,
+            prompt_cache_transport: PromptCacheTransport::None,
+            metadata_json: serde_json::json!({"region": "local"}),
+            expected_revision: None,
+            now: "2026-08-12T00:00:00Z".to_string(),
+        };
+
+        endpoint.validate().unwrap();
+
+        endpoint.base_url = "https://user:password@api.example.test/v1".to_string();
+        assert!(endpoint
+            .validate()
+            .unwrap_err()
+            .message
+            .contains("user information"));
+
+        endpoint.base_url = "https://api.example.test/v1?api_key=secret".to_string();
+        assert!(endpoint
+            .validate()
+            .unwrap_err()
+            .message
+            .contains("query or fragment"));
+
+        endpoint.base_url = "https://api.example.test/v1".to_string();
+        endpoint.metadata_json = serde_json::json!({"nested": {"customAuthToken": "secret"}});
+        assert!(endpoint
+            .validate()
+            .unwrap_err()
+            .message
+            .contains("secret-bearing key"));
     }
 
     #[test]
