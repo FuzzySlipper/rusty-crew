@@ -41,6 +41,11 @@ export const SERVICE_ROUTE_CATALOG_EXEMPTIONS = [
       "legacy MCP catalog route is route-table visible but not a Rusty View capability surface",
   },
   {
+    route_id: "admin.model_registry",
+    reason:
+      "normalized model endpoint and configuration metadata is generated from the dedicated model-provider admin OpenAPI contract",
+  },
+  {
     route_id: "admin.model_providers",
     reason:
       "model-provider admin capability metadata remains in its dedicated contract until it joins the shared catalog",

@@ -1,10 +1,11 @@
 use rusty_crew_core_persistence::*;
 use rusty_crew_core_protocol::{
-    CoreResult, IsoTimestamp, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
-    ModelProviderCredentialUnlink, ModelProviderQuery, ModelProviderRecord, ModelProviderWrite,
-    ProfileId, ProfilePurgeReport, ProfileRegistryRecord, ProfileRegistryUpdate,
-    ProfileRegistryWrite, ServiceCredentialDelete, ServiceCredentialQuery, ServiceCredentialRecord,
-    ServiceCredentialWrite,
+    CoreResult, IsoTimestamp, ModelConfigurationQuery, ModelConfigurationRecord,
+    ModelConfigurationWrite, ModelEndpointQuery, ModelEndpointRecord, ModelEndpointWrite,
+    ModelProviderCredentialLink, ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink,
+    ModelProviderQuery, ModelProviderRecord, ModelProviderWrite, ProfileId, ProfilePurgeReport,
+    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ServiceCredentialDelete,
+    ServiceCredentialQuery, ServiceCredentialRecord, ServiceCredentialWrite,
 };
 
 pub(crate) trait RuntimeStorageAdminStore {
@@ -47,6 +48,24 @@ pub(crate) trait RuntimeServiceDataStore {
         profile_id: &ProfileId,
     ) -> CoreResult<Option<ProfileRegistryRecord>>;
     fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport>;
+    fn upsert_model_endpoint(&self, write: &ModelEndpointWrite) -> CoreResult<ModelEndpointRecord>;
+    fn get_model_endpoint(&self, endpoint_id: &str) -> CoreResult<Option<ModelEndpointRecord>>;
+    fn list_model_endpoints(
+        &self,
+        query: &ModelEndpointQuery,
+    ) -> CoreResult<Vec<ModelEndpointRecord>>;
+    fn upsert_model_configuration(
+        &self,
+        write: &ModelConfigurationWrite,
+    ) -> CoreResult<ModelConfigurationRecord>;
+    fn get_model_configuration(
+        &self,
+        model_config_id: &str,
+    ) -> CoreResult<Option<ModelConfigurationRecord>>;
+    fn list_model_configurations(
+        &self,
+        query: &ModelConfigurationQuery,
+    ) -> CoreResult<Vec<ModelConfigurationRecord>>;
     fn upsert_model_provider(&self, write: &ModelProviderWrite) -> CoreResult<ModelProviderRecord>;
     fn get_model_provider(&self, alias: &str) -> CoreResult<Option<ModelProviderRecord>>;
     fn get_model_provider_secret(&self, alias: &str) -> CoreResult<Option<String>>;
@@ -166,6 +185,42 @@ impl RuntimeServiceDataStore for CoreCoordinationStore {
 
     fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport> {
         self.service_data().purge_profile(profile_id)
+    }
+
+    fn upsert_model_endpoint(&self, write: &ModelEndpointWrite) -> CoreResult<ModelEndpointRecord> {
+        self.service_data().upsert_model_endpoint(write)
+    }
+
+    fn get_model_endpoint(&self, endpoint_id: &str) -> CoreResult<Option<ModelEndpointRecord>> {
+        self.service_data().get_model_endpoint(endpoint_id)
+    }
+
+    fn list_model_endpoints(
+        &self,
+        query: &ModelEndpointQuery,
+    ) -> CoreResult<Vec<ModelEndpointRecord>> {
+        self.service_data().list_model_endpoints(query)
+    }
+
+    fn upsert_model_configuration(
+        &self,
+        write: &ModelConfigurationWrite,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        self.service_data().upsert_model_configuration(write)
+    }
+
+    fn get_model_configuration(
+        &self,
+        model_config_id: &str,
+    ) -> CoreResult<Option<ModelConfigurationRecord>> {
+        self.service_data().get_model_configuration(model_config_id)
+    }
+
+    fn list_model_configurations(
+        &self,
+        query: &ModelConfigurationQuery,
+    ) -> CoreResult<Vec<ModelConfigurationRecord>> {
+        self.service_data().list_model_configurations(query)
     }
 
     fn upsert_model_provider(&self, write: &ModelProviderWrite) -> CoreResult<ModelProviderRecord> {

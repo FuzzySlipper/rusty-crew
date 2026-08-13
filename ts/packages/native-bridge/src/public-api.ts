@@ -110,6 +110,7 @@ import type {
 } from "./external-event-retention-public-api.js";
 import type { NativeExternalRuntimeBridgeMethods } from "./external-runtime-public-api.js";
 import type { NativeInstallDiplomatBridgeMethods } from "./install-diplomat-public-api.js";
+import type { NativeModelEndpointBridgeMethods } from "./model-endpoint-public-api.js";
 import type {
   NativeModelProviderCredentialKind,
   NativeModelProviderCredentialLink,
@@ -136,6 +137,7 @@ import type {
 } from "./brain-wake-public-api.js";
 
 export type * from "./model-provider-public-api.js";
+export type * from "./model-endpoint-public-api.js";
 
 export type {
   BridgeBufferClient,
@@ -1941,7 +1943,8 @@ export interface NativeBridgeModule
     NativeCrewSessionBridgeMethods,
     NativeRuntimeActivityBridgeMethods,
     NativeReviewSubmissionBridgeMethods,
-    NativeInstallDiplomatBridgeMethods {
+    NativeInstallDiplomatBridgeMethods,
+    NativeModelEndpointBridgeMethods {
   readonly manifestVersion: number;
   readonly operationNames: readonly ManifestOperationName[];
   readonly wireShapeFingerprint: string;

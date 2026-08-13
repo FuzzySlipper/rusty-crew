@@ -121,6 +121,10 @@ import {
   type ModelProviderRefreshMode,
   type ModelProviderWriteRefreshResult,
 } from "./service-model-provider-routes.js";
+import {
+  handleModelRegistryAdminRequest,
+  type ModelEndpointAdminRouteContext,
+} from "./service-model-endpoint-admin-routes.js";
 import { handleServiceCredentialAdminRequest } from "./service-credential-admin-routes.js";
 import { handleTelegramDiplomatAdminRequest } from "./telegram-diplomat-admin-routes.js";
 import type { OpenAiOauthPendingLogin } from "./service-openai-oauth-routes.js";
@@ -2011,6 +2015,47 @@ async function handleHttpRequest(
         requestId: requestId(request),
       },
       { bridge: state.bridge },
+    );
+  }
+
+  if (route?.id === "admin.model_registry") {
+    const method = (request.method ?? "GET").toUpperCase();
+    const body =
+      method === "POST" || method === "PATCH"
+        ? await readJsonBody(request)
+        : undefined;
+    const normalizedModelBridge = state.bridge as NativeBridgeModule &
+      Pick<
+        ModelEndpointAdminRouteContext,
+        | "upsertModelEndpoint"
+        | "listModelEndpoints"
+        | "getModelEndpoint"
+        | "upsertModelConfiguration"
+        | "listModelConfigurations"
+        | "getModelConfiguration"
+      >;
+    return handleModelRegistryAdminRequest(
+      {
+        method,
+        url: url.toString(),
+        body,
+        requestId: requestId(request),
+      },
+      {
+        upsertModelEndpoint: (write) =>
+          normalizedModelBridge.upsertModelEndpoint(write),
+        listModelEndpoints: (query) =>
+          normalizedModelBridge.listModelEndpoints(query),
+        getModelEndpoint: (endpointId) =>
+          normalizedModelBridge.getModelEndpoint(endpointId),
+        upsertModelConfiguration: (write) =>
+          normalizedModelBridge.upsertModelConfiguration(write),
+        listModelConfigurations: (query) =>
+          normalizedModelBridge.listModelConfigurations(query),
+        getModelConfiguration: (modelConfigId) =>
+          normalizedModelBridge.getModelConfiguration(modelConfigId),
+        now: state.now,
+      },
     );
   }
 

@@ -15,12 +15,12 @@ export interface RustBridgeValidationFixtureSummary {
   }>;
 }
 
-const EXPECTED_MANIFEST_OPERATION_COUNT = 298;
+const EXPECTED_MANIFEST_OPERATION_COUNT = 304;
 const EXPECTED_TYPEBOX_SCHEMA_EXPORT_COUNT = 44;
 const EXPECTED_RUST_FIXTURE_FAMILY_COUNT = 11;
 const EXPECTED_GENERATED_OUTPUT_SCHEMA_COUNT = 200;
 const EXPECTED_UNIT_RETURN_OPERATION_COUNT = 13;
-const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 298;
+const EXPECTED_MANIFEST_OPERATION_COVERAGE_COUNT = 304;
 const EXPECTED_EXEMPT_OPERATION_COUNT = 0;
 
 const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
@@ -30,6 +30,8 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "create_profile_registry_record",
   "drain_brain_run",
   "get_model_provider",
+  "get_model_endpoint",
+  "get_model_configuration",
   "get_service_credential",
   "get_service_credential_secret",
   "delete_service_credential",
@@ -41,6 +43,8 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "list_curator_candidates",
   "list_curator_mutations",
   "list_model_providers",
+  "list_model_endpoints",
+  "list_model_configurations",
   "list_external_turns_for_native_thread",
   "query_external_turn_page",
   "list_service_credentials",
@@ -76,6 +80,8 @@ const RUNTIME_VALIDATED_MANIFEST_OPERATIONS = [
   "unlink_model_provider_credential",
   "update_profile_registry_record",
   "upsert_model_provider",
+  "upsert_model_endpoint",
+  "upsert_model_configuration",
   "upsert_service_credential",
   "validate_tool_metadata_policy",
   "validate_local_tool_profile_policy",

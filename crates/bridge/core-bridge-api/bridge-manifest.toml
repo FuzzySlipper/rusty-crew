@@ -2091,6 +2091,60 @@ errors = "core_protocol::CoreError"
 summary = "Create or update a DB-backed model-provider alias and secret envelope."
 
 [[operation]]
+name = "upsert_model_endpoint"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelEndpointWrite"
+output = "core_protocol::ModelEndpointRecord"
+errors = "core_protocol::CoreError"
+summary = "Create or update an independently revisioned model transport endpoint."
+
+[[operation]]
+name = "list_model_endpoints"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelEndpointQuery"
+output = "Vec<core_protocol::ModelEndpointRecord>"
+errors = "core_protocol::CoreError"
+summary = "List normalized model transport endpoints without exposing credential secrets."
+
+[[operation]]
+name = "get_model_endpoint"
+surface = "stable"
+direction = "ts_to_rust"
+input = "endpoint_id: String"
+output = "Option<core_protocol::ModelEndpointRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one normalized model transport endpoint by stable id."
+
+[[operation]]
+name = "upsert_model_configuration"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelConfigurationWrite"
+output = "core_protocol::ModelConfigurationRecord"
+errors = "core_protocol::CoreError"
+summary = "Create or update an independently revisioned model configuration."
+
+[[operation]]
+name = "list_model_configurations"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::ModelConfigurationQuery"
+output = "Vec<core_protocol::ModelConfigurationRecord>"
+errors = "core_protocol::CoreError"
+summary = "List normalized model configurations independently of endpoint transport facts."
+
+[[operation]]
+name = "get_model_configuration"
+surface = "stable"
+direction = "ts_to_rust"
+input = "model_config_id: String"
+output = "Option<core_protocol::ModelConfigurationRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read one normalized model configuration by stable id."
+
+[[operation]]
 name = "list_model_providers"
 surface = "stable"
 direction = "ts_to_rust"

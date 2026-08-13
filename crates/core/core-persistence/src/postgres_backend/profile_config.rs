@@ -924,6 +924,7 @@ impl PostgresBackendStore {
                     "upserted PostgreSQL model provider was not readable",
                 )
             })?;
+        super::model_registry::sync_legacy_provider_to_normalized_in_tx(&mut tx, &schema, &record)?;
         tx.commit()
             .map_err(|error| postgres_error("commit PostgreSQL model provider upsert", error))?;
         Ok(record)

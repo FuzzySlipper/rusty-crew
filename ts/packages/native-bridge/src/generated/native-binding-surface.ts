@@ -41,6 +41,12 @@ export interface NativeBridgeBinding {
   listProfileRegistryRecordsJson(queryJson: string): string
   getProfileRegistryRecordJson(profileId: string): string
   purgeProfileJson(profileId: string): string
+  upsertModelEndpointJson(writeJson: string): string
+  listModelEndpointsJson(queryJson: string): string
+  getModelEndpointJson(endpointId: string): string
+  upsertModelConfigurationJson(writeJson: string): string
+  listModelConfigurationsJson(queryJson: string): string
+  getModelConfigurationJson(modelConfigId: string): string
   upsertModelProviderJson(writeJson: string): string
   listModelProvidersJson(queryJson: string): string
   getModelProviderJson(alias: string): string
@@ -920,7 +926,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 298,
+  "manifestOperationCount": 304,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1241,6 +1247,54 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "purge_profile"
+    },
+    {
+      "name": "upsertModelEndpointJson",
+      "parameterSource": "writeJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "upsert_model_endpoint"
+    },
+    {
+      "name": "listModelEndpointsJson",
+      "parameterSource": "queryJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_model_endpoints"
+    },
+    {
+      "name": "getModelEndpointJson",
+      "parameterSource": "endpointId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_model_endpoint"
+    },
+    {
+      "name": "upsertModelConfigurationJson",
+      "parameterSource": "writeJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "upsert_model_configuration"
+    },
+    {
+      "name": "listModelConfigurationsJson",
+      "parameterSource": "queryJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_model_configurations"
+    },
+    {
+      "name": "getModelConfigurationJson",
+      "parameterSource": "modelConfigId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "get_model_configuration"
     },
     {
       "name": "upsertModelProviderJson",

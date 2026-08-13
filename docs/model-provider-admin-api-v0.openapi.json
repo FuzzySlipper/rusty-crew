@@ -16,6 +16,383 @@
     }
   ],
   "paths": {
+    "/v1/admin/model-endpoints": {
+      "get": {
+        "operationId": "listModelEndpoints",
+        "summary": "List normalized model endpoints",
+        "parameters": [
+          {
+            "name": "endpointId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/NormalizedModelStatus"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Normalized model endpoint page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelEndpointListPage"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createModelEndpoint",
+        "summary": "Create a normalized model endpoint",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelEndpointWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Normalized model endpoint write result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelEndpointWriteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/responses/ModelEndpointRevisionConflictEnvelope"
+          }
+        }
+      }
+    },
+    "/v1/admin/model-endpoints/{endpointId}": {
+      "get": {
+        "operationId": "getModelEndpoint",
+        "summary": "Read a normalized model endpoint",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/EndpointId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Normalized model endpoint",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelEndpointRecord"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchModelEndpoint",
+        "summary": "Update a normalized model endpoint",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/EndpointId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelEndpointPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Normalized model endpoint write result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelEndpointWriteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/responses/ModelEndpointRevisionConflictEnvelope"
+          }
+        }
+      }
+    },
+    "/v1/admin/model-configurations": {
+      "get": {
+        "operationId": "listModelConfigurations",
+        "summary": "List normalized model configurations",
+        "parameters": [
+          {
+            "name": "modelConfigId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "endpointId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/NormalizedModelStatus"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Normalized model configuration page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelConfigurationListPage"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createModelConfiguration",
+        "summary": "Create a normalized model configuration",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConfigurationWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Normalized model configuration write result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelConfigurationWriteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/responses/ModelConfigurationRevisionConflictEnvelope"
+          }
+        }
+      }
+    },
+    "/v1/admin/model-configurations/{modelConfigId}": {
+      "get": {
+        "operationId": "getModelConfiguration",
+        "summary": "Read a normalized model configuration",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ModelConfigId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Normalized model configuration",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelConfigurationRecord"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchModelConfiguration",
+        "summary": "Update a normalized model configuration",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ModelConfigId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelConfigurationPatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Normalized model configuration write result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiEnvelope"
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "$ref": "#/components/schemas/ModelConfigurationWriteResult"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "404": {
+            "$ref": "#/components/responses/ErrorEnvelope"
+          },
+          "409": {
+            "$ref": "#/components/responses/ModelConfigurationRevisionConflictEnvelope"
+          }
+        }
+      }
+    },
     "/v1/admin/model-providers": {
       "get": {
         "operationId": "listModelProviders",
@@ -1114,6 +1491,24 @@
           "type": "string"
         }
       },
+      "EndpointId": {
+        "name": "endpointId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-z0-9._:-]{1,128}$"
+        }
+      },
+      "ModelConfigId": {
+        "name": "modelConfigId",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "pattern": "^[a-z0-9._:-]{1,128}$"
+        }
+      },
       "Limit": {
         "name": "limit",
         "in": "query",
@@ -1163,6 +1558,48 @@
           "application/json": {
             "schema": {
               "$ref": "#/components/schemas/ApiEnvelope"
+            }
+          }
+        }
+      },
+      "ModelEndpointRevisionConflictEnvelope": {
+        "description": "Normalized model endpoint revision conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                },
+                {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelEndpointRevisionConflict"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "ModelConfigurationRevisionConflictEnvelope": {
+        "description": "Normalized model configuration revision conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/ApiEnvelope"
+                },
+                {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelConfigurationRevisionConflict"
+                    }
+                  }
+                }
+              ]
             }
           }
         }
@@ -1222,7 +1659,14 @@
             "type": "string"
           },
           "reason_code": {
-            "$ref": "#/components/schemas/ModelProviderReasonCode"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ModelProviderReasonCode"
+              },
+              {
+                "$ref": "#/components/schemas/NormalizedModelReasonCode"
+              }
+            ]
           },
           "message": {
             "type": "string"
@@ -1247,6 +1691,668 @@
             "const": 1
           }
         }
+      },
+      "NormalizedModelStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "disabled",
+          "archived"
+        ]
+      },
+      "ModelEndpointProtocol": {
+        "type": "string",
+        "enum": [
+          "responses",
+          "chat_completions"
+        ]
+      },
+      "ModelEndpointWireDialect": {
+        "type": "string",
+        "enum": [
+          "openai_stateful",
+          "openai_stateless",
+          "generic_stateless",
+          "deepseek",
+          "meta",
+          "standard",
+          "kimi",
+          "glm",
+          "qwen"
+        ],
+        "description": "Closed wire dialect registry. The selected dialect must be valid for the endpoint protocol."
+      },
+      "ModelEndpointAuthScheme": {
+        "type": "string",
+        "enum": [
+          "none",
+          "bearer_api_key",
+          "openai_codex_oauth"
+        ],
+        "description": "Authentication behavior is explicit. Credentials are referenced by credentialId and secret material is never part of this API."
+      },
+      "PromptCacheTransport": {
+        "type": "string",
+        "enum": [
+          "none",
+          "openrouter_anthropic"
+        ],
+        "description": "Explicit transport support for prompt caching."
+      },
+      "ModelReasoningHistory": {
+        "type": "string",
+        "enum": [
+          "provider_default",
+          "discard",
+          "preserve_all",
+          "tool_calls_only"
+        ]
+      },
+      "ModelThinkingMode": {
+        "type": "string",
+        "enum": [
+          "provider_default",
+          "enabled",
+          "disabled"
+        ]
+      },
+      "ModelPromptCachingPolicy": {
+        "type": "string",
+        "enum": [
+          "disabled",
+          "automatic_5m",
+          "automatic_1h"
+        ],
+        "description": "The policy is normalized configuration state; the endpoint promptCacheTransport and model ID still constrain enabled policies."
+      },
+      "ModelCapabilities": {
+        "type": "object",
+        "required": [
+          "version",
+          "imageInput"
+        ],
+        "properties": {
+          "version": {
+            "type": "integer",
+            "const": 1
+          },
+          "imageInput": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelEndpointRecord": {
+        "type": "object",
+        "required": [
+          "endpointId",
+          "status",
+          "baseUrl",
+          "protocol",
+          "wireDialect",
+          "authScheme",
+          "promptCacheTransport",
+          "metadataJson",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "endpointId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NormalizedModelStatus"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "baseUrl": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/ModelEndpointProtocol"
+          },
+          "wireDialect": {
+            "$ref": "#/components/schemas/ModelEndpointWireDialect"
+          },
+          "authScheme": {
+            "$ref": "#/components/schemas/ModelEndpointAuthScheme"
+          },
+          "credentialId": {
+            "type": "string"
+          },
+          "promptCacheTransport": {
+            "$ref": "#/components/schemas/PromptCacheTransport"
+          },
+          "metadataJson": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelEndpointWrite": {
+        "type": "object",
+        "required": [
+          "endpointId",
+          "status",
+          "baseUrl",
+          "protocol",
+          "wireDialect"
+        ],
+        "properties": {
+          "endpointId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NormalizedModelStatus"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "baseUrl": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/ModelEndpointProtocol"
+          },
+          "wireDialect": {
+            "$ref": "#/components/schemas/ModelEndpointWireDialect"
+          },
+          "authScheme": {
+            "$ref": "#/components/schemas/ModelEndpointAuthScheme",
+            "default": "none"
+          },
+          "credentialId": {
+            "type": "string"
+          },
+          "promptCacheTransport": {
+            "$ref": "#/components/schemas/PromptCacheTransport",
+            "default": "none"
+          },
+          "metadataJson": {
+            "type": "object",
+            "additionalProperties": true,
+            "default": {}
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelEndpointPatch": {
+        "type": "object",
+        "properties": {
+          "endpointId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NormalizedModelStatus"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "baseUrl": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/ModelEndpointProtocol"
+          },
+          "wireDialect": {
+            "$ref": "#/components/schemas/ModelEndpointWireDialect"
+          },
+          "authScheme": {
+            "$ref": "#/components/schemas/ModelEndpointAuthScheme"
+          },
+          "credentialId": {
+            "type": "string"
+          },
+          "promptCacheTransport": {
+            "$ref": "#/components/schemas/PromptCacheTransport"
+          },
+          "metadataJson": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelEndpointListPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelEndpointRecord"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelEndpointWriteResult": {
+        "type": "object",
+        "required": [
+          "endpoint"
+        ],
+        "properties": {
+          "endpoint": {
+            "$ref": "#/components/schemas/ModelEndpointRecord"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelEndpointRevisionConflict": {
+        "type": "object",
+        "required": [
+          "expectedRevision",
+          "currentRevision"
+        ],
+        "properties": {
+          "endpoint": {
+            "$ref": "#/components/schemas/ModelEndpointRecord"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "currentRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelConfigurationRecord": {
+        "type": "object",
+        "required": [
+          "modelConfigId",
+          "endpointId",
+          "status",
+          "modelId",
+          "reasoningHistory",
+          "thinkingMode",
+          "promptCachingPolicy",
+          "capabilities",
+          "metadataJson",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "modelConfigId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "endpointId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NormalizedModelStatus"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "modelId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "contextWindowTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "temperatureMilli": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "reasoningEffort": {
+            "type": "string"
+          },
+          "reasoningFormat": {
+            "type": "string"
+          },
+          "reasoningHistory": {
+            "$ref": "#/components/schemas/ModelReasoningHistory"
+          },
+          "reasoningBudgetTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "thinkingMode": {
+            "$ref": "#/components/schemas/ModelThinkingMode"
+          },
+          "promptCachingPolicy": {
+            "$ref": "#/components/schemas/ModelPromptCachingPolicy"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ModelCapabilities"
+          },
+          "metadataJson": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelConfigurationWrite": {
+        "type": "object",
+        "required": [
+          "modelConfigId",
+          "endpointId",
+          "status",
+          "modelId"
+        ],
+        "properties": {
+          "modelConfigId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "endpointId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NormalizedModelStatus"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "modelId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "contextWindowTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "temperatureMilli": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "reasoningEffort": {
+            "type": "string"
+          },
+          "reasoningFormat": {
+            "type": "string"
+          },
+          "reasoningHistory": {
+            "$ref": "#/components/schemas/ModelReasoningHistory",
+            "default": "provider_default"
+          },
+          "reasoningBudgetTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "thinkingMode": {
+            "$ref": "#/components/schemas/ModelThinkingMode",
+            "default": "provider_default"
+          },
+          "promptCachingPolicy": {
+            "$ref": "#/components/schemas/ModelPromptCachingPolicy",
+            "default": "disabled"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ModelCapabilities",
+            "default": {
+              "version": 1,
+              "imageInput": false
+            }
+          },
+          "metadataJson": {
+            "type": "object",
+            "additionalProperties": true,
+            "default": {}
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelConfigurationPatch": {
+        "type": "object",
+        "properties": {
+          "modelConfigId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "endpointId": {
+            "type": "string",
+            "pattern": "^[a-z0-9._:-]{1,128}$"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NormalizedModelStatus"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "modelId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "contextWindowTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "maxOutputTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "temperatureMilli": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "reasoningEffort": {
+            "type": "string"
+          },
+          "reasoningFormat": {
+            "type": "string"
+          },
+          "reasoningHistory": {
+            "$ref": "#/components/schemas/ModelReasoningHistory"
+          },
+          "reasoningBudgetTokens": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "thinkingMode": {
+            "$ref": "#/components/schemas/ModelThinkingMode"
+          },
+          "promptCachingPolicy": {
+            "$ref": "#/components/schemas/ModelPromptCachingPolicy"
+          },
+          "capabilities": {
+            "$ref": "#/components/schemas/ModelCapabilities"
+          },
+          "metadataJson": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelConfigurationListPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelConfigurationRecord"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelConfigurationWriteResult": {
+        "type": "object",
+        "required": [
+          "configuration"
+        ],
+        "properties": {
+          "configuration": {
+            "$ref": "#/components/schemas/ModelConfigurationRecord"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ModelConfigurationRevisionConflict": {
+        "type": "object",
+        "required": [
+          "expectedRevision",
+          "currentRevision"
+        ],
+        "properties": {
+          "configuration": {
+            "$ref": "#/components/schemas/ModelConfigurationRecord"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "currentRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "NormalizedModelReasonCode": {
+        "type": "string",
+        "enum": [
+          "invalid_model_endpoint",
+          "invalid_model_configuration",
+          "invalid_model_endpoint_status",
+          "model_endpoint_not_found",
+          "model_configuration_not_found",
+          "model_endpoint_revision_mismatch",
+          "model_configuration_revision_mismatch",
+          "model_endpoint_admin_method_not_allowed"
+        ]
       },
       "ModelProviderStatus": {
         "type": "string",

@@ -1817,6 +1817,12 @@ fn native_mapping_inventory_artifact() -> Result<Value> {
         "purge_profile",
     ];
     let model_provider_operations = vec![
+        "upsert_model_endpoint",
+        "list_model_endpoints",
+        "get_model_endpoint",
+        "upsert_model_configuration",
+        "list_model_configurations",
+        "get_model_configuration",
         "upsert_model_provider",
         "list_model_providers",
         "get_model_provider",

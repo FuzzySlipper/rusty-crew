@@ -25,6 +25,7 @@ export type ServiceApiRouteId =
   | "admin.image_generation"
   | "roleplay"
   | "admin.storage"
+  | "admin.model_registry"
   | "admin.model_providers"
   | "admin.service_credentials"
   | "admin.telegram_diplomat"
@@ -164,6 +165,17 @@ export const SERVICE_API_ROUTE_TABLE: readonly ServiceApiRouteDescriptor[] = [
   ),
   route("admin.storage", 200, "after_auth", "Storage query routes", (path) =>
     path.startsWith("/v1/admin/storage/"),
+  ),
+  route(
+    "admin.model_registry",
+    205,
+    "after_auth",
+    "Normalized model endpoint and configuration registry routes",
+    (path) =>
+      path === "/v1/admin/model-endpoints" ||
+      path.startsWith("/v1/admin/model-endpoints/") ||
+      path === "/v1/admin/model-configurations" ||
+      path.startsWith("/v1/admin/model-configurations/"),
   ),
   route(
     "admin.model_providers",

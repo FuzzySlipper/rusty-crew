@@ -62,6 +62,14 @@ struct ProtocolContractRoots {
     session_activity_digest_query: SessionActivityDigestQuery,
     context_compaction_artifact: ContextCompactionArtifact,
     context_compaction_artifact_query: ContextCompactionArtifactQuery,
+    model_endpoint_record: ModelEndpointRecord,
+    model_endpoint_write: ModelEndpointWrite,
+    model_endpoint_query: ModelEndpointQuery,
+    model_configuration_record: ModelConfigurationRecord,
+    model_configuration_write: ModelConfigurationWrite,
+    model_configuration_query: ModelConfigurationQuery,
+    model_endpoint_backfill_report: ModelEndpointBackfillReport,
+    model_endpoint_parity_report: ModelEndpointParityReport,
     manual_context_compaction_request: ManualContextCompactionRequest,
     manual_context_compaction_response: ManualContextCompactionResponse,
     runtime_activity_begin: RuntimeActivityBegin,
@@ -325,6 +333,12 @@ fn render_schema(schema: &Value, path: &str, omit_null: bool) -> Result<String> 
                 .map(|kind| render_schema_type(kind, schema, path))
                 .collect::<Result<Vec<_>>>()?;
             Ok(join_union(variants))
+        }
+        None if schema
+            .as_object()
+            .is_some_and(|object| object.keys().all(|key| key == "default")) =>
+        {
+            Ok("unknown".to_owned())
         }
         None if schema.as_object().is_some_and(Map::is_empty) => Ok("unknown".to_owned()),
         _ => bail!("unsupported JSON Schema construct at {path}: {schema}"),

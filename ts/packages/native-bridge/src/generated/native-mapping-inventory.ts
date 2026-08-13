@@ -1106,6 +1106,12 @@ export const nativeMappingInventory = {
         ]
       },
       "operationNames": [
+        "upsert_model_endpoint",
+        "list_model_endpoints",
+        "get_model_endpoint",
+        "upsert_model_configuration",
+        "list_model_configurations",
+        "get_model_configuration",
         "upsert_model_provider",
         "list_model_providers",
         "get_model_provider",
@@ -1114,6 +1120,12 @@ export const nativeMappingInventory = {
         "plan_model_provider_refresh"
       ],
       "rawMethods": [
+        "upsertModelEndpointJson",
+        "listModelEndpointsJson",
+        "getModelEndpointJson",
+        "upsertModelConfigurationJson",
+        "listModelConfigurationsJson",
+        "getModelConfigurationJson",
         "upsertModelProviderJson",
         "listModelProvidersJson",
         "getModelProviderJson",

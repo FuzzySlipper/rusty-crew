@@ -275,6 +275,64 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn upsert_model_endpoint_json(&self, write_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let write = parse_json::<ModelEndpointWrite>(&write_json, "model endpoint write")?;
+        let record = bridge
+            .upsert_model_endpoint(&write)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "model endpoint record")
+    }
+
+    #[napi]
+    pub fn list_model_endpoints_json(&self, query_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query = parse_json::<ModelEndpointQuery>(&query_json, "model endpoint query")?;
+        let records = bridge.list_model_endpoints(&query).map_err(to_napi_error)?;
+        serialize_json(&records, "model endpoint records")
+    }
+
+    #[napi]
+    pub fn get_model_endpoint_json(&self, endpoint_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let record = bridge
+            .get_model_endpoint(&endpoint_id)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "model endpoint record")
+    }
+
+    #[napi]
+    pub fn upsert_model_configuration_json(&self, write_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let write =
+            parse_json::<ModelConfigurationWrite>(&write_json, "model configuration write")?;
+        let record = bridge
+            .upsert_model_configuration(&write)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "model configuration record")
+    }
+
+    #[napi]
+    pub fn list_model_configurations_json(&self, query_json: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let query =
+            parse_json::<ModelConfigurationQuery>(&query_json, "model configuration query")?;
+        let records = bridge
+            .list_model_configurations(&query)
+            .map_err(to_napi_error)?;
+        serialize_json(&records, "model configuration records")
+    }
+
+    #[napi]
+    pub fn get_model_configuration_json(&self, model_config_id: String) -> napi::Result<String> {
+        let bridge = self.bridge()?;
+        let record = bridge
+            .get_model_configuration(&model_config_id)
+            .map_err(to_napi_error)?;
+        serialize_json(&record, "model configuration record")
+    }
+
+    #[napi]
     pub fn upsert_model_provider_json(&self, write_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let write = parse_json::<ModelProviderWrite>(&write_json, "model provider write")?;

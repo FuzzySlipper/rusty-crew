@@ -41,6 +41,12 @@ export declare class NativeBridgeBinding {
   listProfileRegistryRecordsJson(queryJson: string): string
   getProfileRegistryRecordJson(profileId: string): string
   purgeProfileJson(profileId: string): string
+  upsertModelEndpointJson(writeJson: string): string
+  listModelEndpointsJson(queryJson: string): string
+  getModelEndpointJson(endpointId: string): string
+  upsertModelConfigurationJson(writeJson: string): string
+  listModelConfigurationsJson(queryJson: string): string
+  getModelConfigurationJson(modelConfigId: string): string
   upsertModelProviderJson(writeJson: string): string
   listModelProvidersJson(queryJson: string): string
   getModelProviderJson(alias: string): string

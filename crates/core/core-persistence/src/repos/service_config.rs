@@ -167,6 +167,7 @@ impl CoordinationStore {
                 "upserted model provider was not readable",
             )
         })?;
+        super::model_registry::sync_legacy_provider_to_normalized_in_tx(&tx, &record)?;
         tx.commit()
             .map_err(|error| persistence_error("commit upsert model provider", error))?;
         Ok(record)

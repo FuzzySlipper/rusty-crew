@@ -3300,6 +3300,23 @@
           }
         ]
       },
+      "ChatCompletionsPromptCachingPolicy": {
+        "enum": ["disabled", "automatic_5m", "automatic_1h"],
+        "type": "string"
+      },
+      "ChatCompletionsReasoningHistory": {
+        "enum": [
+          "provider_default",
+          "discard",
+          "preserve_all",
+          "tool_calls_only"
+        ],
+        "type": "string"
+      },
+      "ChatCompletionsThinkingMode": {
+        "enum": ["provider_default", "enabled", "disabled"],
+        "type": "string"
+      },
       "CompletionPacket": {
         "properties": {
           "session_id": { "type": "string" },
@@ -6253,6 +6270,369 @@
         "enum": ["frozen_snapshot_next_wake"],
         "type": "string"
       },
+      "ModelCapabilities": {
+        "properties": {
+          "image_input": { "default": false, "type": "boolean" },
+          "version": {
+            "default": 1,
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "ModelConfigurationQuery": {
+        "properties": {
+          "endpoint_id": { "type": ["string", "null"] },
+          "limit": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "model_config_id": { "type": ["string", "null"] },
+          "offset": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "status": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ModelProviderStatus" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ModelConfigurationRecord": {
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/ModelCapabilities",
+            "default": { "image_input": false, "version": 1 }
+          },
+          "context_window_tokens": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "created_at": { "type": "string" },
+          "description": { "type": ["string", "null"] },
+          "display_name": { "type": ["string", "null"] },
+          "endpoint_id": { "type": "string" },
+          "max_output_tokens": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "metadata_json": { "default": {} },
+          "model_config_id": { "type": "string" },
+          "model_id": { "type": "string" },
+          "prompt_caching_policy": {
+            "$ref": "#/components/schemas/ChatCompletionsPromptCachingPolicy",
+            "default": "disabled"
+          },
+          "reasoning_budget_tokens": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "reasoning_effort": { "type": ["string", "null"] },
+          "reasoning_format": { "type": ["string", "null"] },
+          "reasoning_history": {
+            "$ref": "#/components/schemas/ChatCompletionsReasoningHistory",
+            "default": "provider_default"
+          },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "status": { "$ref": "#/components/schemas/ModelProviderStatus" },
+          "temperature_milli": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "thinking_mode": {
+            "$ref": "#/components/schemas/ChatCompletionsThinkingMode",
+            "default": "provider_default"
+          },
+          "updated_at": { "type": "string" }
+        },
+        "required": [
+          "model_config_id",
+          "endpoint_id",
+          "status",
+          "model_id",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ModelConfigurationWrite": {
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/ModelCapabilities",
+            "default": { "image_input": false, "version": 1 }
+          },
+          "context_window_tokens": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "description": { "type": ["string", "null"] },
+          "display_name": { "type": ["string", "null"] },
+          "endpoint_id": { "type": "string" },
+          "expected_revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "max_output_tokens": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "metadata_json": { "default": {} },
+          "model_config_id": { "type": "string" },
+          "model_id": { "type": "string" },
+          "now": { "type": "string" },
+          "prompt_caching_policy": {
+            "$ref": "#/components/schemas/ChatCompletionsPromptCachingPolicy",
+            "default": "disabled"
+          },
+          "reasoning_budget_tokens": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "reasoning_effort": { "type": ["string", "null"] },
+          "reasoning_format": { "type": ["string", "null"] },
+          "reasoning_history": {
+            "$ref": "#/components/schemas/ChatCompletionsReasoningHistory",
+            "default": "provider_default"
+          },
+          "status": { "$ref": "#/components/schemas/ModelProviderStatus" },
+          "temperature_milli": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "thinking_mode": {
+            "$ref": "#/components/schemas/ChatCompletionsThinkingMode",
+            "default": "provider_default"
+          }
+        },
+        "required": [
+          "model_config_id",
+          "endpoint_id",
+          "status",
+          "model_id",
+          "now"
+        ],
+        "type": "object"
+      },
+      "ModelEndpointAuthScheme": {
+        "enum": ["none", "bearer_api_key", "openai_codex_oauth"],
+        "type": "string"
+      },
+      "ModelEndpointBackfillReport": {
+        "description": "Aggregate backfill/parity output. Every member is safe to serialize for\ndiagnostics because no field contains a secret or secret-bearing payload.",
+        "properties": {
+          "joined_projection_equality": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelEndpointJoinedProjectionEquality"
+            },
+            "type": "array"
+          },
+          "mappings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelEndpointLegacyAliasMapping"
+            },
+            "type": "array"
+          },
+          "representability_errors": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelEndpointRepresentabilityError"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ModelEndpointJoinedProjectionEquality": {
+        "description": "Equality of the safe, joined projection of a legacy alias and its\nnormalized endpoint/configuration records. Differences are field names,\nnever the differing values.",
+        "properties": {
+          "differing_fields": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "endpoint_id": { "type": "string" },
+          "legacy_alias": { "type": "string" },
+          "model_config_id": { "type": "string" },
+          "projection_equal": { "type": "boolean" }
+        },
+        "required": [
+          "legacy_alias",
+          "endpoint_id",
+          "model_config_id",
+          "projection_equal",
+          "differing_fields"
+        ],
+        "type": "object"
+      },
+      "ModelEndpointLegacyAliasMapping": {
+        "description": "A deterministic, secret-free mapping from one legacy provider alias to the\nnormalized endpoint/configuration pair created by a backfill.",
+        "properties": {
+          "endpoint_id": { "type": "string" },
+          "legacy_alias": { "type": "string" },
+          "model_config_id": { "type": "string" }
+        },
+        "required": ["legacy_alias", "endpoint_id", "model_config_id"],
+        "type": "object"
+      },
+      "ModelEndpointParityReport": {
+        "properties": {
+          "joined_projection_equality": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ModelEndpointJoinedProjectionEquality"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "ModelEndpointQuery": {
+        "properties": {
+          "endpoint_id": { "type": ["string", "null"] },
+          "limit": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "offset": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "status": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/ModelProviderStatus" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ModelEndpointRecord": {
+        "properties": {
+          "auth_scheme": {
+            "$ref": "#/components/schemas/ModelEndpointAuthScheme",
+            "default": "none"
+          },
+          "base_url": { "type": "string" },
+          "created_at": { "type": "string" },
+          "credential_id": { "type": ["string", "null"] },
+          "description": { "type": ["string", "null"] },
+          "display_name": { "type": ["string", "null"] },
+          "endpoint_id": { "type": "string" },
+          "metadata_json": { "default": {} },
+          "prompt_cache_transport": {
+            "$ref": "#/components/schemas/PromptCacheTransport",
+            "default": "none"
+          },
+          "protocol": { "$ref": "#/components/schemas/ModelProviderProtocol" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "status": { "$ref": "#/components/schemas/ModelProviderStatus" },
+          "updated_at": { "type": "string" },
+          "wire_dialect": {
+            "$ref": "#/components/schemas/ModelEndpointWireDialect"
+          }
+        },
+        "required": [
+          "endpoint_id",
+          "status",
+          "base_url",
+          "protocol",
+          "wire_dialect",
+          "revision",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "ModelEndpointRepresentabilityError": {
+        "description": "A representability failure names only the legacy row and field; it carries\nno provider secret or raw credential material.",
+        "properties": {
+          "field": { "type": "string" },
+          "legacy_alias": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["legacy_alias", "field", "reason"],
+        "type": "object"
+      },
+      "ModelEndpointWireDialect": {
+        "enum": [
+          "openai_stateful",
+          "openai_stateless",
+          "generic_stateless",
+          "deepseek",
+          "meta",
+          "standard",
+          "kimi",
+          "glm",
+          "qwen"
+        ],
+        "type": "string"
+      },
+      "ModelEndpointWrite": {
+        "properties": {
+          "auth_scheme": {
+            "$ref": "#/components/schemas/ModelEndpointAuthScheme",
+            "default": "none"
+          },
+          "base_url": { "type": "string" },
+          "credential_id": { "type": ["string", "null"] },
+          "description": { "type": ["string", "null"] },
+          "display_name": { "type": ["string", "null"] },
+          "endpoint_id": { "type": "string" },
+          "expected_revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "metadata_json": { "default": {} },
+          "now": { "type": "string" },
+          "prompt_cache_transport": {
+            "$ref": "#/components/schemas/PromptCacheTransport",
+            "default": "none"
+          },
+          "protocol": { "$ref": "#/components/schemas/ModelProviderProtocol" },
+          "status": { "$ref": "#/components/schemas/ModelProviderStatus" },
+          "wire_dialect": {
+            "$ref": "#/components/schemas/ModelEndpointWireDialect"
+          }
+        },
+        "required": [
+          "endpoint_id",
+          "status",
+          "base_url",
+          "protocol",
+          "wire_dialect",
+          "now"
+        ],
+        "type": "object"
+      },
+      "ModelProviderProtocol": {
+        "enum": ["responses", "chat_completions"],
+        "type": "string"
+      },
+      "ModelProviderStatus": {
+        "enum": ["active", "disabled", "archived"],
+        "type": "string"
+      },
       "NormalizedExternalRuntimeEvent": {
         "type": "object",
         "required": [
@@ -6309,6 +6689,10 @@
       },
       "ProjectionVisibility": {
         "enum": ["observation", "user_visible"],
+        "type": "string"
+      },
+      "PromptCacheTransport": {
+        "enum": ["none", "openrouter_anthropic"],
         "type": "string"
       },
       "ProviderStateAbsenceReason": {

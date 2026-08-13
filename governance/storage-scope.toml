@@ -135,10 +135,12 @@ id = "profile_registry"
 label = "Profile Registry And Config"
 owns = [
   "profile_registry",
+  "model_endpoints",
+  "model_configurations",
   "model_providers",
   "service_credentials",
 ]
-notes = "Active profile registry, DB-backed prompt fields, model provider aliases, shared service credentials, profile import/export metadata."
+notes = "Active profile registry, DB-backed prompt fields, normalized model endpoint and configuration registries, legacy model provider rollback shadows, shared service credentials, profile import/export metadata."
 
 [[scope]]
 id = "bindings"

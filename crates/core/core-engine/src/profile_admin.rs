@@ -60,6 +60,45 @@ impl CoreEngine {
         Ok(report)
     }
 
+    pub fn upsert_model_endpoint(
+        &self,
+        write: &ModelEndpointWrite,
+    ) -> CoreResult<ModelEndpointRecord> {
+        RuntimeServiceDataStore::upsert_model_endpoint(&self.store, write)
+    }
+
+    pub fn get_model_endpoint(&self, endpoint_id: &str) -> CoreResult<Option<ModelEndpointRecord>> {
+        RuntimeServiceDataStore::get_model_endpoint(&self.store, endpoint_id)
+    }
+
+    pub fn list_model_endpoints(
+        &self,
+        query: &ModelEndpointQuery,
+    ) -> CoreResult<Vec<ModelEndpointRecord>> {
+        RuntimeServiceDataStore::list_model_endpoints(&self.store, query)
+    }
+
+    pub fn upsert_model_configuration(
+        &self,
+        write: &ModelConfigurationWrite,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        RuntimeServiceDataStore::upsert_model_configuration(&self.store, write)
+    }
+
+    pub fn get_model_configuration(
+        &self,
+        model_config_id: &str,
+    ) -> CoreResult<Option<ModelConfigurationRecord>> {
+        RuntimeServiceDataStore::get_model_configuration(&self.store, model_config_id)
+    }
+
+    pub fn list_model_configurations(
+        &self,
+        query: &ModelConfigurationQuery,
+    ) -> CoreResult<Vec<ModelConfigurationRecord>> {
+        RuntimeServiceDataStore::list_model_configurations(&self.store, query)
+    }
+
     pub fn upsert_model_provider(
         &self,
         write: &ModelProviderWrite,

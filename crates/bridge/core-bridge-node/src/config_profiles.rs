@@ -136,6 +136,48 @@ impl NativeBridge {
         self.engine()?.purge_profile(profile_id)
     }
 
+    pub fn upsert_model_endpoint(
+        &self,
+        write: &ModelEndpointWrite,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ModelEndpointRecord> {
+        self.engine()?.upsert_model_endpoint(write)
+    }
+
+    pub fn get_model_endpoint(
+        &self,
+        endpoint_id: &str,
+    ) -> CoreResult<Option<rusty_crew_core_bridge_api::ModelEndpointRecord>> {
+        self.engine()?.get_model_endpoint(endpoint_id)
+    }
+
+    pub fn list_model_endpoints(
+        &self,
+        query: &ModelEndpointQuery,
+    ) -> CoreResult<Vec<rusty_crew_core_bridge_api::ModelEndpointRecord>> {
+        self.engine()?.list_model_endpoints(query)
+    }
+
+    pub fn upsert_model_configuration(
+        &self,
+        write: &ModelConfigurationWrite,
+    ) -> CoreResult<rusty_crew_core_bridge_api::ModelConfigurationRecord> {
+        self.engine()?.upsert_model_configuration(write)
+    }
+
+    pub fn get_model_configuration(
+        &self,
+        model_config_id: &str,
+    ) -> CoreResult<Option<rusty_crew_core_bridge_api::ModelConfigurationRecord>> {
+        self.engine()?.get_model_configuration(model_config_id)
+    }
+
+    pub fn list_model_configurations(
+        &self,
+        query: &ModelConfigurationQuery,
+    ) -> CoreResult<Vec<rusty_crew_core_bridge_api::ModelConfigurationRecord>> {
+        self.engine()?.list_model_configurations(query)
+    }
+
     pub fn upsert_model_provider(
         &self,
         write: &ModelProviderWrite,

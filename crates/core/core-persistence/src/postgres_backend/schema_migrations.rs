@@ -8,7 +8,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 58;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 59;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -310,6 +310,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 58,
         description: "repair skipped quoted-schema external runtime migrations",
         apply: Some(apply_postgres_quoted_schema_external_runtime_repairs),
+    },
+    PostgresSchemaMigration {
+        version: 59,
+        description: "add normalized model endpoint and configuration registries",
+        apply: Some(super::model_registry::apply_postgres_model_registry),
     },
 ];
 
@@ -2566,7 +2571,7 @@ mod tests {
         apply_postgres_schema_migrations(&mut client, &quoted_schema).unwrap();
         client
             .batch_execute(&format!(
-                "DELETE FROM {quoted_schema}.schema_migrations WHERE version = 58;
+                "DELETE FROM {quoted_schema}.schema_migrations WHERE version >= 58;
                  ALTER TABLE {schema}.external_turns DROP COLUMN creation_ordinal;
                  ALTER TABLE {schema}.external_turns DROP COLUMN created_at;
                  DROP SEQUENCE IF EXISTS {schema}.external_turn_creation_ordinal_seq;"

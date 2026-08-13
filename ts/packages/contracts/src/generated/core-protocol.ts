@@ -601,6 +601,12 @@ export type BrainWakeStreamItem = {
   type: "wake_failed";
 };
 
+export type ChatCompletionsPromptCachingPolicy = "disabled" | "automatic_5m" | "automatic_1h";
+
+export type ChatCompletionsReasoningHistory = "provider_default" | "discard" | "preserve_all" | "tool_calls_only";
+
+export type ChatCompletionsThinkingMode = "provider_default" | "enabled" | "disabled";
+
 export type CompletionPacket = {
   sessionId: SessionId;
   status: CompletionStatus;
@@ -1747,6 +1753,142 @@ export type MemoryWritePolicy = {
 
 export type MidTurnDeltaMode = "frozen_snapshot_next_wake";
 
+export type ModelCapabilities = {
+  imageInput?: boolean;
+  version?: number;
+};
+
+export type ModelConfigurationQuery = {
+  endpointId?: string | null;
+  limit?: number | null;
+  modelConfigId?: string | null;
+  offset?: number | null;
+  status?: ModelProviderStatus | null;
+};
+
+export type ModelConfigurationRecord = {
+  capabilities?: ModelCapabilities;
+  contextWindowTokens?: number | null;
+  createdAt: string;
+  description?: string | null;
+  displayName?: string | null;
+  endpointId: string;
+  maxOutputTokens?: number | null;
+  metadataJson?: unknown;
+  modelConfigId: string;
+  modelId: string;
+  promptCachingPolicy?: ChatCompletionsPromptCachingPolicy;
+  reasoningBudgetTokens?: number | null;
+  reasoningEffort?: string | null;
+  reasoningFormat?: string | null;
+  reasoningHistory?: ChatCompletionsReasoningHistory;
+  revision: number;
+  status: ModelProviderStatus;
+  temperatureMilli?: number | null;
+  thinkingMode?: ChatCompletionsThinkingMode;
+  updatedAt: string;
+};
+
+export type ModelConfigurationWrite = {
+  capabilities?: ModelCapabilities;
+  contextWindowTokens?: number | null;
+  description?: string | null;
+  displayName?: string | null;
+  endpointId: string;
+  expectedRevision?: number | null;
+  maxOutputTokens?: number | null;
+  metadataJson?: unknown;
+  modelConfigId: string;
+  modelId: string;
+  now: string;
+  promptCachingPolicy?: ChatCompletionsPromptCachingPolicy;
+  reasoningBudgetTokens?: number | null;
+  reasoningEffort?: string | null;
+  reasoningFormat?: string | null;
+  reasoningHistory?: ChatCompletionsReasoningHistory;
+  status: ModelProviderStatus;
+  temperatureMilli?: number | null;
+  thinkingMode?: ChatCompletionsThinkingMode;
+};
+
+export type ModelEndpointAuthScheme = "none" | "bearer_api_key" | "openai_codex_oauth";
+
+export type ModelEndpointBackfillReport = {
+  joinedProjectionEquality?: Array<ModelEndpointJoinedProjectionEquality>;
+  mappings?: Array<ModelEndpointLegacyAliasMapping>;
+  representabilityErrors?: Array<ModelEndpointRepresentabilityError>;
+};
+
+export type ModelEndpointJoinedProjectionEquality = {
+  differingFields: Array<string>;
+  endpointId: string;
+  legacyAlias: string;
+  modelConfigId: string;
+  projectionEqual: boolean;
+};
+
+export type ModelEndpointLegacyAliasMapping = {
+  endpointId: string;
+  legacyAlias: string;
+  modelConfigId: string;
+};
+
+export type ModelEndpointParityReport = {
+  joinedProjectionEquality?: Array<ModelEndpointJoinedProjectionEquality>;
+};
+
+export type ModelEndpointQuery = {
+  endpointId?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+  status?: ModelProviderStatus | null;
+};
+
+export type ModelEndpointRecord = {
+  authScheme?: ModelEndpointAuthScheme;
+  baseUrl: string;
+  createdAt: string;
+  credentialId?: string | null;
+  description?: string | null;
+  displayName?: string | null;
+  endpointId: string;
+  metadataJson?: unknown;
+  promptCacheTransport?: PromptCacheTransport;
+  protocol: ModelProviderProtocol;
+  revision: number;
+  status: ModelProviderStatus;
+  updatedAt: string;
+  wireDialect: ModelEndpointWireDialect;
+};
+
+export type ModelEndpointRepresentabilityError = {
+  field: string;
+  legacyAlias: string;
+  reason: string;
+};
+
+export type ModelEndpointWireDialect = "openai_stateful" | "openai_stateless" | "generic_stateless" | "deepseek" | "meta" | "standard" | "kimi" | "glm" | "qwen";
+
+export type ModelEndpointWrite = {
+  authScheme?: ModelEndpointAuthScheme;
+  baseUrl: string;
+  credentialId?: string | null;
+  description?: string | null;
+  displayName?: string | null;
+  endpointId: string;
+  expectedRevision?: number | null;
+  metadataJson?: unknown;
+  now: string;
+  promptCacheTransport?: PromptCacheTransport;
+  protocol: ModelProviderProtocol;
+  status: ModelProviderStatus;
+  wireDialect: ModelEndpointWireDialect;
+};
+
+export type ModelProviderProtocol = "responses" | "chat_completions";
+
+export type ModelProviderStatus = "active" | "disabled" | "archived";
+
 export type NormalizedExternalRuntimeEvent = {
   createdAt: string;
   eventId: string;
@@ -1779,6 +1921,8 @@ export type ProjectionRef = {
 };
 
 export type ProjectionVisibility = "observation" | "user_visible";
+
+export type PromptCacheTransport = "none" | "openrouter_anthropic";
 
 export type ProviderStateAbsenceReason = "not_configured" | "missing" | "expired" | "invalidated" | "module_does_not_use_state" | "load_failed";
 

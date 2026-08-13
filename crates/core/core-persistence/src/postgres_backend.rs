@@ -13,6 +13,7 @@ mod external_runtime;
 mod install_diplomat;
 mod logical_turns;
 mod memory_lore;
+mod model_registry;
 mod pool;
 mod profile_config;
 mod review_submissions;
@@ -78,29 +79,31 @@ use crate::{
     LoreRecallTraceRecord, McpBindingQuery, McpBindingRecord, MessageBlockId, MessageBlockRecord,
     MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
     MessageVariantId, MessageVariantQuery, MessageVariantRecord, MessageVariantSource,
-    MessageVariantStatus, MessageVariantWrite, ModelProviderCredential,
+    MessageVariantStatus, MessageVariantWrite, ModelConfigurationQuery, ModelConfigurationRecord,
+    ModelConfigurationWrite, ModelEndpointAuthScheme, ModelEndpointQuery, ModelEndpointRecord,
+    ModelEndpointWireDialect, ModelEndpointWrite, ModelProviderCredential,
     ModelProviderCredentialKind, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
     ModelProviderCredentialUnlink, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
     ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite, PersistedEvent,
     ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
     ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport,
     ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
-    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, ProviderStateAbsenceReason,
-    ProviderStateCompatibilityAction, ProviderStateCompatibilityPlan,
+    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, PromptCacheTransport,
+    ProviderStateAbsenceReason, ProviderStateCompatibilityAction, ProviderStateCompatibilityPlan,
     ProviderStateCompatibilitySnapshot, ProviderWireStateDiagnostic,
     ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateRecord,
     ProviderWireStateWakeLookup, ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage,
     QueuedMessageFilter, QueuedMessageRecord, QueuedMessageState, RemoveChatAttachmentRequest,
-    RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest, ReviewSubmissionRecord,
-    RoleplayChatLayerRecord, RoleplayChatLayersWrite, RoleplayLoreEntryPromotion,
-    RoleplayLoreFactCapture, RoleplayLoreLayerArchive, RoleplayLoreLayerConfigRecord,
-    RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin, RoleplayLoreLayerEntryLink,
-    RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate, RoleplayLoreLayerWrite,
-    RoleplayLoreLayerWritePolicy, RoleplayLoreProvenanceEvent, RoleplayLoreQuery,
-    RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace, RoleplayLoreSupersede,
-    RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeActivityId, RuntimeActivityRecord,
-    RuntimeActivityStatus, RuntimeCounterQuery, RuntimeCounterRecord, RuntimeCounterScope,
-    RuntimeDatabaseSize, RuntimeEventFilter, RuntimeEventRecord,
+    RemoveChatDataBankScopeRequest, ReorderChatMessageVariantsRequest, ResponsesProviderDialect,
+    ReviewSubmissionRecord, RoleplayChatLayerRecord, RoleplayChatLayersWrite,
+    RoleplayLoreEntryPromotion, RoleplayLoreFactCapture, RoleplayLoreLayerArchive,
+    RoleplayLoreLayerConfigRecord, RoleplayLoreLayerConfigWrite, RoleplayLoreLayerEntryJoin,
+    RoleplayLoreLayerEntryLink, RoleplayLoreLayerRecord, RoleplayLoreLayerUpdate,
+    RoleplayLoreLayerWrite, RoleplayLoreLayerWritePolicy, RoleplayLoreProvenanceEvent,
+    RoleplayLoreQuery, RoleplayLoreRecord, RoleplayLoreRecordStatus, RoleplayLoreReplace,
+    RoleplayLoreSupersede, RoleplayLoreTombstone, RoleplayLoreWrite, RunId, RuntimeActivityId,
+    RuntimeActivityRecord, RuntimeActivityStatus, RuntimeCounterQuery, RuntimeCounterRecord,
+    RuntimeCounterScope, RuntimeDatabaseSize, RuntimeEventFilter, RuntimeEventRecord,
     RuntimeExternalEventStorageDiagnostics, RuntimeFilesystemHeadroom, RuntimeMaintenancePolicy,
     RuntimeMaintenanceReport, RuntimeRepositoryGroupDiagnostic, RuntimeSearchFilter,
     RuntimeSearchResult, RuntimeSearchRowType, RuntimeStateSummary, RuntimeStorageCapability,
@@ -17771,6 +17774,97 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn postgres_normalized_model_registries_enforce_cas_and_shadow_parity() {
+        let Some(database_url) = postgres_test_database_url() else {
+            return;
+        };
+        let schema = unique_schema("model_registry");
+        let store = PostgresBackendStore::connect(&database_url, &schema).unwrap();
+        let endpoint_write = ModelEndpointWrite {
+            endpoint_id: "shared".to_string(),
+            status: ModelProviderStatus::Active,
+            display_name: Some("Shared".to_string()),
+            description: None,
+            base_url: "http://127.0.0.1:18082/v1".to_string(),
+            protocol: ModelProviderProtocol::ChatCompletions,
+            wire_dialect: ModelEndpointWireDialect::Standard,
+            auth_scheme: ModelEndpointAuthScheme::None,
+            credential_id: None,
+            prompt_cache_transport: PromptCacheTransport::None,
+            metadata_json: json!({}),
+            expected_revision: None,
+            now: "2026-08-12T20:00:00Z".to_string(),
+        };
+        assert_eq!(
+            store
+                .upsert_model_endpoint(&endpoint_write)
+                .unwrap()
+                .revision,
+            1
+        );
+        let configuration_write = |id: &str| ModelConfigurationWrite {
+            model_config_id: id.to_string(),
+            endpoint_id: "shared".to_string(),
+            status: ModelProviderStatus::Active,
+            display_name: Some(id.to_string()),
+            description: None,
+            model_id: format!("model-{id}"),
+            context_window_tokens: Some(32_000),
+            max_output_tokens: Some(4_096),
+            temperature_milli: Some(500),
+            reasoning_effort: None,
+            reasoning_format: None,
+            reasoning_history: ChatCompletionsReasoningHistory::ProviderDefault,
+            reasoning_budget_tokens: None,
+            thinking_mode: ChatCompletionsThinkingMode::ProviderDefault,
+            prompt_caching_policy: ChatCompletionsPromptCachingPolicy::Disabled,
+            capabilities: Default::default(),
+            metadata_json: json!({}),
+            expected_revision: None,
+            now: "2026-08-12T20:00:01Z".to_string(),
+        };
+        store
+            .upsert_model_configuration(&configuration_write("a"))
+            .unwrap();
+        store
+            .upsert_model_configuration(&configuration_write("b"))
+            .unwrap();
+        assert_eq!(
+            store
+                .get_model_configuration("a")
+                .unwrap()
+                .unwrap()
+                .revision,
+            1
+        );
+        assert_eq!(store.get_model_provider_secret("a").unwrap(), None);
+
+        let mut stale = endpoint_write.clone();
+        stale.expected_revision = Some(0);
+        assert!(store
+            .upsert_model_endpoint(&stale)
+            .unwrap_err()
+            .message
+            .contains("revision mismatch"));
+
+        let shadow = store.get_model_provider("a").unwrap().unwrap();
+        let mut legacy = model_provider_write(
+            "a",
+            ModelProviderProtocol::ChatCompletions,
+            &shadow.provider_kind,
+            &shadow.model_id,
+            None,
+        );
+        legacy.base_url = Some("http://127.0.0.1:19090/v1".to_string());
+        legacy.expected_revision = Some(shadow.revision);
+        assert_eq!(
+            store.upsert_model_provider(&legacy).unwrap_err().message,
+            "legacy_provider_shared_endpoint_conflict"
+        );
+        store.drop_schema_for_test().unwrap();
     }
 
     fn unique_schema(prefix: &str) -> String {

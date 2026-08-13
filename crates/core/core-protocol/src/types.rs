@@ -1702,6 +1702,828 @@ pub enum ChatCompletionsPromptCachingPolicy {
     Automatic1h,
 }
 
+/// The normalized endpoint status uses the same closed vocabulary as the
+/// legacy provider registry. The alias is intentional: status has identical
+/// semantics at both layers and must not acquire a second source of truth.
+pub type ModelEndpointStatus = ModelProviderStatus;
+
+/// The normalized endpoint protocol uses the same closed vocabulary as the
+/// legacy provider registry. Wire behavior is selected separately by
+/// `ModelEndpointWireDialect`.
+pub type ModelEndpointProtocol = ModelProviderProtocol;
+
+/// The normalized model configuration keeps the existing provider policy
+/// vocabulary until a later generated contract replaces the legacy name.
+pub type ModelPromptCachingPolicy = ChatCompletionsPromptCachingPolicy;
+pub type PromptCachingPolicy = ChatCompletionsPromptCachingPolicy;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelEndpointWireDialect {
+    OpenaiStateful,
+    OpenaiStateless,
+    GenericStateless,
+    Deepseek,
+    Meta,
+    Standard,
+    Kimi,
+    Glm,
+    Qwen,
+}
+
+impl ModelEndpointWireDialect {
+    /// Check the protocol/dialect pair without inferring either value from a
+    /// provider alias, URL, model ID, or vendor label.
+    pub fn validate_protocol_pairing(self, protocol: ModelEndpointProtocol) -> CoreResult<()> {
+        let valid = match protocol {
+            ModelEndpointProtocol::Responses => matches!(
+                self,
+                Self::OpenaiStateful
+                    | Self::OpenaiStateless
+                    | Self::GenericStateless
+                    | Self::Deepseek
+                    | Self::Meta
+            ),
+            ModelEndpointProtocol::ChatCompletions => matches!(
+                self,
+                Self::Standard | Self::Kimi | Self::Glm | Self::Qwen | Self::Deepseek
+            ),
+        };
+
+        if valid {
+            return Ok(());
+        }
+
+        Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("wire dialect {self:?} is not valid for protocol {protocol:?}"),
+        ))
+    }
+
+    pub fn validate_for_protocol(self, protocol: ModelEndpointProtocol) -> CoreResult<()> {
+        self.validate_protocol_pairing(protocol)
+    }
+
+    pub fn validate_protocol(self, protocol: ModelEndpointProtocol) -> CoreResult<()> {
+        self.validate_protocol_pairing(protocol)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelEndpointAuthScheme {
+    #[default]
+    None,
+    BearerApiKey,
+    #[serde(rename = "openai_codex_oauth")]
+    OpenAiCodexOauth,
+}
+
+impl ModelEndpointAuthScheme {
+    pub fn validate_protocol(self, protocol: ModelEndpointProtocol) -> CoreResult<()> {
+        if self == Self::OpenAiCodexOauth && protocol != ModelEndpointProtocol::Responses {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "OpenAI Codex OAuth requires the responses protocol",
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_for_protocol(self, protocol: ModelEndpointProtocol) -> CoreResult<()> {
+        self.validate_protocol(protocol)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptCacheTransport {
+    #[default]
+    None,
+    OpenrouterAnthropic,
+}
+
+impl PromptCacheTransport {
+    pub fn validate_protocol(self, protocol: ModelEndpointProtocol) -> CoreResult<()> {
+        if self == Self::OpenrouterAnthropic && protocol != ModelEndpointProtocol::ChatCompletions {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "OpenRouter Anthropic prompt caching requires the chat_completions protocol",
+            ));
+        }
+        Ok(())
+    }
+}
+
+pub const MODEL_CAPABILITIES_VERSION: u32 = 1;
+
+fn default_model_capabilities_version() -> u32 {
+    MODEL_CAPABILITIES_VERSION
+}
+
+fn default_json_object() -> Value {
+    Value::Object(serde_json::Map::new())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelCapabilities {
+    #[serde(default = "default_model_capabilities_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub image_input: bool,
+}
+
+impl Default for ModelCapabilities {
+    fn default() -> Self {
+        Self {
+            version: MODEL_CAPABILITIES_VERSION,
+            image_input: false,
+        }
+    }
+}
+
+impl ModelCapabilities {
+    pub fn validate(&self) -> CoreResult<()> {
+        if self.version != MODEL_CAPABILITIES_VERSION {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                format!(
+                    "unsupported model capabilities version {}; expected {}",
+                    self.version, MODEL_CAPABILITIES_VERSION
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointRecord {
+    pub endpoint_id: String,
+    pub status: ModelEndpointStatus,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub base_url: String,
+    pub protocol: ModelEndpointProtocol,
+    pub wire_dialect: ModelEndpointWireDialect,
+    #[serde(default)]
+    pub auth_scheme: ModelEndpointAuthScheme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_id: Option<String>,
+    #[serde(default)]
+    pub prompt_cache_transport: PromptCacheTransport,
+    #[serde(default = "default_json_object")]
+    pub metadata_json: Value,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointWrite {
+    pub endpoint_id: String,
+    pub status: ModelEndpointStatus,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub base_url: String,
+    pub protocol: ModelEndpointProtocol,
+    pub wire_dialect: ModelEndpointWireDialect,
+    #[serde(default)]
+    pub auth_scheme: ModelEndpointAuthScheme,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_id: Option<String>,
+    #[serde(default)]
+    pub prompt_cache_transport: PromptCacheTransport,
+    #[serde(default = "default_json_object")]
+    pub metadata_json: Value,
+    pub expected_revision: Option<u64>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointQuery {
+    pub endpoint_id: Option<String>,
+    pub status: Option<ModelEndpointStatus>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+impl ModelEndpointRecord {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_model_endpoint_fields(
+            &self.endpoint_id,
+            self.display_name.as_deref(),
+            self.description.as_deref(),
+            &self.base_url,
+            self.protocol,
+            self.wire_dialect,
+            self.auth_scheme,
+            self.credential_id.as_deref(),
+            self.prompt_cache_transport,
+            &self.metadata_json,
+        )?;
+        validate_timestamp("model endpoint created_at", &self.created_at)?;
+        validate_timestamp("model endpoint updated_at", &self.updated_at)
+    }
+}
+
+impl ModelEndpointWrite {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_model_endpoint_fields(
+            &self.endpoint_id,
+            self.display_name.as_deref(),
+            self.description.as_deref(),
+            &self.base_url,
+            self.protocol,
+            self.wire_dialect,
+            self.auth_scheme,
+            self.credential_id.as_deref(),
+            self.prompt_cache_transport,
+            &self.metadata_json,
+        )?;
+        validate_timestamp("model endpoint now", &self.now)
+    }
+}
+
+impl ModelEndpointQuery {
+    pub fn validate(&self) -> CoreResult<()> {
+        if let Some(endpoint_id) = self.endpoint_id.as_deref() {
+            validate_normalized_id("model endpoint endpoint_id", endpoint_id)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelConfigurationRecord {
+    pub model_config_id: String,
+    pub endpoint_id: String,
+    pub status: ModelEndpointStatus,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub model_id: String,
+    pub context_window_tokens: Option<u32>,
+    pub max_output_tokens: Option<u32>,
+    pub temperature_milli: Option<u32>,
+    pub reasoning_effort: Option<String>,
+    pub reasoning_format: Option<String>,
+    #[serde(default)]
+    pub reasoning_history: ChatCompletionsReasoningHistory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget_tokens: Option<u32>,
+    #[serde(default)]
+    pub thinking_mode: ChatCompletionsThinkingMode,
+    #[serde(default)]
+    pub prompt_caching_policy: ModelPromptCachingPolicy,
+    #[serde(default)]
+    pub capabilities: ModelCapabilities,
+    #[serde(default = "default_json_object", alias = "metadata")]
+    pub metadata_json: Value,
+    pub revision: u64,
+    pub created_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelConfigurationWrite {
+    pub model_config_id: String,
+    pub endpoint_id: String,
+    pub status: ModelEndpointStatus,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub model_id: String,
+    pub context_window_tokens: Option<u32>,
+    pub max_output_tokens: Option<u32>,
+    pub temperature_milli: Option<u32>,
+    pub reasoning_effort: Option<String>,
+    pub reasoning_format: Option<String>,
+    #[serde(default)]
+    pub reasoning_history: ChatCompletionsReasoningHistory,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget_tokens: Option<u32>,
+    #[serde(default)]
+    pub thinking_mode: ChatCompletionsThinkingMode,
+    #[serde(default)]
+    pub prompt_caching_policy: ModelPromptCachingPolicy,
+    #[serde(default)]
+    pub capabilities: ModelCapabilities,
+    #[serde(default = "default_json_object", alias = "metadata")]
+    pub metadata_json: Value,
+    pub expected_revision: Option<u64>,
+    pub now: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct ModelConfigurationQuery {
+    pub model_config_id: Option<String>,
+    pub endpoint_id: Option<String>,
+    pub status: Option<ModelEndpointStatus>,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+}
+
+impl ModelConfigurationRecord {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_model_configuration_fields(
+            &self.model_config_id,
+            &self.endpoint_id,
+            self.display_name.as_deref(),
+            self.description.as_deref(),
+            &self.model_id,
+            self.context_window_tokens,
+            self.max_output_tokens,
+            self.temperature_milli,
+            self.reasoning_effort.as_deref(),
+            self.reasoning_format.as_deref(),
+            self.reasoning_history,
+            self.reasoning_budget_tokens,
+            self.thinking_mode,
+            self.prompt_caching_policy,
+            &self.capabilities,
+            &self.metadata_json,
+        )?;
+        validate_timestamp("model configuration created_at", &self.created_at)?;
+        validate_timestamp("model configuration updated_at", &self.updated_at)
+    }
+
+    pub fn validate_for_endpoint(&self, endpoint: &ModelEndpointRecord) -> CoreResult<()> {
+        self.validate()?;
+        validate_model_configuration_for_endpoint(
+            endpoint,
+            &self.model_config_id,
+            &self.endpoint_id,
+            &self.model_id,
+            self.max_output_tokens,
+            self.temperature_milli,
+            self.reasoning_history,
+            self.reasoning_budget_tokens,
+            self.thinking_mode,
+            self.prompt_caching_policy,
+        )
+    }
+}
+
+impl ModelConfigurationWrite {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_model_configuration_fields(
+            &self.model_config_id,
+            &self.endpoint_id,
+            self.display_name.as_deref(),
+            self.description.as_deref(),
+            &self.model_id,
+            self.context_window_tokens,
+            self.max_output_tokens,
+            self.temperature_milli,
+            self.reasoning_effort.as_deref(),
+            self.reasoning_format.as_deref(),
+            self.reasoning_history,
+            self.reasoning_budget_tokens,
+            self.thinking_mode,
+            self.prompt_caching_policy,
+            &self.capabilities,
+            &self.metadata_json,
+        )?;
+        validate_timestamp("model configuration now", &self.now)
+    }
+
+    pub fn validate_for_endpoint(&self, endpoint: &ModelEndpointRecord) -> CoreResult<()> {
+        self.validate()?;
+        validate_model_configuration_for_endpoint(
+            endpoint,
+            &self.model_config_id,
+            &self.endpoint_id,
+            &self.model_id,
+            self.max_output_tokens,
+            self.temperature_milli,
+            self.reasoning_history,
+            self.reasoning_budget_tokens,
+            self.thinking_mode,
+            self.prompt_caching_policy,
+        )
+    }
+}
+
+impl ModelConfigurationQuery {
+    pub fn validate(&self) -> CoreResult<()> {
+        if let Some(model_config_id) = self.model_config_id.as_deref() {
+            validate_normalized_id("model configuration model_config_id", model_config_id)?;
+        }
+        if let Some(endpoint_id) = self.endpoint_id.as_deref() {
+            validate_normalized_id("model configuration endpoint_id", endpoint_id)?;
+        }
+        Ok(())
+    }
+}
+
+/// A deterministic, secret-free mapping from one legacy provider alias to the
+/// normalized endpoint/configuration pair created by a backfill.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointLegacyAliasMapping {
+    pub legacy_alias: String,
+    pub endpoint_id: String,
+    pub model_config_id: String,
+}
+
+impl ModelEndpointLegacyAliasMapping {
+    pub fn validate(&self) -> CoreResult<()> {
+        validate_normalized_id("legacy model provider alias", &self.legacy_alias)?;
+        validate_normalized_id("model endpoint endpoint_id", &self.endpoint_id)?;
+        validate_normalized_id("model configuration model_config_id", &self.model_config_id)
+    }
+}
+
+/// A representability failure names only the legacy row and field; it carries
+/// no provider secret or raw credential material.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointRepresentabilityError {
+    pub legacy_alias: String,
+    pub field: String,
+    pub reason: String,
+}
+
+/// Equality of the safe, joined projection of a legacy alias and its
+/// normalized endpoint/configuration records. Differences are field names,
+/// never the differing values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointJoinedProjectionEquality {
+    pub legacy_alias: String,
+    pub endpoint_id: String,
+    pub model_config_id: String,
+    pub projection_equal: bool,
+    pub differing_fields: Vec<String>,
+}
+
+impl ModelEndpointJoinedProjectionEquality {
+    pub fn is_equal(&self) -> bool {
+        self.projection_equal
+    }
+}
+
+pub type ModelEndpointParityResult = ModelEndpointJoinedProjectionEquality;
+
+/// One alias's backfill outcome, including either a deterministic mapping or
+/// safe representability diagnostics and an optional joined parity result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointBackfillResult {
+    pub legacy_alias: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mapping: Option<ModelEndpointLegacyAliasMapping>,
+    #[serde(default)]
+    pub representability_errors: Vec<ModelEndpointRepresentabilityError>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joined_projection: Option<ModelEndpointJoinedProjectionEquality>,
+}
+
+/// Aggregate backfill/parity output. Every member is safe to serialize for
+/// diagnostics because no field contains a secret or secret-bearing payload.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointBackfillReport {
+    #[serde(default)]
+    pub mappings: Vec<ModelEndpointLegacyAliasMapping>,
+    #[serde(default)]
+    pub representability_errors: Vec<ModelEndpointRepresentabilityError>,
+    #[serde(default)]
+    pub joined_projection_equality: Vec<ModelEndpointJoinedProjectionEquality>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEndpointParityReport {
+    #[serde(default)]
+    pub joined_projection_equality: Vec<ModelEndpointJoinedProjectionEquality>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_model_endpoint_fields(
+    endpoint_id: &str,
+    display_name: Option<&str>,
+    description: Option<&str>,
+    base_url: &str,
+    protocol: ModelEndpointProtocol,
+    wire_dialect: ModelEndpointWireDialect,
+    auth_scheme: ModelEndpointAuthScheme,
+    credential_id: Option<&str>,
+    prompt_cache_transport: PromptCacheTransport,
+    metadata_json: &Value,
+) -> CoreResult<()> {
+    validate_normalized_id("model endpoint endpoint_id", endpoint_id)?;
+    validate_optional_short_text("model endpoint display_name", display_name)?;
+    validate_optional_short_text("model endpoint description", description)?;
+    validate_base_url(base_url)?;
+    wire_dialect.validate_protocol_pairing(protocol)?;
+    auth_scheme.validate_protocol(protocol)?;
+    validate_credential_binding(auth_scheme, credential_id)?;
+    prompt_cache_transport.validate_protocol(protocol)?;
+    validate_object_metadata("model endpoint metadata_json", metadata_json)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_model_configuration_fields(
+    model_config_id: &str,
+    endpoint_id: &str,
+    display_name: Option<&str>,
+    description: Option<&str>,
+    model_id: &str,
+    context_window_tokens: Option<u32>,
+    max_output_tokens: Option<u32>,
+    temperature_milli: Option<u32>,
+    reasoning_effort: Option<&str>,
+    reasoning_format: Option<&str>,
+    reasoning_history: ChatCompletionsReasoningHistory,
+    reasoning_budget_tokens: Option<u32>,
+    thinking_mode: ChatCompletionsThinkingMode,
+    prompt_caching_policy: ModelPromptCachingPolicy,
+    capabilities: &ModelCapabilities,
+    metadata_json: &Value,
+) -> CoreResult<()> {
+    validate_normalized_id("model configuration model_config_id", model_config_id)?;
+    validate_normalized_id("model configuration endpoint_id", endpoint_id)?;
+    validate_optional_short_text("model configuration display_name", display_name)?;
+    validate_optional_short_text("model configuration description", description)?;
+    validate_model_id("model configuration model_id", model_id)?;
+    validate_positive_optional_u32(
+        "model configuration context_window_tokens",
+        context_window_tokens,
+    )?;
+    validate_positive_optional_u32("model configuration max_output_tokens", max_output_tokens)?;
+    if let Some(temperature_milli) = temperature_milli {
+        if temperature_milli > 10_000 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "model configuration temperature_milli must be at most 10000",
+            ));
+        }
+    }
+    validate_optional_short_text("model configuration reasoning_effort", reasoning_effort)?;
+    validate_optional_short_text("model configuration reasoning_format", reasoning_format)?;
+    if reasoning_budget_tokens == Some(0) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model configuration reasoning_budget_tokens must be greater than zero",
+        ));
+    }
+    if thinking_mode == ChatCompletionsThinkingMode::Disabled
+        && reasoning_history != ChatCompletionsReasoningHistory::ProviderDefault
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "disabled thinking cannot configure reasoning history preservation",
+        ));
+    }
+    if prompt_caching_policy != ChatCompletionsPromptCachingPolicy::Disabled
+        && !matches!(
+            prompt_caching_policy,
+            ChatCompletionsPromptCachingPolicy::Automatic5m
+                | ChatCompletionsPromptCachingPolicy::Automatic1h
+        )
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "unsupported model configuration prompt caching policy",
+        ));
+    }
+    capabilities.validate()?;
+    validate_object_metadata("model configuration metadata_json", metadata_json)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_model_configuration_for_endpoint(
+    endpoint: &ModelEndpointRecord,
+    model_config_id: &str,
+    endpoint_id: &str,
+    model_id: &str,
+    max_output_tokens: Option<u32>,
+    temperature_milli: Option<u32>,
+    reasoning_history: ChatCompletionsReasoningHistory,
+    reasoning_budget_tokens: Option<u32>,
+    thinking_mode: ChatCompletionsThinkingMode,
+    prompt_caching_policy: ModelPromptCachingPolicy,
+) -> CoreResult<()> {
+    endpoint.validate()?;
+    validate_normalized_id("model configuration model_config_id", model_config_id)?;
+    if endpoint.endpoint_id != endpoint_id {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!(
+                "model configuration endpoint_id {endpoint_id} does not match endpoint {}",
+                endpoint.endpoint_id
+            ),
+        ));
+    }
+    validate_model_id("model configuration model_id", model_id)?;
+
+    if prompt_caching_policy != ChatCompletionsPromptCachingPolicy::Disabled {
+        if endpoint.prompt_cache_transport != PromptCacheTransport::OpenrouterAnthropic {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "model configuration prompt caching requires the openrouter_anthropic transport",
+            ));
+        }
+        if !model_id.starts_with("anthropic/") {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "OpenRouter Anthropic prompt caching requires an anthropic/ model id",
+            ));
+        }
+    }
+
+    match endpoint.protocol {
+        ModelEndpointProtocol::Responses => {
+            if reasoning_history != ChatCompletionsReasoningHistory::ProviderDefault
+                || reasoning_budget_tokens.is_some()
+                || thinking_mode != ChatCompletionsThinkingMode::ProviderDefault
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "chat completions reasoning settings require the chat_completions protocol",
+                ));
+            }
+        }
+        ModelEndpointProtocol::ChatCompletions => {
+            if endpoint.wire_dialect == ModelEndpointWireDialect::Standard
+                && (reasoning_history != ChatCompletionsReasoningHistory::ProviderDefault
+                    || reasoning_budget_tokens.is_some()
+                    || thinking_mode != ChatCompletionsThinkingMode::ProviderDefault)
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "standard chat completions dialect does not accept vendor thinking settings",
+                ));
+            }
+            if reasoning_history == ChatCompletionsReasoningHistory::ToolCallsOnly
+                && endpoint.wire_dialect != ModelEndpointWireDialect::Deepseek
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::InvalidInput,
+                    "tool_calls_only reasoning history requires the deepseek chat completions dialect",
+                ));
+            }
+            if let Some(budget) = reasoning_budget_tokens {
+                if endpoint.wire_dialect != ModelEndpointWireDialect::Qwen {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "reasoning budget tokens are supported only by the qwen chat completions dialect",
+                    ));
+                }
+                if thinking_mode != ChatCompletionsThinkingMode::Enabled {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "qwen reasoning budget tokens require thinking mode enabled",
+                    ));
+                }
+                if budget == 0 {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "reasoning budget tokens must be greater than zero",
+                    ));
+                }
+            }
+            if endpoint.wire_dialect == ModelEndpointWireDialect::Kimi
+                && thinking_mode != ChatCompletionsThinkingMode::Disabled
+            {
+                if temperature_milli.is_some() {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "kimi thinking models do not accept a temperature override",
+                    ));
+                }
+                if !matches!(max_output_tokens, Some(tokens) if tokens >= 16_000) {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "kimi thinking models require max_output_tokens of at least 16000",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_credential_binding(
+    auth_scheme: ModelEndpointAuthScheme,
+    credential_id: Option<&str>,
+) -> CoreResult<()> {
+    match (auth_scheme, credential_id) {
+        (ModelEndpointAuthScheme::None, None) => Ok(()),
+        (ModelEndpointAuthScheme::None, Some(_)) => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "auth_scheme none cannot reference a credential_id",
+        )),
+        (_, None) => Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "an authenticated endpoint requires a credential_id",
+        )),
+        (_, Some(credential_id)) => {
+            validate_normalized_id("model endpoint credential_id", credential_id)
+        }
+    }
+}
+
+fn validate_normalized_id(label: &str, value: &str) -> CoreResult<()> {
+    if value.is_empty() || value.len() > 128 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must be 1-128 characters"),
+        ));
+    }
+    if !value.chars().all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || matches!(character, '-' | '_' | ':' | '.')
+    }) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must use lowercase ASCII id characters"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_model_id(label: &str, value: &str) -> CoreResult<()> {
+    if value.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must be non-empty"),
+        ));
+    }
+    if value.len() > 512 {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            format!("{label} must be at most 512 bytes"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_base_url(value: &str) -> CoreResult<()> {
+    if value.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model endpoint base_url must be non-empty",
+        ));
+    }
+    if value.len() > 2048 {
+        return Err(CoreError::new(
+            CoreErrorKind::ActionRejected,
+            "model endpoint base_url must be at most 2048 bytes",
+        ));
+    }
+    if value.chars().any(char::is_whitespace) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model endpoint base_url must not contain whitespace",
+        ));
+    }
+    if !value.starts_with("http://") && !value.starts_with("https://") {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "model endpoint base_url must use http:// or https://",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_optional_short_text(label: &str, value: Option<&str>) -> CoreResult<()> {
+    if let Some(value) = value {
+        if value.len() > 512 {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                format!("{label} must be at most 512 bytes"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_positive_optional_u32(label: &str, value: Option<u32>) -> CoreResult<()> {
+    if value == Some(0) {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must be greater than zero when set"),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_object_metadata(label: &str, value: &Value) -> CoreResult<()> {
+    if value.is_object() {
+        return Ok(());
+    }
+    Err(CoreError::new(
+        CoreErrorKind::InvalidInput,
+        format!("{label} must be a JSON object"),
+    ))
+}
+
+fn validate_timestamp(label: &str, value: &str) -> CoreResult<()> {
+    if value.trim().is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            format!("{label} must be non-empty"),
+        ));
+    }
+    Ok(())
+}
+
 pub const MODEL_PROVIDER_SECRET_ENVELOPE_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -2321,6 +3143,141 @@ mod tests {
         assert!(error
             .message
             .contains("invalid model provider secret envelope"));
+    }
+
+    #[test]
+    fn model_endpoint_wire_dialect_pairing_is_closed_and_protocol_scoped() {
+        for dialect in [
+            ModelEndpointWireDialect::OpenaiStateful,
+            ModelEndpointWireDialect::OpenaiStateless,
+            ModelEndpointWireDialect::GenericStateless,
+            ModelEndpointWireDialect::Deepseek,
+            ModelEndpointWireDialect::Meta,
+        ] {
+            assert!(dialect
+                .validate_protocol_pairing(ModelEndpointProtocol::Responses)
+                .is_ok());
+        }
+        for dialect in [
+            ModelEndpointWireDialect::Standard,
+            ModelEndpointWireDialect::Kimi,
+            ModelEndpointWireDialect::Glm,
+            ModelEndpointWireDialect::Qwen,
+            ModelEndpointWireDialect::Deepseek,
+        ] {
+            assert!(dialect
+                .validate_protocol_pairing(ModelEndpointProtocol::ChatCompletions)
+                .is_ok());
+        }
+
+        assert!(ModelEndpointWireDialect::Standard
+            .validate_protocol_pairing(ModelEndpointProtocol::Responses)
+            .is_err());
+        assert!(ModelEndpointWireDialect::Meta
+            .validate_protocol_pairing(ModelEndpointProtocol::ChatCompletions)
+            .is_err());
+        assert_eq!(
+            serde_json::to_value(ModelEndpointWireDialect::OpenaiStateful).unwrap(),
+            serde_json::json!("openai_stateful")
+        );
+    }
+
+    #[test]
+    fn model_endpoint_oauth_requires_responses_and_a_credential() {
+        let mut endpoint = ModelEndpointWrite {
+            endpoint_id: "openai-codex".to_string(),
+            status: ModelEndpointStatus::Active,
+            display_name: Some("OpenAI Codex".to_string()),
+            description: None,
+            base_url: "https://chatgpt.com/backend-api".to_string(),
+            protocol: ModelEndpointProtocol::Responses,
+            wire_dialect: ModelEndpointWireDialect::OpenaiStateful,
+            auth_scheme: ModelEndpointAuthScheme::OpenAiCodexOauth,
+            credential_id: Some("credential:openai-codex".to_string()),
+            prompt_cache_transport: PromptCacheTransport::None,
+            metadata_json: serde_json::json!({}),
+            expected_revision: None,
+            now: "2026-08-12T00:00:00Z".to_string(),
+        };
+
+        endpoint.validate().unwrap();
+
+        endpoint.protocol = ModelEndpointProtocol::ChatCompletions;
+        endpoint.wire_dialect = ModelEndpointWireDialect::Standard;
+        let error = endpoint
+            .validate()
+            .expect_err("OAuth must reject chat completions");
+        assert!(error.message.contains("OAuth"));
+
+        endpoint.protocol = ModelEndpointProtocol::Responses;
+        endpoint.wire_dialect = ModelEndpointWireDialect::OpenaiStateful;
+        endpoint.credential_id = None;
+        let error = endpoint
+            .validate()
+            .expect_err("OAuth must require a credential reference");
+        assert!(error.message.contains("credential_id"));
+    }
+
+    #[test]
+    fn normalized_model_contracts_serialize_without_secret_fields() {
+        let endpoint = ModelEndpointWrite {
+            endpoint_id: "safe-endpoint".to_string(),
+            status: ModelEndpointStatus::Active,
+            display_name: None,
+            description: None,
+            base_url: "https://api.example.test/v1".to_string(),
+            protocol: ModelEndpointProtocol::ChatCompletions,
+            wire_dialect: ModelEndpointWireDialect::Standard,
+            auth_scheme: ModelEndpointAuthScheme::BearerApiKey,
+            credential_id: Some("credential:api".to_string()),
+            prompt_cache_transport: PromptCacheTransport::None,
+            metadata_json: serde_json::json!({"owner": "test"}),
+            expected_revision: Some(3),
+            now: "2026-08-12T00:00:00Z".to_string(),
+        };
+        let configuration = ModelConfigurationWrite {
+            model_config_id: "safe-model".to_string(),
+            endpoint_id: "safe-endpoint".to_string(),
+            status: ModelEndpointStatus::Active,
+            display_name: Some("Safe model".to_string()),
+            description: None,
+            model_id: "provider/model".to_string(),
+            context_window_tokens: Some(128_000),
+            max_output_tokens: Some(4096),
+            temperature_milli: Some(500),
+            reasoning_effort: None,
+            reasoning_format: None,
+            reasoning_history: ChatCompletionsReasoningHistory::ProviderDefault,
+            reasoning_budget_tokens: None,
+            thinking_mode: ChatCompletionsThinkingMode::ProviderDefault,
+            prompt_caching_policy: PromptCachingPolicy::Disabled,
+            capabilities: ModelCapabilities::default(),
+            metadata_json: serde_json::json!({"owner": "test"}),
+            expected_revision: None,
+            now: "2026-08-12T00:00:00Z".to_string(),
+        };
+        let report = ModelEndpointBackfillReport {
+            mappings: vec![ModelEndpointLegacyAliasMapping {
+                legacy_alias: "legacy-model".to_string(),
+                endpoint_id: "safe-endpoint".to_string(),
+                model_config_id: "safe-model".to_string(),
+            }],
+            representability_errors: Vec::new(),
+            joined_projection_equality: Vec::new(),
+        };
+
+        let serialized = serde_json::to_string(&(endpoint, configuration, report)).unwrap();
+        for field in [
+            "\"secret\"",
+            "\"api_key\"",
+            "\"access_token\"",
+            "\"refresh_token\"",
+        ] {
+            assert!(
+                !serialized.contains(field),
+                "serialized contract contains {field}"
+            );
+        }
     }
 
     #[test]

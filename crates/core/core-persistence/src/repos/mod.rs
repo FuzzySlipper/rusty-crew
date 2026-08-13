@@ -8,6 +8,7 @@ pub(crate) mod external_runtime;
 pub(crate) mod install_diplomat;
 pub(crate) mod logical_turns;
 pub(crate) mod memory;
+pub(crate) mod model_registry;
 pub(crate) mod queued_messages;
 pub(crate) mod review_submissions;
 pub(crate) mod roleplay_lore;

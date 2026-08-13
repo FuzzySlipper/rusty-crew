@@ -99,6 +99,10 @@ import {
 import { createNativeBridgeRuntimeConfigMethods } from "./runtime-config-wrappers.js";
 import { createNativeBridgeRuntimeActivityMethods } from "./runtime-activity-wrappers.js";
 import { createNativeBridgeReviewSubmissionMethods } from "./review-submission-wrappers.js";
+import {
+  createNativeBridgeNormalizedModelMethods,
+  type NativeBridgeBindingWithNormalizedModelMethods,
+} from "./model-endpoint-wrappers.js";
 import { createNativeBridgeProfileProviderMethods } from "./profile-provider-wrappers.js";
 import { createNativeBridgeServiceCredentialMethods } from "./service-credential-wrappers.js";
 import { createNativeBridgeInstallDiplomatMethods } from "./install-diplomat-wrappers.js";
@@ -787,6 +791,12 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     listModelProviders: unavailable("initialize_engine"),
     getModelProvider: unavailable("initialize_engine"),
     getModelProviderSecret: unavailable("initialize_engine"),
+    upsertModelEndpoint: unavailable("upsert_model_endpoint"),
+    listModelEndpoints: unavailable("list_model_endpoints"),
+    getModelEndpoint: unavailable("get_model_endpoint"),
+    upsertModelConfiguration: unavailable("upsert_model_configuration"),
+    listModelConfigurations: unavailable("list_model_configurations"),
+    getModelConfiguration: unavailable("get_model_configuration"),
     upsertServiceCredential: unavailable("initialize_engine"),
     listServiceCredentials: unavailable("initialize_engine"),
     getServiceCredential: unavailable("initialize_engine"),
@@ -1691,6 +1701,9 @@ function createNativeBridgeModule(
     },
     gitHubGateEventCursor: async () => binding.githubGateEventCursor(),
     ...createNativeBridgeReviewSubmissionMethods(binding),
+    ...createNativeBridgeNormalizedModelMethods(
+      binding as NativeBridgeBindingWithNormalizedModelMethods,
+    ),
     ...createNativeBridgeProfileProviderMethods(binding),
     ...createNativeBridgeServiceCredentialMethods(binding),
     ...createNativeBridgeInstallDiplomatMethods(binding),

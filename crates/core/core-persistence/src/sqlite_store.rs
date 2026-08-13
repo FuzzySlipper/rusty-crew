@@ -1630,6 +1630,69 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn upsert_model_endpoint(
+        &self,
+        write: &ModelEndpointWrite,
+    ) -> CoreResult<ModelEndpointRecord> {
+        match self {
+            Self::Sqlite(store) => store.upsert_model_endpoint(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.upsert_model_endpoint(write),
+        }
+    }
+
+    pub fn get_model_endpoint(&self, endpoint_id: &str) -> CoreResult<Option<ModelEndpointRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_model_endpoint(endpoint_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_model_endpoint(endpoint_id),
+        }
+    }
+
+    pub fn list_model_endpoints(
+        &self,
+        query: &ModelEndpointQuery,
+    ) -> CoreResult<Vec<ModelEndpointRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_model_endpoints(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_model_endpoints(query),
+        }
+    }
+
+    pub fn upsert_model_configuration(
+        &self,
+        write: &ModelConfigurationWrite,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        match self {
+            Self::Sqlite(store) => store.upsert_model_configuration(write),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.upsert_model_configuration(write),
+        }
+    }
+
+    pub fn get_model_configuration(
+        &self,
+        model_config_id: &str,
+    ) -> CoreResult<Option<ModelConfigurationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.get_model_configuration(model_config_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.get_model_configuration(model_config_id),
+        }
+    }
+
+    pub fn list_model_configurations(
+        &self,
+        query: &ModelConfigurationQuery,
+    ) -> CoreResult<Vec<ModelConfigurationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_model_configurations(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_model_configurations(query),
+        }
+    }
+
     pub fn upsert_model_provider(
         &self,
         write: &ModelProviderWrite,
@@ -3506,6 +3569,45 @@ impl ServiceDataRepositorySet<'_> {
 
     pub fn purge_profile(&self, profile_id: &ProfileId) -> CoreResult<ProfilePurgeReport> {
         self.store.purge_profile(profile_id)
+    }
+
+    pub fn upsert_model_endpoint(
+        &self,
+        write: &ModelEndpointWrite,
+    ) -> CoreResult<ModelEndpointRecord> {
+        self.store.upsert_model_endpoint(write)
+    }
+
+    pub fn get_model_endpoint(&self, endpoint_id: &str) -> CoreResult<Option<ModelEndpointRecord>> {
+        self.store.get_model_endpoint(endpoint_id)
+    }
+
+    pub fn list_model_endpoints(
+        &self,
+        query: &ModelEndpointQuery,
+    ) -> CoreResult<Vec<ModelEndpointRecord>> {
+        self.store.list_model_endpoints(query)
+    }
+
+    pub fn upsert_model_configuration(
+        &self,
+        write: &ModelConfigurationWrite,
+    ) -> CoreResult<ModelConfigurationRecord> {
+        self.store.upsert_model_configuration(write)
+    }
+
+    pub fn get_model_configuration(
+        &self,
+        model_config_id: &str,
+    ) -> CoreResult<Option<ModelConfigurationRecord>> {
+        self.store.get_model_configuration(model_config_id)
+    }
+
+    pub fn list_model_configurations(
+        &self,
+        query: &ModelConfigurationQuery,
+    ) -> CoreResult<Vec<ModelConfigurationRecord>> {
+        self.store.list_model_configurations(query)
     }
 
     pub fn upsert_model_provider(
