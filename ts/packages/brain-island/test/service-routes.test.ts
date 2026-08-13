@@ -1371,6 +1371,26 @@ test("model provider admin routes type validation failures without mutating crea
     return persist(write);
   };
 
+  const rejectedProviderKind = await handleModelProviderAdminRequest(
+    {
+      method: "POST",
+      url: "http://local/v1/admin/model-providers",
+      requestId: "req-invalid-provider-kind",
+      body: {
+        alias: "ambiguous-provider-kind",
+        protocol: "chat_completions",
+        providerKind: "whatever-the-operator-typed",
+        modelId: "test-model",
+      },
+    },
+    context,
+  );
+  assert.equal(rejectedProviderKind.status, 400);
+  assert.match(
+    String(errorDetails(rejectedProviderKind).message),
+    /model provider kind must be/,
+  );
+
   const rejectedCreate = await handleModelProviderAdminRequest(
     {
       method: "POST",

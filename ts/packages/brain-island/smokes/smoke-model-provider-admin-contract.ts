@@ -19,6 +19,7 @@ import {
   CHAT_COMPLETIONS_DIALECT_VALUES,
   CHAT_COMPLETIONS_REASONING_HISTORY_VALUES,
   CHAT_COMPLETIONS_PROMPT_CACHING_VALUES,
+  MODEL_PROVIDER_KIND_VALUES,
   MODEL_PROVIDER_PROTOCOL_VALUES,
   MODEL_PROVIDER_REFRESH_MODE_VALUES,
   MODEL_PROVIDER_REVISION_CONFLICT_DATA_FIELDS,
@@ -51,6 +52,9 @@ assert.deepEqual(schema("ModelProviderStatus").enum, [
 ]);
 assert.deepEqual(schema("ModelProviderProtocol").enum, [
   ...MODEL_PROVIDER_PROTOCOL_VALUES,
+]);
+assert.deepEqual(schema("ModelProviderKind").enum, [
+  ...MODEL_PROVIDER_KIND_VALUES,
 ]);
 assert.deepEqual(schema("ChatCompletionsDialect").enum, [
   ...CHAT_COMPLETIONS_DIALECT_VALUES,

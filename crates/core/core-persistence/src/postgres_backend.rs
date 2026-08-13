@@ -15604,16 +15604,33 @@ mod tests {
             .unwrap_err();
         assert_eq!(missing_with_revision.kind, CoreErrorKind::ActionRejected);
 
-        let wrong_provider_kind = store
+        let cross_kind_api_key = store
+            .upsert_service_credential(&ServiceCredentialWrite {
+                credential_id: "custom:shared-api-key".to_string(),
+                display_name: "Cross-kind shared API key".to_string(),
+                provider_kind: "custom".to_string(),
+                credential_kind: ModelProviderCredentialKind::ApiKey,
+                secret: Some("sk-cross-kind".to_string()),
+                clear_secret: false,
+                expected_revision: None,
+                now: "2026-07-02T00:05:30Z".to_string(),
+            })
+            .unwrap();
+        let cross_kind_link = store
             .link_model_provider_credential(&ModelProviderCredentialLink {
                 provider_alias: api_key.alias.clone(),
-                credential_id: shared.credential_id.clone(),
+                credential_id: cross_kind_api_key.credential_id.clone(),
                 expected_provider_revision: Some(api_key.revision),
-                expected_credential_revision: Some(refreshed.revision),
+                expected_credential_revision: Some(cross_kind_api_key.revision),
                 now: "2026-07-02T00:06:00Z".to_string(),
             })
-            .unwrap_err();
-        assert_eq!(wrong_provider_kind.kind, CoreErrorKind::ActionRejected);
+            .unwrap();
+        assert_eq!(cross_kind_link.provider.provider_kind, "deepseek");
+        assert_eq!(cross_kind_link.credential.provider_kind, "custom");
+        assert_eq!(
+            cross_kind_link.provider.credential_id.as_deref(),
+            Some("custom:shared-api-key")
+        );
         let openai_chat = store
             .upsert_model_provider(&model_provider_write(
                 "openai-chat",

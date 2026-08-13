@@ -24,10 +24,13 @@ profile assigned to `chat_completions` resolves to `chat-completions`; a profile
 assigned to `responses` resolves to `openai-responses`. An explicitly configured
 brain must be compatible with the protocol or registration fails.
 
-`providerKind` is a lowercase routing/diagnostic label such as `openai`,
-`den-router`, or `custom`; it is not a substitute for `protocol`. Supported
-provider IDs use lowercase ASCII letters, digits, `-`, `_`, or `:` and are at
-most 128 characters.
+`providerKind` is an explicit classification selected from `custom`, `local`,
+`den-router`, `openai`, `openai-compatible`, `openrouter`, `deepseek`, or
+`moonshot`; it is not a substitute for `protocol`. `openai` enables the OpenAI
+OAuth provider flow and `openrouter` enables guarded Anthropic prompt caching.
+The other values are routing/diagnostic labels retained for existing
+configurations. The admin API rejects unrecognized values rather than silently
+accepting an ambiguous free-form label.
 
 Current green paths are:
 

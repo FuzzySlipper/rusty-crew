@@ -1571,11 +1571,7 @@ fn upsert_model_provider_in_tx(
                 format!("service credential {id} not found"),
             )
         })?;
-        validate_provider_credential_compatibility(
-            &write.provider_kind,
-            write.protocol,
-            &credential,
-        )?;
+        validate_provider_credential_compatibility(write.protocol, &credential)?;
     }
     tx.execute(
         "INSERT INTO model_providers (
@@ -1756,13 +1752,7 @@ fn upsert_service_credential_in_tx(
                     format!("linked model provider {alias} was not readable"),
                 )
             })?;
-            validate_provider_credential_fields(
-                &provider.provider_kind,
-                provider.protocol,
-                &write.provider_kind,
-                write.credential_kind,
-                &write.credential_id,
-            )?;
+            validate_provider_credential_fields(provider.protocol, write.credential_kind)?;
         }
     }
     let preserved_secret = if write.clear_secret || incoming_secret.is_some() {
@@ -1991,11 +1981,7 @@ fn link_model_provider_credential_in_tx(
         link.expected_credential_revision,
         credential.revision,
     )?;
-    validate_provider_credential_compatibility(
-        &provider.provider_kind,
-        provider.protocol,
-        &credential,
-    )?;
+    validate_provider_credential_compatibility(provider.protocol, &credential)?;
     tx.execute(
         "UPDATE model_providers
             SET credential_id = ?2, revision = revision + 1, updated_at = ?3
@@ -2591,35 +2577,16 @@ fn validate_expected_revision(
 }
 
 fn validate_provider_credential_compatibility(
-    provider_kind: &str,
     protocol: ModelProviderProtocol,
     credential: &ServiceCredentialRecord,
 ) -> CoreResult<()> {
-    validate_provider_credential_fields(
-        provider_kind,
-        protocol,
-        &credential.provider_kind,
-        credential.credential_kind,
-        &credential.credential_id,
-    )
+    validate_provider_credential_fields(protocol, credential.credential_kind)
 }
 
 fn validate_provider_credential_fields(
-    provider_kind: &str,
     protocol: ModelProviderProtocol,
-    credential_provider_kind: &str,
     credential_kind: ModelProviderCredentialKind,
-    credential_id: &str,
 ) -> CoreResult<()> {
-    if provider_kind != credential_provider_kind {
-        return Err(CoreError::new(
-            CoreErrorKind::ActionRejected,
-            format!(
-                "model provider kind {provider_kind} cannot use {} credential {}",
-                credential_provider_kind, credential_id
-            ),
-        ));
-    }
     if credential_kind == ModelProviderCredentialKind::OpenAiOauth
         && protocol != ModelProviderProtocol::Responses
     {

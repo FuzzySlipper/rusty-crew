@@ -1,4 +1,4 @@
-export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.6.0";
+export const MODEL_PROVIDER_ADMIN_CONTRACT_VERSION = "0.7.0";
 
 export const MODEL_PROVIDER_ADMIN_OPENAPI_PATH =
   "docs/model-provider-admin-api-v0.openapi.json";
@@ -15,6 +15,27 @@ export const MODEL_PROVIDER_PROTOCOL_VALUES = [
   "responses",
   "chat_completions",
 ] as const;
+
+/**
+ * Closed model-provider classifications accepted by the admin API.
+ *
+ * Protocol and dialect fields own wire behavior. `openai` additionally enables
+ * the OpenAI OAuth provider flow, while `openrouter` enables the guarded
+ * Anthropic prompt-caching policy. The remaining values are explicit
+ * diagnostic classifications retained for existing configurations.
+ */
+export const MODEL_PROVIDER_KIND_VALUES = [
+  "custom",
+  "local",
+  "den-router",
+  "openai",
+  "openai-compatible",
+  "openrouter",
+  "deepseek",
+  "moonshot",
+] as const;
+
+export type ModelProviderKind = (typeof MODEL_PROVIDER_KIND_VALUES)[number];
 
 export const CHAT_COMPLETIONS_DIALECT_VALUES = [
   "standard",
@@ -179,6 +200,12 @@ export function isModelProviderProtocolContractValue(
   return MODEL_PROVIDER_PROTOCOL_VALUES.includes(
     value as (typeof MODEL_PROVIDER_PROTOCOL_VALUES)[number],
   );
+}
+
+export function isModelProviderKindContractValue(
+  value: string,
+): value is ModelProviderKind {
+  return MODEL_PROVIDER_KIND_VALUES.includes(value as ModelProviderKind);
 }
 
 export function isModelProviderRefreshModeContractValue(

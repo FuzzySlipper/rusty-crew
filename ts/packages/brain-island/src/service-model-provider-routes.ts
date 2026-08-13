@@ -9,6 +9,7 @@ import type { AdminRouteResult } from "./admin-diagnostics-api.js";
 import {
   MODEL_PROVIDER_ADMIN_REASON_CODES,
   MODEL_PROVIDER_TEMPERATURE_MILLI_SCALE,
+  isModelProviderKindContractValue,
   isModelProviderProtocolContractValue,
   isModelProviderRefreshModeContractValue,
   isModelProviderStatusContractValue,
@@ -404,6 +405,16 @@ function modelProviderProtocolFromBody(
   );
 }
 
+function modelProviderKindFromBody(value: unknown): string {
+  const providerKind = optionalString(value) ?? "custom";
+  if (isModelProviderKindContractValue(providerKind)) {
+    return providerKind;
+  }
+  throw new Error(
+    "model provider kind must be custom, local, den-router, openai, openai-compatible, openrouter, deepseek, or moonshot",
+  );
+}
+
 function modelProviderSecretFromBody(
   body: Record<string, unknown>,
 ): string | undefined {
@@ -505,7 +516,7 @@ function modelProviderWriteFromBody(
     alias,
     status: status ?? "active",
     protocol: modelProviderProtocolFromBody(body.protocol),
-    providerKind: optionalString(body.providerKind) ?? "custom",
+    providerKind: modelProviderKindFromBody(body.providerKind),
     displayName: optionalString(body.displayName),
     description: optionalString(body.description),
     baseUrl: optionalString(body.baseUrl),
