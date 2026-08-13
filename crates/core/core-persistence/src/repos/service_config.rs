@@ -1659,7 +1659,9 @@ fn upsert_model_provider_in_tx(
     Ok(())
 }
 
-fn row_to_model_provider(row: &rusqlite::Row<'_>) -> rusqlite::Result<ModelProviderRecord> {
+pub(crate) fn row_to_model_provider(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<ModelProviderRecord> {
     let status: String = row.get(1)?;
     let protocol: String = row.get(2)?;
     let responses_dialect: Option<String> = row.get(13)?;

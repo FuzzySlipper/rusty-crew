@@ -3073,6 +3073,42 @@ mod tests {
         }
         .to_storage_text()
         .unwrap();
+        let provider_json = serde_json::to_string(&ModelProviderRecord {
+            alias: "imported-oauth".to_string(),
+            status: ModelProviderStatus::Active,
+            protocol: ModelProviderProtocol::Responses,
+            provider_kind: "openai".to_string(),
+            display_name: Some("Imported OAuth".to_string()),
+            description: None,
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            model_id: "gpt-5.6".to_string(),
+            context_window_tokens: None,
+            max_output_tokens: None,
+            temperature_milli: None,
+            reasoning_effort: None,
+            reasoning_format: None,
+            responses_dialect: Some(ResponsesProviderDialect::OpenaiStateless),
+            chat_completions_dialect:
+                rusty_crew_core_protocol::ChatCompletionsWireDialect::Standard,
+            thinking_mode: rusty_crew_core_protocol::ChatCompletionsThinkingMode::ProviderDefault,
+            reasoning_history:
+                rusty_crew_core_protocol::ChatCompletionsReasoningHistory::ProviderDefault,
+            reasoning_budget_tokens: None,
+            prompt_caching: rusty_crew_core_protocol::ChatCompletionsPromptCachingPolicy::Disabled,
+            credential_id: None,
+            credential: ModelProviderCredential {
+                has_secret: false,
+                secret_ref: None,
+                updated_at: None,
+                kind: None,
+                revision: None,
+            },
+            metadata_json: serde_json::json!({}),
+            revision: 4,
+            created_at: "2026-07-16T00:00:00Z".to_string(),
+            updated_at: "2026-07-16T00:00:00Z".to_string(),
+        })
+        .unwrap();
         client
             .execute(
                 &format!(
@@ -3083,7 +3119,7 @@ mod tests {
                 ),
                 &[
                     &"imported-oauth",
-                    &r#"{"display_name":"Imported OAuth","provider_kind":"openai"}"#,
+                    &provider_json,
                     &oauth_secret,
                     &"2026-07-16T00:00:00Z",
                 ],

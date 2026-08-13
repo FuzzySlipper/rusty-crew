@@ -80,16 +80,18 @@ use crate::{
     MessageId, MessageSlotId, MessageSlotQuery, MessageSlotRecord, MessageSlotWrite,
     MessageVariantId, MessageVariantQuery, MessageVariantRecord, MessageVariantSource,
     MessageVariantStatus, MessageVariantWrite, ModelConfigurationQuery, ModelConfigurationRecord,
-    ModelConfigurationWrite, ModelEndpointAuthScheme, ModelEndpointQuery, ModelEndpointRecord,
-    ModelEndpointWireDialect, ModelEndpointWrite, ModelProviderCredential,
-    ModelProviderCredentialKind, ModelProviderCredentialLink, ModelProviderCredentialLinkResult,
-    ModelProviderCredentialUnlink, ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord,
-    ModelProviderSecretEnvelope, ModelProviderStatus, ModelProviderWrite, PersistedEvent,
-    ProfileId, ProfileMemoryCaps, ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord,
-    ProfileMemoryReplace, ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport,
-    ProfilePurgeTableCount, ProfileRegistryLifecycleStatus, ProfileRegistryQuery,
-    ProfileRegistryRecord, ProfileRegistryUpdate, ProfileRegistryWrite, PromptCacheTransport,
-    ProviderStateAbsenceReason, ProviderStateCompatibilityAction, ProviderStateCompatibilityPlan,
+    ModelConfigurationWrite, ModelEndpointAuthScheme, ModelEndpointBackfillReport,
+    ModelEndpointJoinedProjectionEquality, ModelEndpointLegacyAliasMapping, ModelEndpointQuery,
+    ModelEndpointRecord, ModelEndpointRepresentabilityError, ModelEndpointWireDialect,
+    ModelEndpointWrite, ModelProviderCredential, ModelProviderCredentialKind,
+    ModelProviderCredentialLink, ModelProviderCredentialLinkResult, ModelProviderCredentialUnlink,
+    ModelProviderProtocol, ModelProviderQuery, ModelProviderRecord, ModelProviderSecretEnvelope,
+    ModelProviderStatus, ModelProviderWrite, PersistedEvent, ProfileId, ProfileMemoryCaps,
+    ProfileMemoryDelete, ProfileMemoryQuery, ProfileMemoryRecord, ProfileMemoryReplace,
+    ProfileMemoryTarget, ProfileMemoryWrite, ProfilePurgeReport, ProfilePurgeTableCount,
+    ProfileRegistryLifecycleStatus, ProfileRegistryQuery, ProfileRegistryRecord,
+    ProfileRegistryUpdate, ProfileRegistryWrite, PromptCacheTransport, ProviderStateAbsenceReason,
+    ProviderStateCompatibilityAction, ProviderStateCompatibilityPlan,
     ProviderStateCompatibilitySnapshot, ProviderWireStateDiagnostic,
     ProviderWireStateInvalidationReason, ProviderWireStateKey, ProviderWireStateRecord,
     ProviderWireStateWakeLookup, ProviderWireStateWakeResult, ProviderWireStateWrite, QueryPage,
@@ -17777,6 +17779,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires local PostgreSQL dev database env"]
     fn postgres_normalized_model_registries_enforce_cas_and_shadow_parity() {
         let Some(database_url) = postgres_test_database_url() else {
             return;
@@ -17841,6 +17844,16 @@ mod tests {
             1
         );
         assert_eq!(store.get_model_provider_secret("a").unwrap(), None);
+        let report = store.backfill_legacy_model_registry(true).unwrap();
+        assert!(report.representability_errors.is_empty());
+        assert!(report
+            .joined_projection_equality
+            .iter()
+            .all(|entry| entry.projection_equal));
+        assert!(report
+            .mappings
+            .iter()
+            .all(|mapping| mapping.endpoint_id == "shared"));
 
         let mut stale = endpoint_write.clone();
         stale.expected_revision = Some(0);
@@ -17858,6 +17871,39 @@ mod tests {
             &shadow.model_id,
             None,
         );
+        legacy.display_name = shadow.display_name.clone();
+        legacy.description = shadow.description.clone();
+        legacy.base_url = shadow.base_url.clone();
+        legacy.context_window_tokens = shadow.context_window_tokens;
+        legacy.max_output_tokens = shadow.max_output_tokens;
+        legacy.temperature_milli = shadow.temperature_milli;
+        legacy.metadata_json = shadow.metadata_json.clone();
+        legacy.model_id = "model-a-v2".to_string();
+        legacy.expected_revision = Some(shadow.revision);
+        store.upsert_model_provider(&legacy).unwrap();
+        assert_eq!(
+            store
+                .get_model_endpoint("shared")
+                .unwrap()
+                .unwrap()
+                .revision,
+            1
+        );
+
+        let shadow = store.get_model_provider("a").unwrap().unwrap();
+        let mut legacy = model_provider_write(
+            "a",
+            ModelProviderProtocol::ChatCompletions,
+            &shadow.provider_kind,
+            &shadow.model_id,
+            None,
+        );
+        legacy.display_name = shadow.display_name.clone();
+        legacy.description = shadow.description.clone();
+        legacy.context_window_tokens = shadow.context_window_tokens;
+        legacy.max_output_tokens = shadow.max_output_tokens;
+        legacy.temperature_milli = shadow.temperature_milli;
+        legacy.metadata_json = shadow.metadata_json.clone();
         legacy.base_url = Some("http://127.0.0.1:19090/v1".to_string());
         legacy.expected_revision = Some(shadow.revision);
         assert_eq!(

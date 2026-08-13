@@ -37,7 +37,8 @@ pub(super) fn apply_postgres_model_registry(
             ON {schema}.model_configurations(model_id, model_config_id);"
     ))
     .map_err(|error| postgres_error("create PostgreSQL normalized model registries", error))?;
-    backfill_postgres_legacy_model_registry(tx, schema)
+    let report = backfill_postgres_legacy_model_registry(tx, schema, false)?;
+    crate::repos::model_registry::ensure_migration_backfill_is_safe(&report)
 }
 
 impl PostgresBackendStore {
@@ -274,12 +275,35 @@ impl PostgresBackendStore {
             .map(|row| parse_json(row.get::<_, String>(0), "model configuration record_json"))
             .collect()
     }
+
+    pub fn backfill_legacy_model_registry(
+        &self,
+        dry_run: bool,
+    ) -> CoreResult<ModelEndpointBackfillReport> {
+        let schema = self.quoted_schema();
+        let mut client = self.client()?;
+        let mut tx = client.transaction().map_err(|error| {
+            postgres_error("start PostgreSQL legacy model registry backfill", error)
+        })?;
+        let report = backfill_postgres_legacy_model_registry(&mut tx, &schema, dry_run)?;
+        if dry_run {
+            tx.rollback().map_err(|error| {
+                postgres_error("rollback PostgreSQL model registry dry-run", error)
+            })?;
+        } else {
+            tx.commit().map_err(|error| {
+                postgres_error("commit PostgreSQL legacy model registry backfill", error)
+            })?;
+        }
+        Ok(report)
+    }
 }
 
 fn backfill_postgres_legacy_model_registry(
     tx: &mut Transaction<'_>,
     schema: &str,
-) -> CoreResult<()> {
+    dry_run: bool,
+) -> CoreResult<ModelEndpointBackfillReport> {
     let catalog_schema = schema
         .strip_prefix('"')
         .and_then(|value| value.strip_suffix('"'))
@@ -300,16 +324,22 @@ fn backfill_postgres_legacy_model_registry(
         )
         .map_err(|error| postgres_error("inspect PostgreSQL credential table for backfill", error))?
         .get(0);
-    if !has_credentials {
-        return Ok(());
-    }
+    let credential_projection = if has_credentials {
+        format!(
+            "mp.credential_id,sc.credential_kind,sc.secret_ciphertext,sc.secret_updated_at,sc.revision
+             FROM {schema}.model_providers mp
+             LEFT JOIN {schema}.service_credentials sc ON sc.credential_id=mp.credential_id"
+        )
+    } else {
+        format!(
+            "NULL::TEXT,NULL::TEXT,NULL::TEXT,NULL::TEXT,NULL::BIGINT
+             FROM {schema}.model_providers mp"
+        )
+    };
     let rows = tx
         .query(
             &format!(
-                "SELECT mp.provider_json,mp.credential_id,sc.credential_kind,
-                        sc.secret_ciphertext,sc.secret_updated_at,sc.revision
-                 FROM {schema}.model_providers mp
-                 LEFT JOIN {schema}.service_credentials sc ON sc.credential_id=mp.credential_id
+                "SELECT mp.alias,mp.provider_json,{credential_projection}
                  ORDER BY mp.alias"
             ),
             &[],
@@ -317,33 +347,114 @@ fn backfill_postgres_legacy_model_registry(
         .map_err(|error| {
             postgres_error("query PostgreSQL legacy model registry backfill", error)
         })?;
+    let mut report = ModelEndpointBackfillReport::default();
     for row in rows {
-        let Ok(mut provider) = parse_json::<ModelProviderRecord>(
-            row.get::<_, String>(0),
+        let alias: String = row.get(0);
+        let mut provider = match parse_json::<ModelProviderRecord>(
+            row.get::<_, String>(1),
             "legacy model provider_json",
-        ) else {
-            continue;
+        ) {
+            Ok(provider) => provider,
+            Err(error) => {
+                report
+                    .representability_errors
+                    .push(ModelEndpointRepresentabilityError {
+                        legacy_alias: alias,
+                        field: "provider_json".to_string(),
+                        reason: error.message,
+                    });
+                continue;
+            }
         };
-        provider.credential_id = row.get(1);
-        let kind_raw: Option<String> = row.get(2);
-        let secret: Option<String> = row.get(3);
+        provider.credential_id = row.get(2);
+        let kind_raw: Option<String> = row.get(3);
+        let secret: Option<String> = row.get(4);
+        let kind = match kind_raw.as_deref().map(parse_credential_kind).transpose() {
+            Ok(kind) => kind,
+            Err(error) => {
+                report
+                    .representability_errors
+                    .push(ModelEndpointRepresentabilityError {
+                        legacy_alias: alias,
+                        field: "credential_kind".to_string(),
+                        reason: error.message,
+                    });
+                continue;
+            }
+        };
         provider.credential = ModelProviderCredential {
             has_secret: secret.is_some(),
             secret_ref: secret
                 .as_ref()
                 .and(provider.credential_id.as_ref())
                 .map(|id| format!("db://service_credentials/{id}/secret")),
-            updated_at: row.get(4),
-            kind: kind_raw.as_deref().map(parse_credential_kind).transpose()?,
-            revision: row.get::<_, Option<i64>>(5).map(|value| value as u64),
+            updated_at: row.get(5),
+            kind,
+            revision: row.get::<_, Option<i64>>(6).map(|value| value as u64),
         };
-        let Ok((endpoint, configuration)) = normalized_from_provider(&provider) else {
-            continue;
+        let (endpoint, configuration) = match normalized_from_provider(&provider) {
+            Ok(records) => records,
+            Err(error) => {
+                report
+                    .representability_errors
+                    .push(ModelEndpointRepresentabilityError {
+                        legacy_alias: alias,
+                        field: "legacy_provider".to_string(),
+                        reason: error.message,
+                    });
+                continue;
+            }
         };
-        insert_endpoint_if_absent(tx, schema, &endpoint)?;
-        insert_configuration_if_absent(tx, schema, &configuration)?;
+        let mut actual_configuration = get_configuration(tx, schema, &alias)?;
+        let resolved_endpoint_id = actual_configuration
+            .as_ref()
+            .map_or_else(|| alias.clone(), |record| record.endpoint_id.clone());
+        let mut actual_endpoint = get_endpoint(tx, schema, &resolved_endpoint_id)?;
+        if !dry_run {
+            if actual_endpoint.is_none() {
+                insert_endpoint_if_absent(tx, schema, &endpoint)?;
+                actual_endpoint = Some(endpoint.clone());
+            }
+            if actual_configuration.is_none() {
+                insert_configuration_if_absent(tx, schema, &configuration)?;
+                actual_configuration = Some(configuration.clone());
+            }
+        }
+        let mapping = ModelEndpointLegacyAliasMapping {
+            legacy_alias: alias.clone(),
+            endpoint_id: actual_endpoint
+                .as_ref()
+                .map_or_else(|| alias.clone(), |record| record.endpoint_id.clone()),
+            model_config_id: actual_configuration
+                .as_ref()
+                .map_or_else(|| alias.clone(), |record| record.model_config_id.clone()),
+        };
+        let projected_endpoint = actual_endpoint.as_ref().unwrap_or(&endpoint);
+        let projected_configuration = actual_configuration.as_ref().unwrap_or(&configuration);
+        let credential = if has_credentials {
+            endpoint_credential_summary(tx, schema, projected_endpoint.credential_id.as_deref())?
+        } else {
+            provider.credential.clone()
+        };
+        let joined = crate::repos::model_registry::joined_provider_projection(
+            projected_endpoint,
+            projected_configuration,
+            credential,
+        );
+        let differing_fields =
+            crate::repos::model_registry::provider_projection_differences(&provider, &joined);
+        report.mappings.push(mapping);
+        report
+            .joined_projection_equality
+            .push(ModelEndpointJoinedProjectionEquality {
+                legacy_alias: alias.clone(),
+                endpoint_id: projected_endpoint.endpoint_id.clone(),
+                model_config_id: projected_configuration.model_config_id.clone(),
+                projection_equal: differing_fields.is_empty(),
+                differing_fields,
+            });
     }
-    Ok(())
+    Ok(report)
 }
 
 fn parse_credential_kind(raw: &str) -> CoreResult<ModelProviderCredentialKind> {
@@ -547,6 +658,19 @@ pub(super) fn sync_legacy_provider_to_normalized_in_tx(
     }
     let existing_endpoint = get_endpoint(tx, schema, &endpoint.endpoint_id)?;
     if let Some(existing) = existing_endpoint.as_ref() {
+        // Joined legacy rows expose configuration lifecycle/display values, so
+        // those fields cannot safely mutate a shared endpoint.
+        endpoint.status = existing.status;
+        endpoint.display_name = existing.display_name.clone();
+        endpoint.description = existing.description.clone();
+        let projected_vendor_label = existing
+            .metadata_json
+            .get("legacyVendorLabel")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("custom");
+        if provider.provider_kind == projected_vendor_label {
+            endpoint.metadata_json = existing.metadata_json.clone();
+        }
         let shared_count: i64 = tx
             .query_one(
                 &format!("SELECT COUNT(*) FROM {schema}.model_configurations WHERE endpoint_id=$1"),
@@ -554,15 +678,18 @@ pub(super) fn sync_legacy_provider_to_normalized_in_tx(
             )
             .map_err(|error| postgres_error("count PostgreSQL shared endpoint configs", error))?
             .get(0);
-        if shared_count > 1 && endpoint_transport_changed(existing, &endpoint) {
+        let endpoint_changed = endpoint_fields_changed(existing, &endpoint);
+        if shared_count > 1 && endpoint_changed {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
                 "legacy_provider_shared_endpoint_conflict",
             ));
         }
-        endpoint.revision = existing.revision + 1;
-        endpoint.created_at = existing.created_at.clone();
-        update_endpoint_record(tx, schema, &endpoint, existing.revision)?;
+        if endpoint_changed {
+            endpoint.revision = existing.revision + 1;
+            endpoint.created_at = existing.created_at.clone();
+            update_endpoint_record(tx, schema, &endpoint, existing.revision)?;
+        }
     } else {
         insert_endpoint_if_absent(tx, schema, &endpoint)?;
     }
@@ -698,13 +825,17 @@ fn normalized_from_provider(
     Ok((endpoint, configuration))
 }
 
-fn endpoint_transport_changed(a: &ModelEndpointRecord, b: &ModelEndpointRecord) -> bool {
-    a.base_url != b.base_url
+fn endpoint_fields_changed(a: &ModelEndpointRecord, b: &ModelEndpointRecord) -> bool {
+    a.status != b.status
+        || a.display_name != b.display_name
+        || a.description != b.description
+        || a.base_url != b.base_url
         || a.protocol != b.protocol
         || a.wire_dialect != b.wire_dialect
         || a.auth_scheme != b.auth_scheme
         || a.credential_id != b.credential_id
         || a.prompt_cache_transport != b.prompt_cache_transport
+        || a.metadata_json != b.metadata_json
 }
 
 fn insert_endpoint_if_absent<C: GenericClient>(

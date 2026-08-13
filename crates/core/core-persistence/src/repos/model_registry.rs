@@ -36,7 +36,49 @@ pub(crate) fn migrate_v75_add_model_registry(tx: &rusqlite::Transaction<'_>) -> 
             ON model_configurations(model_id, model_config_id);",
     )
     .map_err(|error| persistence_error("create normalized model registries", error))?;
-    backfill_legacy_model_registry_in_tx(tx, false).map(|_| ())
+    let report = backfill_legacy_model_registry_in_tx(tx, false)?;
+    ensure_migration_backfill_is_safe(&report)
+}
+
+pub(crate) fn ensure_migration_backfill_is_safe(
+    report: &ModelEndpointBackfillReport,
+) -> CoreResult<()> {
+    let unequal = report
+        .joined_projection_equality
+        .iter()
+        .filter(|entry| !entry.projection_equal)
+        .count();
+    if report.representability_errors.is_empty() && unequal == 0 {
+        return Ok(());
+    }
+    Err(CoreError::new(
+        CoreErrorKind::InvalidInput,
+        format!(
+            "legacy model registry backfill failed: {} unrepresentable row(s), {unequal} unequal joined projection(s): {}",
+            report.representability_errors.len(),
+            report.representability_errors
+                .iter()
+                .map(|entry| format!(
+                    "{}[{}]={}",
+                    entry.legacy_alias, entry.field, entry.reason
+                ))
+                .chain(
+                    report
+                        .joined_projection_equality
+                        .iter()
+                        .filter(|entry| !entry.projection_equal)
+                        .map(|entry| {
+                            format!(
+                                "{}=[{}]",
+                                entry.legacy_alias,
+                                entry.differing_fields.join(",")
+                            )
+                        }),
+                )
+                .collect::<Vec<_>>()
+                .join(";")
+        ),
+    ))
 }
 
 impl CoordinationStore {
@@ -269,6 +311,20 @@ pub(crate) fn sync_legacy_provider_to_normalized_in_tx(
     desired_configuration.endpoint_id = endpoint_id.clone();
 
     if let Some(existing_endpoint) = existing_endpoint.as_ref() {
+        // Legacy joined reads project lifecycle/display fields from the model
+        // configuration. They therefore cannot express edits to the shared
+        // endpoint copies of those fields; preserve endpoint authority.
+        desired_endpoint.status = existing_endpoint.status;
+        desired_endpoint.display_name = existing_endpoint.display_name.clone();
+        desired_endpoint.description = existing_endpoint.description.clone();
+        let projected_vendor_label = existing_endpoint
+            .metadata_json
+            .get("legacyVendorLabel")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("custom");
+        if provider.provider_kind == projected_vendor_label {
+            desired_endpoint.metadata_json = existing_endpoint.metadata_json.clone();
+        }
         let shared_count: i64 = tx
             .query_row(
                 "SELECT COUNT(*) FROM model_configurations WHERE endpoint_id=?1",
@@ -278,15 +334,18 @@ pub(crate) fn sync_legacy_provider_to_normalized_in_tx(
             .map_err(|error| {
                 persistence_error("count shared model endpoint configurations", error)
             })?;
-        if shared_count > 1 && endpoint_transport_changed(existing_endpoint, &desired_endpoint) {
+        let endpoint_changed = endpoint_fields_changed(existing_endpoint, &desired_endpoint);
+        if shared_count > 1 && endpoint_changed {
             return Err(CoreError::new(
                 CoreErrorKind::ActionRejected,
                 "legacy_provider_shared_endpoint_conflict",
             ));
         }
-        desired_endpoint.revision = existing_endpoint.revision + 1;
-        desired_endpoint.created_at = existing_endpoint.created_at.clone();
-        write_model_endpoint_in_tx(tx, &desired_endpoint, Some(existing_endpoint.revision))?;
+        if endpoint_changed {
+            desired_endpoint.revision = existing_endpoint.revision + 1;
+            desired_endpoint.created_at = existing_endpoint.created_at.clone();
+            write_model_endpoint_in_tx(tx, &desired_endpoint, Some(existing_endpoint.revision))?;
+        }
     } else {
         write_model_endpoint_in_tx(tx, &desired_endpoint, None)?;
     }
@@ -382,7 +441,7 @@ fn normalized_records_from_provider(
             PromptCacheTransport::OpenrouterAnthropic
         },
         metadata_json: JsonValue::Object(endpoint_metadata),
-        revision: 1,
+        revision: provider.revision,
         created_at: provider.created_at.clone(),
         updated_at: provider.updated_at.clone(),
     };
@@ -405,7 +464,7 @@ fn normalized_records_from_provider(
         prompt_caching_policy: provider.prompt_caching,
         capabilities: Default::default(),
         metadata_json: provider.metadata_json.clone(),
-        revision: 1,
+        revision: provider.revision,
         created_at: provider.created_at.clone(),
         updated_at: provider.updated_at.clone(),
     };
@@ -413,13 +472,17 @@ fn normalized_records_from_provider(
     Ok((endpoint, configuration))
 }
 
-fn endpoint_transport_changed(a: &ModelEndpointRecord, b: &ModelEndpointRecord) -> bool {
-    a.base_url != b.base_url
+fn endpoint_fields_changed(a: &ModelEndpointRecord, b: &ModelEndpointRecord) -> bool {
+    a.status != b.status
+        || a.display_name != b.display_name
+        || a.description != b.description
+        || a.base_url != b.base_url
         || a.protocol != b.protocol
         || a.wire_dialect != b.wire_dialect
         || a.auth_scheme != b.auth_scheme
         || a.credential_id != b.credential_id
         || a.prompt_cache_transport != b.prompt_cache_transport
+        || a.metadata_json != b.metadata_json
 }
 
 fn sync_normalized_endpoint_shadows_in_tx(
@@ -748,8 +811,8 @@ fn backfill_legacy_model_registry_in_tx(
                 mp.temperature_milli,mp.reasoning_effort,mp.reasoning_format,
                 mp.responses_dialect,mp.chat_completions_dialect,mp.thinking_mode,
                 mp.reasoning_history,mp.reasoning_budget_tokens,mp.prompt_caching,
-                mp.credential_id,sc.credential_kind,mp.metadata_json,mp.revision,
-                mp.created_at,mp.updated_at
+                mp.credential_id,sc.secret_ciphertext,sc.secret_updated_at,sc.credential_kind,
+                sc.revision,mp.metadata_json,mp.revision,mp.created_at,mp.updated_at
          FROM model_providers mp
          LEFT JOIN service_credentials sc ON sc.credential_id=mp.credential_id
          ORDER BY mp.alias ASC",
@@ -763,33 +826,66 @@ fn backfill_legacy_model_registry_in_tx(
         .next()
         .map_err(|error| persistence_error("read legacy model registry backfill", error))?
     {
-        let alias: String = row
-            .get(0)
+        let alias = row
+            .get::<_, String>(0)
             .map_err(|error| persistence_error("read legacy alias", error))?;
-        match legacy_records_from_row(row) {
+        let provider = match super::service_config::row_to_model_provider(row) {
+            Ok(provider) => provider,
+            Err(error) => {
+                report
+                    .representability_errors
+                    .push(ModelEndpointRepresentabilityError {
+                        legacy_alias: alias,
+                        field: "legacy_provider".to_string(),
+                        reason: format!("legacy provider row is not readable: {error}"),
+                    });
+                continue;
+            }
+        };
+        match normalized_records_from_provider(&provider) {
             Ok((endpoint, configuration)) => {
-                let mapping = ModelEndpointLegacyAliasMapping {
-                    legacy_alias: alias.clone(),
-                    endpoint_id: alias.clone(),
-                    model_config_id: alias.clone(),
-                };
+                let mut actual_configuration = get_model_configuration_in_conn(tx, &alias)?;
+                let resolved_endpoint_id = actual_configuration
+                    .as_ref()
+                    .map_or_else(|| alias.clone(), |record| record.endpoint_id.clone());
+                let mut actual_endpoint = get_model_endpoint_in_conn(tx, &resolved_endpoint_id)?;
                 if !dry_run {
-                    if get_model_endpoint_in_conn(tx, &alias)?.is_none() {
+                    if actual_endpoint.is_none() {
                         write_model_endpoint_in_tx(tx, &endpoint, None)?;
+                        actual_endpoint = Some(endpoint.clone());
                     }
-                    if get_model_configuration_in_conn(tx, &alias)?.is_none() {
+                    if actual_configuration.is_none() {
                         write_model_configuration_in_tx(tx, &configuration, None)?;
+                        actual_configuration = Some(configuration.clone());
                     }
                 }
+                let mapping = ModelEndpointLegacyAliasMapping {
+                    legacy_alias: alias.clone(),
+                    endpoint_id: actual_endpoint
+                        .as_ref()
+                        .map_or_else(|| alias.clone(), |record| record.endpoint_id.clone()),
+                    model_config_id: actual_configuration
+                        .as_ref()
+                        .map_or_else(|| alias.clone(), |record| record.model_config_id.clone()),
+                };
                 report.mappings.push(mapping);
+                let projected_endpoint = actual_endpoint.as_ref().unwrap_or(&endpoint);
+                let projected_configuration =
+                    actual_configuration.as_ref().unwrap_or(&configuration);
+                let joined = joined_provider_projection(
+                    projected_endpoint,
+                    projected_configuration,
+                    provider.credential.clone(),
+                );
+                let differing_fields = provider_projection_differences(&provider, &joined);
                 report
                     .joined_projection_equality
                     .push(ModelEndpointJoinedProjectionEquality {
                         legacy_alias: alias.clone(),
-                        endpoint_id: alias.clone(),
-                        model_config_id: alias,
-                        projection_equal: true,
-                        differing_fields: Vec::new(),
+                        endpoint_id: projected_endpoint.endpoint_id.clone(),
+                        model_config_id: projected_configuration.model_config_id.clone(),
+                        projection_equal: differing_fields.is_empty(),
+                        differing_fields,
                     });
             }
             Err(error) => report
@@ -804,6 +900,110 @@ fn backfill_legacy_model_registry_in_tx(
     Ok(report)
 }
 
+pub(crate) fn joined_provider_projection(
+    endpoint: &ModelEndpointRecord,
+    configuration: &ModelConfigurationRecord,
+    credential: ModelProviderCredential,
+) -> ModelProviderRecord {
+    let provider_kind = endpoint
+        .metadata_json
+        .get("legacyVendorLabel")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("custom")
+        .to_string();
+    let responses_dialect = match endpoint.wire_dialect {
+        ModelEndpointWireDialect::OpenaiStateful => Some(ResponsesProviderDialect::OpenaiStateful),
+        ModelEndpointWireDialect::OpenaiStateless => {
+            Some(ResponsesProviderDialect::OpenaiStateless)
+        }
+        ModelEndpointWireDialect::GenericStateless => {
+            Some(ResponsesProviderDialect::GenericStateless)
+        }
+        ModelEndpointWireDialect::Deepseek
+            if endpoint.protocol == ModelProviderProtocol::Responses =>
+        {
+            Some(ResponsesProviderDialect::Deepseek)
+        }
+        ModelEndpointWireDialect::Meta => Some(ResponsesProviderDialect::Meta),
+        _ => None,
+    };
+    let chat_completions_dialect = match endpoint.wire_dialect {
+        ModelEndpointWireDialect::Kimi => ChatCompletionsWireDialect::Kimi,
+        ModelEndpointWireDialect::Glm => ChatCompletionsWireDialect::Glm,
+        ModelEndpointWireDialect::Qwen => ChatCompletionsWireDialect::Qwen,
+        ModelEndpointWireDialect::Deepseek => ChatCompletionsWireDialect::Deepseek,
+        _ => ChatCompletionsWireDialect::Standard,
+    };
+    ModelProviderRecord {
+        alias: configuration.model_config_id.clone(),
+        status: configuration.status,
+        protocol: endpoint.protocol,
+        provider_kind,
+        display_name: configuration.display_name.clone(),
+        description: configuration.description.clone(),
+        base_url: Some(endpoint.base_url.clone()),
+        model_id: configuration.model_id.clone(),
+        context_window_tokens: configuration.context_window_tokens,
+        max_output_tokens: configuration.max_output_tokens,
+        temperature_milli: configuration.temperature_milli,
+        reasoning_effort: configuration.reasoning_effort.clone(),
+        reasoning_format: configuration.reasoning_format.clone(),
+        responses_dialect,
+        chat_completions_dialect,
+        thinking_mode: configuration.thinking_mode,
+        reasoning_history: configuration.reasoning_history,
+        reasoning_budget_tokens: configuration.reasoning_budget_tokens,
+        prompt_caching: configuration.prompt_caching_policy,
+        credential_id: endpoint.credential_id.clone(),
+        credential,
+        metadata_json: configuration.metadata_json.clone(),
+        revision: configuration.revision,
+        created_at: configuration.created_at.clone(),
+        updated_at: configuration.updated_at.clone(),
+    }
+}
+
+pub(crate) fn provider_projection_differences(
+    source: &ModelProviderRecord,
+    joined: &ModelProviderRecord,
+) -> Vec<String> {
+    let mut fields = Vec::new();
+    macro_rules! compare {
+        ($field:ident) => {
+            if source.$field != joined.$field {
+                fields.push(stringify!($field).to_string());
+            }
+        };
+    }
+    compare!(alias);
+    compare!(status);
+    compare!(protocol);
+    compare!(provider_kind);
+    compare!(display_name);
+    compare!(description);
+    compare!(base_url);
+    compare!(model_id);
+    compare!(context_window_tokens);
+    compare!(max_output_tokens);
+    compare!(temperature_milli);
+    compare!(reasoning_effort);
+    compare!(reasoning_format);
+    compare!(responses_dialect);
+    compare!(chat_completions_dialect);
+    compare!(thinking_mode);
+    compare!(reasoning_history);
+    compare!(reasoning_budget_tokens);
+    compare!(prompt_caching);
+    compare!(credential_id);
+    compare!(credential);
+    compare!(metadata_json);
+    compare!(revision);
+    compare!(created_at);
+    compare!(updated_at);
+    fields
+}
+
+#[allow(dead_code)]
 fn legacy_records_from_row(
     row: &rusqlite::Row<'_>,
 ) -> CoreResult<(ModelEndpointRecord, ModelConfigurationRecord)> {
@@ -1024,6 +1224,36 @@ mod tests {
         }
     }
 
+    fn legacy_write(provider: ModelProviderRecord, now: &str) -> ModelProviderWrite {
+        ModelProviderWrite {
+            alias: provider.alias,
+            status: provider.status,
+            protocol: provider.protocol,
+            provider_kind: provider.provider_kind,
+            display_name: provider.display_name,
+            description: provider.description,
+            base_url: provider.base_url,
+            model_id: provider.model_id,
+            context_window_tokens: provider.context_window_tokens,
+            max_output_tokens: provider.max_output_tokens,
+            temperature_milli: provider.temperature_milli,
+            reasoning_effort: provider.reasoning_effort,
+            reasoning_format: provider.reasoning_format,
+            responses_dialect: provider.responses_dialect,
+            chat_completions_dialect: provider.chat_completions_dialect,
+            thinking_mode: provider.thinking_mode,
+            reasoning_history: provider.reasoning_history,
+            reasoning_budget_tokens: provider.reasoning_budget_tokens,
+            prompt_caching: provider.prompt_caching,
+            secret: None,
+            clear_secret: false,
+            expected_credential_revision: None,
+            metadata_json: provider.metadata_json,
+            expected_revision: Some(provider.revision),
+            now: now.to_string(),
+        }
+    }
+
     #[test]
     fn normalized_registries_have_independent_cas_and_secret_free_shadows() {
         let (store, path) = store();
@@ -1074,34 +1304,37 @@ mod tests {
         store
             .upsert_model_configuration(&configuration("model-b", "shared"))
             .unwrap();
-        let provider = store.get_model_provider("model-a").unwrap().unwrap();
-        let write = ModelProviderWrite {
-            alias: provider.alias,
-            status: provider.status,
-            protocol: provider.protocol,
-            provider_kind: provider.provider_kind,
-            display_name: provider.display_name,
-            description: provider.description,
-            base_url: Some("http://127.0.0.1:9090/v1".to_string()),
-            model_id: provider.model_id,
-            context_window_tokens: provider.context_window_tokens,
-            max_output_tokens: provider.max_output_tokens,
-            temperature_milli: provider.temperature_milli,
-            reasoning_effort: provider.reasoning_effort,
-            reasoning_format: provider.reasoning_format,
-            responses_dialect: provider.responses_dialect,
-            chat_completions_dialect: provider.chat_completions_dialect,
-            thinking_mode: provider.thinking_mode,
-            reasoning_history: provider.reasoning_history,
-            reasoning_budget_tokens: provider.reasoning_budget_tokens,
-            prompt_caching: provider.prompt_caching,
-            secret: None,
-            clear_secret: false,
-            expected_credential_revision: None,
-            metadata_json: provider.metadata_json,
-            expected_revision: Some(provider.revision),
-            now: "2026-08-12T20:00:02Z".to_string(),
-        };
+        let report = store.backfill_legacy_model_registry(true).unwrap();
+        assert!(report.representability_errors.is_empty());
+        assert!(report
+            .joined_projection_equality
+            .iter()
+            .all(|entry| entry.projection_equal));
+        assert!(report
+            .mappings
+            .iter()
+            .all(|mapping| mapping.endpoint_id == "shared"));
+        let mut model_only = legacy_write(
+            store.get_model_provider("model-a").unwrap().unwrap(),
+            "2026-08-12T20:00:02Z",
+        );
+        model_only.model_id = "model-a-v2".to_string();
+        store.upsert_model_provider(&model_only).unwrap();
+        assert_eq!(
+            store
+                .get_model_endpoint("shared")
+                .unwrap()
+                .unwrap()
+                .revision,
+            1,
+            "model-only legacy writes must not advance shared endpoint authority"
+        );
+
+        let mut write = legacy_write(
+            store.get_model_provider("model-a").unwrap().unwrap(),
+            "2026-08-12T20:00:03Z",
+        );
+        write.base_url = Some("http://127.0.0.1:9090/v1".to_string());
         assert_eq!(
             store.upsert_model_provider(&write).unwrap_err().message,
             "legacy_provider_shared_endpoint_conflict"
