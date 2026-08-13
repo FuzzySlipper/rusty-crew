@@ -556,10 +556,10 @@ export async function rustyViewSessionContextUsage(
   const settings =
     optionalRecord(registryRecord?.activeRuntimeSettingsJson) ?? {};
   const modelConfigId = optionalString(settings.modelConfigId);
-  const providerAlias =
+  const explicitProviderAlias =
     optionalString(settings.providerAlias) ??
-    optionalString(settings.provider_alias) ??
-    "default";
+    optionalString(settings.provider_alias);
+  const providerAlias = explicitProviderAlias ?? "default";
   const providerResolution =
     await (async (): Promise<DiagnosticProviderResolution> => {
       if (modelConfigId !== undefined) {
@@ -795,6 +795,8 @@ export async function rustyViewSessionContextUsage(
     provider: {
       alias: modelConfigId ?? providerAlias,
       model_config_id: modelConfigId,
+      provider_alias:
+        modelConfigId === undefined ? providerAlias : explicitProviderAlias,
       model_config_revision:
         modelConfigId === undefined ? undefined : provider?.revision,
       endpoint_id:

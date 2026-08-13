@@ -75,6 +75,28 @@ test("context diagnostics expose a present credential with a missing secret", as
   );
 });
 
+test("context diagnostics label a legacy-only provider selection as compatibility identity", async () => {
+  const context = contextForCredentialLookup(async () => undefined);
+  context.bridge.getProfileRegistryRecord = async () => ({
+    activeRuntimeSettingsJson: { providerAlias: "legacy-diagnostics" },
+  });
+  context.bridge.getModelProvider = async () =>
+    ({
+      alias: "legacy-diagnostics",
+      status: "active",
+      modelId: "legacy-model",
+    }) as never;
+
+  const result = await rustyViewSessionContextUsage(context, {
+    session: session(),
+    requestId: "legacy-provider-identity",
+  });
+
+  assert.equal(result.provider.model_config_id, undefined);
+  assert.equal(result.provider.provider_alias, "legacy-diagnostics");
+  assert.equal(result.provider.alias, "legacy-diagnostics");
+});
+
 test("profile registry diagnostics retain the endpoint credential reference when lookup returns no record", async () => {
   const diagnostics = await buildAdminProfileRegistryDiagnostics({
     bridge: {

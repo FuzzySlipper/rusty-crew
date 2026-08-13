@@ -416,6 +416,7 @@ export interface SessionContextUsageResult {
   provider: {
     alias: string;
     model_config_id?: string;
+    provider_alias?: string;
     model_config_revision?: number;
     endpoint_id?: string;
     endpoint_revision?: number;
