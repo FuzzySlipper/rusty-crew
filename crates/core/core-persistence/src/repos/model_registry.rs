@@ -494,6 +494,17 @@ impl CoordinationStore {
                 ),
             ));
         }
+        tx.execute(
+            "INSERT INTO module_simple_kv_entries (
+                scope_type, scope_id, entry_key, value_json, revision,
+                created_at, updated_at, expires_at
+             ) VALUES ('model_registry', 'deleted_model_configurations', ?1, '{}', 1, ?2, ?2, NULL)
+             ON CONFLICT(scope_type, scope_id, entry_key) DO UPDATE SET
+                revision = module_simple_kv_entries.revision + 1,
+                updated_at = excluded.updated_at",
+            params![delete.model_config_id, existing.updated_at],
+        )
+        .map_err(|error| persistence_error("record deleted model configuration", error))?;
         let changed = tx
             .execute(
                 "DELETE FROM model_configurations WHERE model_config_id=?1 AND revision=?2",
@@ -1647,6 +1658,20 @@ mod tests {
         }
     }
 
+    fn legacy_profile(
+        profile_id: &str,
+        model_config_id: &str,
+        snake_case: bool,
+    ) -> ProfileRegistryWrite {
+        let mut write = normalized_profile(profile_id, model_config_id);
+        write.active_runtime_settings_json = if snake_case {
+            json!({"provider_alias": model_config_id})
+        } else {
+            json!({"providerAlias": model_config_id})
+        };
+        write
+    }
+
     fn legacy_write(provider: ModelProviderRecord, now: &str) -> ModelProviderWrite {
         ModelProviderWrite {
             alias: provider.alias,
@@ -1816,6 +1841,90 @@ mod tests {
                     .delete_model_configuration(&ModelConfigurationDelete {
                         model_config_id: format!("race-config-{iteration}"),
                         expected_revision: persisted_configuration.unwrap().revision,
+                    })
+                    .unwrap();
+            }
+        }
+
+        drop(store);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn concurrent_legacy_profile_mutation_and_configuration_delete_cannot_restore_a_reference() {
+        use std::sync::{Arc, Barrier};
+
+        let (store, path) = store();
+        store
+            .upsert_model_endpoint(&endpoint("legacy-race-endpoint", None))
+            .unwrap();
+
+        for iteration in 0..20 {
+            let model_config_id = format!("legacy-race-config-{iteration}");
+            let profile_id = format!("legacy-race-profile-{iteration}");
+            let configuration = store
+                .upsert_model_configuration(&configuration(
+                    &model_config_id,
+                    "legacy-race-endpoint",
+                ))
+                .unwrap();
+            let update_existing = iteration % 2 == 1;
+            if update_existing {
+                store
+                    .create_profile_registry_record(&legacy_profile(
+                        &profile_id,
+                        "unmigrated-legacy-alias",
+                        iteration % 4 == 1,
+                    ))
+                    .unwrap();
+            }
+            let profile = legacy_profile(&profile_id, &model_config_id, iteration % 2 == 0);
+            let barrier = Arc::new(Barrier::new(3));
+            let mutation_store = store.clone();
+            let mutation_barrier = Arc::clone(&barrier);
+            let mutation = std::thread::spawn(move || {
+                mutation_barrier.wait();
+                if update_existing {
+                    mutation_store.update_profile_registry_record(&ProfileRegistryUpdate {
+                        write: profile,
+                        expected_revision: 1,
+                    })
+                } else {
+                    mutation_store.create_profile_registry_record(&profile)
+                }
+            });
+            let delete_store = store.clone();
+            let delete_barrier = Arc::clone(&barrier);
+            let delete_model_config_id = model_config_id.clone();
+            let delete = std::thread::spawn(move || {
+                delete_barrier.wait();
+                delete_store.delete_model_configuration(&ModelConfigurationDelete {
+                    model_config_id: delete_model_config_id,
+                    expected_revision: configuration.revision,
+                })
+            });
+            barrier.wait();
+            let mutation_result = mutation.join().unwrap();
+            let delete_result = delete.join().unwrap();
+            assert_ne!(mutation_result.is_ok(), delete_result.is_ok());
+            let persisted_configuration = store.get_model_configuration(&model_config_id).unwrap();
+            let persisted_profile = store
+                .get_profile_registry_record(&ProfileId::new(&profile_id))
+                .unwrap();
+            let references_target = persisted_profile.as_ref().is_some_and(|profile| {
+                crate::effective_profile_model_config_id(&profile.active_runtime_settings_json)
+                    .as_deref()
+                    == Some(model_config_id.as_str())
+            });
+            assert!(!references_target || persisted_configuration.is_some());
+            if persisted_profile.is_some() {
+                store.purge_profile(&ProfileId::new(&profile_id)).unwrap();
+            }
+            if let Some(configuration) = persisted_configuration {
+                store
+                    .delete_model_configuration(&ModelConfigurationDelete {
+                        model_config_id,
+                        expected_revision: configuration.revision,
                     })
                     .unwrap();
             }

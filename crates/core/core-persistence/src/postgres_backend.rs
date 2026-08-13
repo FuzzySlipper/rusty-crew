@@ -17960,7 +17960,7 @@ mod tests {
             })
             .unwrap();
 
-        for iteration in 0..10 {
+        for iteration in 0..20 {
             let model_config_id = format!("race-config-{iteration}");
             let profile_id = format!("race-profile-{iteration}");
             let configuration = store
@@ -17986,7 +17986,8 @@ mod tests {
                     now: "2026-08-13T00:00:01Z".into(),
                 })
                 .unwrap();
-            let profile = ProfileRegistryWrite {
+            let update_existing = iteration % 2 == 1;
+            let profile_write = |selection: serde_json::Value| ProfileRegistryWrite {
                 profile_id: ProfileId::new(&profile_id),
                 lifecycle_status: ProfileRegistryLifecycleStatus::Active,
                 display_name: None,
@@ -17996,10 +17997,7 @@ mod tests {
                 owner_id: None,
                 prompt_soul_markdown: None,
                 prompt_memory_markdown: None,
-                active_runtime_settings_json: json!({
-                    "providerAlias": "legacy-other",
-                    "profile": {"modelConfigId": model_config_id},
-                }),
+                active_runtime_settings_json: selection,
                 source_asset_refs: Vec::new(),
                 derived_runtime_refs: Vec::new(),
                 import_export: ProfileRegistryImportExportMetadata {
@@ -18011,12 +18009,31 @@ mod tests {
                 },
                 now: "2026-08-13T00:00:02Z".into(),
             };
+            if update_existing {
+                store
+                    .create_profile_registry_record(&profile_write(
+                        json!({"providerAlias": "unmigrated-legacy-alias"}),
+                    ))
+                    .unwrap();
+            }
+            let profile = profile_write(if iteration % 2 == 0 {
+                json!({"provider_alias": model_config_id})
+            } else {
+                json!({"providerAlias": model_config_id})
+            });
             let barrier = Arc::new(Barrier::new(3));
             let create_store = Arc::clone(&store);
             let create_barrier = Arc::clone(&barrier);
-            let create = std::thread::spawn(move || {
+            let mutation = std::thread::spawn(move || {
                 create_barrier.wait();
-                create_store.create_profile_registry_record(&profile)
+                if update_existing {
+                    create_store.update_profile_registry_record(&ProfileRegistryUpdate {
+                        write: profile,
+                        expected_revision: 1,
+                    })
+                } else {
+                    create_store.create_profile_registry_record(&profile)
+                }
             });
             let delete_store = Arc::clone(&store);
             let delete_barrier = Arc::clone(&barrier);
@@ -18029,24 +18046,28 @@ mod tests {
                 })
             });
             barrier.wait();
-            let create_result = create.join().unwrap();
+            let mutation_result = mutation.join().unwrap();
             let delete_result = delete.join().unwrap();
-            assert_ne!(create_result.is_ok(), delete_result.is_ok());
+            assert_ne!(mutation_result.is_ok(), delete_result.is_ok());
 
             let persisted_profile = store
                 .get_profile_registry_record(&ProfileId::new(&profile_id))
                 .unwrap();
             let persisted_configuration = store.get_model_configuration(&model_config_id).unwrap();
-            assert_eq!(
-                persisted_profile.is_some(),
-                persisted_configuration.is_some()
-            );
+            let references_target = persisted_profile.as_ref().is_some_and(|profile| {
+                crate::effective_profile_model_config_id(&profile.active_runtime_settings_json)
+                    .as_deref()
+                    == Some(model_config_id.as_str())
+            });
+            assert!(!references_target || persisted_configuration.is_some());
             if persisted_profile.is_some() {
                 store.purge_profile(&ProfileId::new(&profile_id)).unwrap();
+            }
+            if let Some(configuration) = persisted_configuration {
                 store
                     .delete_model_configuration(&ModelConfigurationDelete {
                         model_config_id,
-                        expected_revision: persisted_configuration.unwrap().revision,
+                        expected_revision: configuration.revision,
                     })
                     .unwrap();
             }

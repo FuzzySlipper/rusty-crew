@@ -528,6 +528,19 @@ impl PostgresBackendStore {
                 ),
             ));
         }
+        tx.execute(
+            &format!(
+                "INSERT INTO {schema}.module_simple_kv_entries (
+                    scope_type, scope_id, entry_key, value_json, revision,
+                    created_at, updated_at, expires_at
+                 ) VALUES ('model_registry', 'deleted_model_configurations', $1, '{{}}', 1, $2, $2, NULL)
+                 ON CONFLICT(scope_type, scope_id, entry_key) DO UPDATE SET
+                    revision = module_simple_kv_entries.revision + 1,
+                    updated_at = EXCLUDED.updated_at"
+            ),
+            &[&delete.model_config_id, &existing.updated_at],
+        )
+        .map_err(|error| postgres_error("record deleted PostgreSQL model configuration", error))?;
         let changed = tx
             .execute(
                 &format!(

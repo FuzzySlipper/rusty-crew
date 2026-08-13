@@ -1293,8 +1293,10 @@ fn validate_profile_model_configuration_in_conn(
     conn: &Connection,
     write: &ProfileRegistryWrite,
 ) -> CoreResult<()> {
-    let Some(model_config_id) =
-        crate::normalized_profile_model_config_id(&write.active_runtime_settings_json)
+    let normalized = crate::normalized_profile_model_config_id(&write.active_runtime_settings_json);
+    let Some(model_config_id) = normalized
+        .clone()
+        .or_else(|| crate::effective_profile_model_config_id(&write.active_runtime_settings_json))
     else {
         return Ok(());
     };
@@ -1307,7 +1309,23 @@ fn validate_profile_model_configuration_in_conn(
         .optional()
         .map_err(|error| persistence_error("validate profile model configuration", error))?
         .is_some();
-    if !exists {
+    let deleted_legacy_selection = !exists
+        && normalized.is_none()
+        && conn
+            .query_row(
+                "SELECT 1 FROM module_simple_kv_entries
+                 WHERE scope_type = 'model_registry'
+                   AND scope_id = 'deleted_model_configurations'
+                   AND entry_key = ?1",
+                params![model_config_id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|error| {
+                persistence_error("validate deleted legacy model configuration", error)
+            })?
+            .is_some();
+    if normalized.is_some() && !exists || deleted_legacy_selection {
         return Err(CoreError::new(
             CoreErrorKind::ActionRejected,
             format!(
