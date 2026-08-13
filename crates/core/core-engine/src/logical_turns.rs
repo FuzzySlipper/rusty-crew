@@ -811,19 +811,49 @@ impl CoreEngine {
         role_fingerprint: &str,
     ) -> CoreResult<LogicalTurnBindingSnapshot> {
         let profile = self.get_profile_registry_record(&registration.profile_id)?;
-        let provider_alias = profile
+        let legacy_provider_alias = profile
             .as_ref()
             .and_then(profile_provider_alias)
             .unwrap_or_else(|| registration.model_config.provider.clone());
-        let provider = self.get_model_provider(&provider_alias)?;
-        let credential_revision = match provider
-            .as_ref()
-            .and_then(|provider| provider.credential_id.as_deref())
-        {
-            Some(credential_id) => self
-                .get_service_credential(credential_id)?
-                .map(|credential| credential.revision),
+        let registered_normalized = registration.model_config.model_config_id.is_some();
+        let model_config_id = registration
+            .model_config
+            .model_config_id
+            .clone()
+            .or_else(|| profile.as_ref().and_then(profile_model_config_id))
+            .unwrap_or_else(|| legacy_provider_alias.clone());
+        let model_configuration = if registered_normalized {
+            None
+        } else {
+            self.get_model_configuration(&model_config_id)?
+        };
+        let endpoint = match model_configuration.as_ref() {
+            Some(configuration) => self.get_model_endpoint(&configuration.endpoint_id)?,
             None => None,
+        };
+        let legacy_provider = if !registered_normalized && model_configuration.is_none() {
+            self.get_model_provider(&legacy_provider_alias)?
+        } else {
+            None
+        };
+        let credential_id = registration.model_config.credential_id.clone().or_else(|| {
+            endpoint
+                .as_ref()
+                .and_then(|endpoint| endpoint.credential_id.clone())
+                .or_else(|| {
+                    legacy_provider
+                        .as_ref()
+                        .and_then(|provider| provider.credential_id.clone())
+                })
+        });
+        let credential_revision = match registration.model_config.credential_revision {
+            Some(revision) => Some(revision),
+            None => match credential_id.as_deref() {
+                Some(credential_id) => self
+                    .get_service_credential(credential_id)?
+                    .map(|credential| credential.revision),
+                None => None,
+            },
         };
         let tool_fingerprint = json_fingerprint(
             &serde_json::to_value(&registration.tool_profile).map_err(|error| {
@@ -845,8 +875,8 @@ impl CoreEngine {
             .as_ref()
             .map(|scope| scope.provider_fingerprint.clone())
             .or_else(|| {
-                provider.as_ref().and_then(|provider| {
-                    serde_json::to_vec(provider)
+                model_configuration.as_ref().and_then(|configuration| {
+                    serde_json::to_vec(configuration)
                         .ok()
                         .map(|bytes| sha256_hex(&bytes))
                 })
@@ -872,12 +902,33 @@ impl CoreEngine {
                 .as_ref()
                 .map(|strategy| strategy.strategy_id.clone())
                 .unwrap_or_else(|| "default".to_string()),
-            provider_alias,
-            provider_revision: provider.as_ref().map_or(0, |provider| provider.revision),
+            model_config_id,
+            model_config_revision: registration
+                .model_config
+                .model_config_revision
+                .unwrap_or_else(|| {
+                    model_configuration
+                        .as_ref()
+                        .map_or(0, |configuration| configuration.revision)
+                }),
+            endpoint_id: registration
+                .model_config
+                .endpoint_id
+                .clone()
+                .unwrap_or_else(|| {
+                    endpoint.as_ref().map_or_else(
+                        || legacy_provider_alias.clone(),
+                        |endpoint| endpoint.endpoint_id.clone(),
+                    )
+                }),
+            endpoint_revision: registration
+                .model_config
+                .endpoint_revision
+                .unwrap_or_else(|| endpoint.as_ref().map_or(0, |endpoint| endpoint.revision)),
+            provider_alias: legacy_provider.as_ref().map(|_| legacy_provider_alias),
+            provider_revision: legacy_provider.as_ref().map(|provider| provider.revision),
             provider_fingerprint,
-            credential_id: provider
-                .as_ref()
-                .and_then(|provider| provider.credential_id.clone()),
+            credential_id,
             credential_revision,
         })
     }
@@ -1131,6 +1182,14 @@ fn profile_provider_alias(profile: &ProfileRegistryRecord) -> Option<String> {
         .or_else(|| profile.active_runtime_settings_json.get("provider_alias"))
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
+}
+
+fn profile_model_config_id(profile: &ProfileRegistryRecord) -> Option<String> {
+    profile
+        .active_runtime_settings_json
+        .get("modelConfigId")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
 }
 
 fn json_fingerprint(value: &serde_json::Value) -> CoreResult<String> {

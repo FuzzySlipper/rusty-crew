@@ -10,7 +10,7 @@ import type {
 import type {
   NativeBridgeModule,
   NativeCreateProfilePlan,
-  NativeModelProviderRecord,
+  NativeModelEndpointRecord,
   NativeProfilePurgeReport,
   NativeRuntimeConfigPlan,
 } from "@rusty-crew/native-bridge";
@@ -516,18 +516,30 @@ export async function createServiceProfile(
   const soulMarkdown = optionalBodyMarkdown(command, "soulMarkdown");
   const memoryMarkdown = optionalBodyMarkdown(command, "memoryMarkdown");
   const workspaceCwd = optionalBodyString(command, "workspaceCwd");
-  const providerAlias =
-    optionalBodyString(command, "providerAlias") ?? "default";
+  const legacyProviderAlias = optionalBodyString(command, "providerAlias");
+  const modelConfigId =
+    optionalBodyString(command, "modelConfigId") ??
+    legacyProviderAlias ??
+    "default";
   const externalMessageDeliveryPolicy = parseExternalMessageDeliveryPolicy(
     command.body.externalMessageDeliveryPolicy,
   );
-  const modelProvider = await context.bridge.getModelProvider(providerAlias);
-  if (modelProvider === undefined) {
-    throw new Error(`model provider alias ${providerAlias} was not found`);
+  const modelConfiguration =
+    await context.bridge.getModelConfiguration(modelConfigId);
+  if (modelConfiguration === undefined) {
+    throw new Error(`model configuration ${modelConfigId} was not found`);
   }
-  if (modelProvider.status !== "active") {
+  if (modelConfiguration.status !== "active") {
     throw new Error(
-      `model provider alias ${providerAlias} is ${modelProvider.status}; active provider required`,
+      `model configuration ${modelConfigId} is ${modelConfiguration.status}; active configuration required`,
+    );
+  }
+  const modelEndpoint = await context.bridge.getModelEndpoint(
+    modelConfiguration.endpointId,
+  );
+  if (modelEndpoint === undefined || modelEndpoint.status !== "active") {
+    throw new Error(
+      `model endpoint ${modelConfiguration.endpointId} is not active for model configuration ${modelConfigId}`,
     );
   }
   const profilePath = safeProfileConfigPath(
@@ -538,7 +550,7 @@ export async function createServiceProfile(
   const profiles = await loadRuntimeConfigProfiles(context);
   const requestedBrain =
     profileBrainFromBody(command.body.brain ?? command.body.brainSelection) ??
-    defaultProfileBrainForModelProvider(modelProvider);
+    defaultProfileBrainForModelEndpoint(modelEndpoint);
   const brainSelection = await context.bridge.planBrainSelection({
     ...(requestedBrain.module === undefined
       ? {}
@@ -546,8 +558,7 @@ export async function createServiceProfile(
     ...(requestedBrain.strategy === undefined
       ? {}
       : { configuredStrategyId: requestedBrain.strategy }),
-    providerProtocol: modelProvider.protocol,
-    providerKind: modelProvider.providerKind,
+    providerProtocol: modelEndpoint.protocol,
   });
   const plan = await planCreateProfileWithRust({
     bridge: context.bridge,
@@ -563,7 +574,10 @@ export async function createServiceProfile(
       implementationId: optionalBodyString(command, "implementationId"),
       kind: createProfileKind(command),
       ...(workspaceCwd === undefined ? {} : { workspaceCwd }),
-      providerAlias,
+      modelConfigId,
+      ...(legacyProviderAlias === undefined
+        ? {}
+        : { providerAlias: legacyProviderAlias }),
       externalMessageDeliveryPolicy,
       brain: {
         module: brainSelection.module_id,
@@ -647,7 +661,7 @@ export async function createServiceProfile(
       ...(profileSeed.displayName === undefined
         ? {}
         : { displayName: profileSeed.displayName }),
-      providerAlias: profileSeed.providerAlias,
+      modelConfigId: profileSeed.modelConfigId,
       externalMessageDeliveryPolicy: profileSeed.externalMessageDeliveryPolicy,
       brain: profileSeed.brain,
       ...(profileMcpConfig === undefined
@@ -1038,13 +1052,16 @@ function profileBrainFromBody(
 }
 
 export function defaultProfileBrainForModelProvider(
-  provider: NativeModelProviderRecord,
+  provider: Pick<NativeModelEndpointRecord, "protocol">,
 ): { module?: string; strategy?: string } {
   if (provider.protocol === "responses") {
     return { module: "openai-responses" };
   }
   return { module: "chat-completions" };
 }
+
+export const defaultProfileBrainForModelEndpoint =
+  defaultProfileBrainForModelProvider;
 
 export interface RuntimeConfigFileForMutation {
   value: Record<string, unknown>;
@@ -1365,6 +1382,7 @@ function profileRuntimeBrainChanged(
 ): boolean {
   if (before === undefined || after === undefined) return false;
   return (
+    before.modelConfigId !== after.modelConfigId ||
     before.providerAlias !== after.providerAlias ||
     JSON.stringify(before.modelConfig) !== JSON.stringify(after.modelConfig) ||
     JSON.stringify(before.brain ?? {}) !== JSON.stringify(after.brain ?? {})

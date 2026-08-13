@@ -43,6 +43,7 @@ export interface AdminProfileRegistryRecord {
   defaultSessionKind?: string;
   agentId?: string;
   ownerId?: string;
+  modelConfigId?: string;
   providerAlias?: string;
   externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   localToolProfileId?: string;
@@ -174,6 +175,7 @@ async function registryAdminRecord(
     defaultSessionKind: record.defaultSessionKind,
     agentId: record.agentId,
     ownerId: record.ownerId,
+    modelConfigId: runtime.modelConfigId,
     providerAlias: runtime.providerAlias,
     externalMessageDeliveryPolicy: runtime.externalMessageDeliveryPolicy,
     localToolProfileId: runtime.localToolProfileId,
@@ -199,6 +201,7 @@ function runtimeConfigReadbackFromRegistry(
   record: NativeProfileRegistryRecord,
   runtimeConfig: RustyCrewRuntimeConfig,
 ): {
+  modelConfigId?: string;
   providerAlias?: string;
   externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   localToolProfileId?: string;
@@ -216,6 +219,8 @@ function runtimeConfigReadbackFromRegistry(
       settings.externalMessageDeliveryPolicy ??
         settingsProfile.externalMessageDeliveryPolicy,
     ),
+    modelConfigId:
+      stringValue(settings.modelConfigId) ?? settingsProfile.modelConfigId,
     providerAlias:
       stringValue(settings.providerAlias) ??
       stringValue(settings.provider_alias) ??
@@ -241,6 +246,7 @@ function runtimeConfigReadbackFromRegistry(
 }
 
 function profileConfigFromRegistrySettings(settings: Record<string, unknown>): {
+  modelConfigId?: string;
   providerAlias?: string;
   externalMessageDeliveryPolicy?: ExternalMessageDeliveryPolicy;
   localToolProfileId?: string;
@@ -249,6 +255,7 @@ function profileConfigFromRegistrySettings(settings: Record<string, unknown>): {
 } {
   const profile = recordValue(settings.profile);
   return {
+    modelConfigId: stringValue(profile.modelConfigId),
     providerAlias: stringValue(profile.providerAlias),
     externalMessageDeliveryPolicy:
       profile.externalMessageDeliveryPolicy === undefined

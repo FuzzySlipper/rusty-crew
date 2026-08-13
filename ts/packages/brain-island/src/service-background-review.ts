@@ -53,8 +53,10 @@ export interface ServiceBackgroundReviewContext {
     NativeBridgeModule,
     | "claimScheduledHostRuns"
     | "completeScheduledHostRun"
-    | "getModelProvider"
-    | "getModelProviderSecret"
+    | "getModelConfiguration"
+    | "getModelEndpoint"
+    | "getServiceCredential"
+    | "getServiceCredentialSecret"
     | "listProfileMemory"
     | "listSessionActivityDigests"
     | "listSessions"

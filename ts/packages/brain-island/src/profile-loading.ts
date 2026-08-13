@@ -90,6 +90,7 @@ export interface ProfileBackgroundReviewConfig {
   maxFindings?: number;
   maxCandidates?: number;
   llmReviewEnabled?: boolean;
+  captureModelConfigId?: string;
   captureProviderAlias?: string;
   captureMaxProposals?: number;
   dryRun?: boolean;
@@ -167,12 +168,23 @@ export interface ProfileBrainConfig {
   strategy?: string;
 }
 
+export interface ProfileModelSelectionCompatibilityDiagnostic {
+  code:
+    | "legacy_provider_alias_selection"
+    | "inline_model_config_selection"
+    | "legacy_runtime_model_selection";
+  message: string;
+}
+
 export interface ProfileConfig {
   profileId: ProfileId;
   profileDir?: string;
   profileSkillsDir?: string;
   displayName?: string;
+  modelConfigId?: string;
+  /** Legacy selection identity retained only while profile files migrate. */
   providerAlias?: string;
+  modelSelectionCompatibilityDiagnostics?: ProfileModelSelectionCompatibilityDiagnostic[];
   externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   modelConfig: BrainModelConfig;
   brain?: ProfileBrainConfig;
@@ -310,7 +322,10 @@ export interface LoadProfileContextInput {
   session?: SessionToolConstraints;
   catalogId?: string;
   extraRequestedToolsets?: readonly string[];
+  modelConfigResolver?: (modelConfigId: string) => Promise<BrainModelConfig>;
+  /** Compatibility-only resolver for legacy providerAlias profile files. */
   modelProviderResolver?: (alias: string) => Promise<BrainModelConfig>;
+  modelSelectionSource?: "normalized" | "legacy";
   toolAvailabilityPlanner?: ToolAvailabilityPlanner;
   externalMemoryAvailability?: ExternalMemoryToolAvailability;
   profilePromptAssets?: {
@@ -340,7 +355,44 @@ export async function loadProfileContext(
       },
     };
   }
-  if (profile.providerAlias !== undefined) {
+  const modelSelectionSource =
+    input.modelSelectionSource ?? runtimeModelSelectionSource();
+  if (modelSelectionSource === "legacy") {
+    const legacyAlias = profile.providerAlias ?? profile.modelConfigId;
+    if (
+      legacyAlias === undefined ||
+      input.modelProviderResolver === undefined
+    ) {
+      throw invalidProfile(
+        input.profileId,
+        input.profileId,
+        "legacy model selection requires providerAlias or modelConfigId and a legacy resolver",
+      );
+    }
+    profile = {
+      ...profile,
+      modelConfig: await input.modelProviderResolver(legacyAlias),
+      modelSelectionCompatibilityDiagnostics: [
+        ...(profile.modelSelectionCompatibilityDiagnostics ?? []),
+        {
+          code: "legacy_runtime_model_selection",
+          message: `runtime rollback flag selected the compatibility provider view for ${legacyAlias}`,
+        },
+      ],
+    };
+  } else if (profile.modelConfigId !== undefined) {
+    if (input.modelConfigResolver === undefined) {
+      throw invalidProfile(
+        input.profileId,
+        input.profileId,
+        `modelConfigId ${profile.modelConfigId} requires a model configuration resolver`,
+      );
+    }
+    profile = {
+      ...profile,
+      modelConfig: await input.modelConfigResolver(profile.modelConfigId),
+    };
+  } else if (profile.providerAlias !== undefined) {
     if (input.modelProviderResolver === undefined) {
       throw invalidProfile(
         input.profileId,
@@ -411,6 +463,17 @@ export async function loadProfileContext(
     skills,
     toolSelection,
   };
+}
+
+export function runtimeModelSelectionSource(): "normalized" | "legacy" {
+  const value = process.env.RUSTY_CREW_MODEL_SELECTION_SOURCE?.trim();
+  if (value === undefined || value === "" || value === "normalized") {
+    return "normalized";
+  }
+  if (value === "legacy") return "legacy";
+  throw new Error(
+    `RUSTY_CREW_MODEL_SELECTION_SOURCE must be normalized or legacy, got ${value}`,
+  );
 }
 
 export async function loadProfileCuratorDiscoveryContext(input: {
@@ -823,16 +886,43 @@ function validateProfileConfig(
     );
   }
   const providerAlias = optionalString(parsed.providerAlias);
+  const modelConfigId = optionalString(parsed.modelConfigId);
   const modelConfig = parsed.modelConfig;
-  if (!isRecord(modelConfig) && providerAlias === undefined) {
-    throw invalidProfile(profileId, profilePath, "providerAlias is required");
+  if (
+    modelConfigId === undefined &&
+    !isRecord(modelConfig) &&
+    providerAlias === undefined
+  ) {
+    throw invalidProfile(profileId, profilePath, "modelConfigId is required");
   }
   const resolvedModelConfig = isRecord(modelConfig)
     ? modelConfigFromProfileObject(modelConfig)
     : {
-        provider: "unresolved-provider-alias",
-        modelName: providerAlias!,
+        provider:
+          modelConfigId === undefined
+            ? "unresolved-provider-alias"
+            : "unresolved-model-configuration",
+        modelName: modelConfigId ?? providerAlias!,
       };
+  const modelSelectionCompatibilityDiagnostics = [
+    ...(modelConfigId === undefined && providerAlias !== undefined
+      ? [
+          {
+            code: "legacy_provider_alias_selection" as const,
+            message: `providerAlias ${providerAlias} is compatibility-only; migrate the profile to modelConfigId`,
+          },
+        ]
+      : []),
+    ...(modelConfigId === undefined && isRecord(modelConfig)
+      ? [
+          {
+            code: "inline_model_config_selection" as const,
+            message:
+              "inline modelConfig is compatibility-only; migrate the profile to a registered modelConfigId",
+          },
+        ]
+      : []),
+  ];
   const runtimeConfig = isRecord(parsed.runtimeConfig)
     ? parsed.runtimeConfig
     : undefined;
@@ -845,7 +935,11 @@ function validateProfileConfig(
         ? undefined
         : join(fragments.profileDir, "skills"),
     displayName: optionalString(parsed.displayName),
+    modelConfigId,
     providerAlias,
+    ...(modelSelectionCompatibilityDiagnostics.length === 0
+      ? {}
+      : { modelSelectionCompatibilityDiagnostics }),
     externalMessageDeliveryPolicy: profileExternalMessageDeliveryPolicy(
       parsed.externalMessageDeliveryPolicy,
       profileId,
@@ -1036,6 +1130,7 @@ function profileBackgroundReviewConfig(
       typeof raw.llmReviewEnabled === "boolean"
         ? raw.llmReviewEnabled
         : undefined,
+    captureModelConfigId: optionalString(raw.captureModelConfigId),
     captureProviderAlias: optionalString(raw.captureProviderAlias),
     captureMaxProposals: optionalNumber(raw.captureMaxProposals),
     dryRun: typeof raw.dryRun === "boolean" ? raw.dryRun : undefined,

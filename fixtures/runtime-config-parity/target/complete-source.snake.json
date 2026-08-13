@@ -103,7 +103,7 @@
         "max_findings": 10,
         "max_candidates": 6,
         "llm_review_enabled": true,
-        "capture_provider_alias": "review-provider",
+        "capture_model_config_id": "review-provider",
         "capture_max_proposals": 4,
         "dry_run": false
       },

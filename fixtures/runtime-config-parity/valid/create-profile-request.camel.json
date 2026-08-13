@@ -8,6 +8,7 @@
   "implementationId": "parity-created-brain",
   "kind": "full",
   "workspaceCwd": "/home/dev/rusty-crew",
+  "modelConfigId": "parity-provider",
   "providerAlias": "parity-provider",
   "externalMessageDeliveryPolicy": "immediate_steer",
   "modelConfig": {

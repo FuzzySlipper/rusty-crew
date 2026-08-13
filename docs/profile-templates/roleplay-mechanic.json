@@ -1,7 +1,7 @@
 {
   "profileId": "roleplay-mechanic",
   "displayName": "Mechanic",
-  "providerAlias": "replace-with-provider-alias",
+  "modelConfigId": "replace-with-model-config-id",
   "brain": {
     "module": "chat-completions",
     "strategy": "default"

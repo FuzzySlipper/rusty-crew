@@ -109,6 +109,8 @@ pub struct BrainSelectionRequest {
     #[serde(default)]
     pub configured_strategy_id: Option<String>,
     pub provider_protocol: BrainProviderProtocol,
+    /// Compatibility-only vendor label; selection is protocol-driven.
+    #[serde(default)]
     pub provider_kind: String,
     #[serde(default)]
     pub roleplay_narrator_enabled: bool,

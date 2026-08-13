@@ -409,6 +409,10 @@ export interface SessionContextUsageResult {
   profile_id: string;
   provider: {
     alias: string;
+    model_config_id?: string;
+    model_config_revision?: number;
+    endpoint_id?: string;
+    endpoint_revision?: number;
     status: "active" | "disabled" | "archived" | "missing" | "unknown";
     protocol?: "responses" | "chat_completions";
     provider_kind?: string;

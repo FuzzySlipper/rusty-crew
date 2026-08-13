@@ -257,7 +257,7 @@ export async function dispatchWake(
             name:
               profileContext.profile.displayName ??
               profileContext.profile.profileId,
-            providerAlias: profileContext.profile.providerAlias,
+            modelConfigId: profileContext.profile.modelConfigId,
             autoMonitor: profileContext.profile.roleplayMechanic.autoMonitor,
           })) as {
             systemPrompt: string;

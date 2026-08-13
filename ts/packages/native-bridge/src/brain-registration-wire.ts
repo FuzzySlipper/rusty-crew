@@ -20,6 +20,19 @@ export function toNativeBrainRegistration(
       })),
     },
     modelConfig: {
+      modelConfigId: registration.modelConfig.modelConfigId,
+      modelConfigRevision: registration.modelConfig.modelConfigRevision,
+      endpointId: registration.modelConfig.endpointId,
+      endpointRevision: registration.modelConfig.endpointRevision,
+      credentialId: registration.modelConfig.credentialId,
+      credentialRevision: registration.modelConfig.credentialRevision,
+      credentialKind: registration.modelConfig.credentialKind,
+      protocol: registration.modelConfig.api,
+      dialect:
+        registration.modelConfig.responsesDialect ??
+        registration.modelConfig.chatCompletionsDialect,
+      authScheme: registration.modelConfig.authScheme,
+      promptCacheTransport: registration.modelConfig.promptCacheTransport,
       provider: registration.modelConfig.provider,
       modelName: registration.modelConfig.modelName,
       temperatureMilli: registration.modelConfig.temperatureMilli,

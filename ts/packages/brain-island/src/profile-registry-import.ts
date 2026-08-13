@@ -151,7 +151,10 @@ function activeRuntimeSettingsJson(
 ): Record<string, unknown> {
   return stripUndefined({
     schemaVersion: 1,
-    modelConfig: profile.modelConfig,
+    modelConfigId: profile.modelConfigId,
+    ...(profile.modelConfigId === undefined
+      ? { modelConfig: profile.modelConfig }
+      : {}),
     externalMessageDeliveryPolicy: profile.externalMessageDeliveryPolicy,
     brain: profile.brain,
     runtime: profile.runtime,
@@ -410,6 +413,20 @@ function ambiguousFieldDiagnostics(
       ambiguous("profileIdentity", "profileId and profileIdentity differ"),
     );
   }
+  const modelConfigId = optionalString(raw.modelConfigId);
+  const providerAlias = optionalString(raw.providerAlias);
+  if (
+    modelConfigId !== undefined &&
+    providerAlias !== undefined &&
+    modelConfigId !== providerAlias
+  ) {
+    diagnostics.push(
+      ambiguous(
+        "modelConfigId",
+        "modelConfigId and compatibility-only providerAlias differ",
+      ),
+    );
+  }
   const modelConfig = record(raw.modelConfig);
   if (modelConfig) {
     const modelName = optionalString(modelConfig.modelName);
@@ -554,6 +571,8 @@ const PROFILE_SCHEMA = schema(
     "profileIdentity",
     "name",
     "displayName",
+    "modelConfigId",
+    "providerAlias",
     "modelConfig",
     "externalMessageDeliveryPolicy",
     "brain",
@@ -622,6 +641,8 @@ const PROFILE_SCHEMA = schema(
       "maxFindings",
       "maxCandidates",
       "llmReviewEnabled",
+      "captureModelConfigId",
+      "captureProviderAlias",
       "dryRun",
     ]),
     memoryConfig: schema([

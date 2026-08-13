@@ -408,7 +408,8 @@ export function toNativeCreateProfilePlan(
       ? {
           profileId: plan.profile_seed.profile_id,
           displayName: plan.profile_seed.display_name ?? undefined,
-          providerAlias: plan.profile_seed.provider_alias,
+          modelConfigId: plan.profile_seed.model_config_id,
+          providerAlias: plan.profile_seed.provider_alias ?? undefined,
           modelConfig: toProfileModelConfigSeed(plan.profile_seed.model_config),
           brain: {
             module: plan.profile_seed.brain.module ?? undefined,
@@ -591,7 +592,8 @@ export interface RawCreateProfilePlan {
   profile_seed?: {
     profile_id: string;
     display_name?: string;
-    provider_alias: string;
+    model_config_id: string;
+    provider_alias?: string;
     model_config: RawProfileModelConfigSeed;
     brain: {
       module?: string;

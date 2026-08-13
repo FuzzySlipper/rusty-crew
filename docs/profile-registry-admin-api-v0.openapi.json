@@ -382,9 +382,10 @@
       },
       "ProfileRegistryRuntimeConfigEdit": {
         "type": "object",
-        "required": ["providerAlias", "externalMessageDeliveryPolicy", "contextPolicy", "mcpBindings"],
+        "required": ["modelConfigId", "externalMessageDeliveryPolicy", "contextPolicy", "mcpBindings"],
         "properties": {
-          "providerAlias": { "type": "string" },
+          "modelConfigId": { "type": "string" },
+          "providerAlias": { "type": "string", "deprecated": true },
           "externalMessageDeliveryPolicy": { "type": "string", "enum": ["immediate_steer", "serial_next_turn"] },
           "brain": { "$ref": "#/components/schemas/ProfileRegistryBrainConfig" },
           "localToolProfileId": { "type": ["string", "null"] },
@@ -402,7 +403,8 @@
         "required": ["expectedRevision"],
         "properties": {
           "expectedRevision": { "type": "integer", "minimum": 1 },
-          "providerAlias": { "type": "string" },
+          "modelConfigId": { "type": "string" },
+          "providerAlias": { "type": "string", "deprecated": true },
           "externalMessageDeliveryPolicy": { "type": "string", "enum": ["immediate_steer", "serial_next_turn"] },
           "brain": { "$ref": "#/components/schemas/ProfileRegistryBrainConfig" },
           "localToolProfileId": { "type": ["string", "null"] },

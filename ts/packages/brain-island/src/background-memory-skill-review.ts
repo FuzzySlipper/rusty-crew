@@ -48,6 +48,7 @@ export interface BackgroundReviewPayload {
   maxFindings?: number;
   maxCandidates?: number;
   maxTokens?: number;
+  captureModelConfigId?: string;
   captureProviderAlias?: string;
   captureMaxProposals?: number;
   memoryNudgeInterval?: number;
@@ -130,7 +131,7 @@ export interface BackgroundReviewRunnerInput {
 export interface BackgroundReviewCaptureProviderInput {
   runId: string;
   profileId: ProfileId | string;
-  providerAlias: string;
+  modelConfigId: string;
   sessionActivityDigests: readonly SessionActivityDigest[];
   denseProfileMemory?: readonly BackgroundReviewDenseMemoryRecord[];
   skills?: readonly LoadedSkill[];
@@ -232,20 +233,31 @@ export async function runBackgroundMemorySkillReview(
       captureProposals.length === 0
     ) {
       skippedReasons.push("llm_review_no_session_activity_digests");
-    } else if (!input.payload.captureProviderAlias?.trim()) {
-      skippedReasons.push("capture_provider_alias_missing");
+    } else if (
+      !input.payload.captureModelConfigId?.trim() &&
+      !input.payload.captureProviderAlias?.trim()
+    ) {
+      skippedReasons.push("capture_model_config_id_missing");
     } else if (!input.captureProvider) {
       skippedReasons.push("llm_review_requires_provider_path");
     } else {
       const capture = await input.captureProvider({
         runId: input.runId,
         profileId: input.payload.profileId,
-        providerAlias: input.payload.captureProviderAlias,
+        modelConfigId:
+          input.payload.captureModelConfigId ??
+          input.payload.captureProviderAlias!,
         sessionActivityDigests: input.sessionActivityDigests ?? [],
         denseProfileMemory: input.denseProfileMemory,
         skills: input.skills,
         maxProposals: input.payload.captureMaxProposals,
       });
+      if (
+        input.payload.captureModelConfigId === undefined &&
+        input.payload.captureProviderAlias !== undefined
+      ) {
+        skippedReasons.push("legacy_capture_provider_alias_selection");
+      }
       skippedReasons.push(...capture.skippedReasons);
       captureProposals.push(...capture.proposals);
     }

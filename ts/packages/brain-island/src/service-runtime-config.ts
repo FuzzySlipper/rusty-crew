@@ -28,7 +28,6 @@ import type {
   NativeBrainConfigDraft,
   NativeRuntimeConfigDiagnostic,
   NativeRuntimeGraphPlan,
-  NativeModelProviderRecord,
   NativeScheduledJobConfigDraft,
   NativeSessionConfigDraft,
   NativeSessionStateSummary,
@@ -74,7 +73,10 @@ import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import type { BrainToolMediaSink } from "./brain-tool-media.js";
 import type { NarratorImageContextResolver } from "./narrator-image-context.js";
-import { narratorImageInputCapability } from "./narrator-image-context.js";
+import {
+  resolveModelConfigurationForBrain,
+  resolveModelProviderForBrain,
+} from "./model-runtime-resolution.js";
 import { providerStateScopeForProfile } from "./provider-state-fingerprints.js";
 import {
   channelReadbackTool,
@@ -880,6 +882,8 @@ export async function applyRustyCrewRuntimeConfig(input: {
       profilesDir: runtimeConfig.profilesDir,
       skillsDir: runtimeConfig.skillsDir,
       profileId,
+      modelConfigResolver: (modelConfigId) =>
+        resolveModelConfigurationForBrain(input.bridge, modelConfigId),
       modelProviderResolver: (alias) =>
         resolveModelProviderForBrain(input.bridge, alias),
       registry: mcpToolCatalog.registryForProfile(profileId),
@@ -1021,104 +1025,6 @@ export async function applyRustyCrewRuntimeConfig(input: {
   return result;
 }
 
-async function resolveModelProviderForBrain(
-  bridge: NativeBridgeModule,
-  alias: string,
-): Promise<BrainModelConfig> {
-  const provider = await bridge.getModelProvider(alias);
-  if (provider === undefined) {
-    throw new Error(`model provider alias ${alias} was not found`);
-  }
-  if (provider.status !== "active") {
-    throw new Error(
-      `model provider alias ${alias} is ${provider.status}; active provider required`,
-    );
-  }
-  const secret = provider.credential.hasSecret
-    ? await bridge.getModelProviderSecret(alias)
-    : undefined;
-  return modelProviderToBrainModelConfig(provider, secret);
-}
-
-function modelProviderToBrainModelConfig(
-  provider: NativeModelProviderRecord,
-  secret: string | undefined,
-): BrainModelConfig {
-  const apiKey = modelProviderApiKeySecret(provider, secret);
-  const credentialKind =
-    provider.credential.kind ??
-    (apiKey === undefined ? undefined : "legacy_raw_api_key");
-  const apiKeyEnv =
-    apiKey === undefined
-      ? undefined
-      : modelProviderSecretEnvName(provider.alias);
-  if (apiKeyEnv !== undefined) {
-    process.env[apiKeyEnv] = apiKey;
-  }
-  return {
-    provider: provider.providerKind,
-    modelName: provider.modelId,
-    baseUrl: provider.baseUrl,
-    api:
-      provider.protocol === "responses"
-        ? "openai-responses"
-        : "openai-completions",
-    apiKeyEnv,
-    credentialKind,
-    contextWindowTokens: provider.contextWindowTokens,
-    temperatureMilli: provider.temperatureMilli,
-    maxOutputTokens: provider.maxOutputTokens,
-    reasoningEffort: provider.reasoningEffort,
-    reasoningFormat: provider.reasoningFormat,
-    responsesDialect: provider.responsesDialect,
-    chatCompletionsDialect: provider.chatCompletionsDialect,
-    thinkingMode: provider.thinkingMode,
-    reasoningHistory: provider.reasoningHistory,
-    reasoningBudgetTokens: provider.reasoningBudgetTokens,
-    promptCaching: provider.promptCaching,
-    narratorImageInput: narratorImageInputCapability(provider.metadataJson),
-  };
-}
-
-function modelProviderApiKeySecret(
-  provider: NativeModelProviderRecord,
-  secret: string | undefined,
-): string | undefined {
-  if (secret === undefined) {
-    return undefined;
-  }
-  const trimmed = secret.trim();
-  if (!trimmed.startsWith("{")) {
-    return secret;
-  }
-  const envelope = JSON.parse(trimmed) as unknown;
-  if (!isRuntimeRecord(envelope)) {
-    throw new Error(
-      `model provider ${provider.alias} secret envelope is invalid`,
-    );
-  }
-  if (envelope.kind === "api_key" && typeof envelope.value === "string") {
-    return envelope.value;
-  }
-  if (envelope.kind === "openai_oauth") {
-    return undefined;
-  }
-  throw new Error(
-    `model provider ${provider.alias} secret envelope kind is unsupported`,
-  );
-}
-
-function modelProviderSecretEnvName(alias: string): string {
-  return `RUSTY_CREW_MODEL_PROVIDER_SECRET_${alias
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")}`;
-}
-
-function isRuntimeRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 export async function rebuildConfiguredBrainRuntime(input: {
   serviceConfig: RustyCrewServiceConfig;
   runtimeConfig: RustyCrewRuntimeConfig;
@@ -1176,6 +1082,8 @@ export async function rebuildConfiguredBrainRuntime(input: {
     profilesDir: runtimeConfig.profilesDir,
     skillsDir: runtimeConfig.skillsDir,
     profileId: input.profileId,
+    modelConfigResolver: (modelConfigId) =>
+      resolveModelConfigurationForBrain(input.bridge, modelConfigId),
     modelProviderResolver: (alias) =>
       resolveModelProviderForBrain(input.bridge, alias),
     registry: mcpToolCatalog.registryForProfile(input.profileId),

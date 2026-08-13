@@ -119,6 +119,7 @@ backgroundReview:
         agentId: "rusty-crew-runner" as AgentId,
         profileId: "rusty-crew-runner" as ProfileId,
         kind: "full",
+        workspaceCwd: "/home/dev/rusty-crew",
         ownerId: "owner:den-k8plus:rusty-crew-runner",
         maxHistoryMessages: 200,
       },
@@ -236,6 +237,7 @@ backgroundReview:
       (diagnostic) => diagnostic.severity === "error",
     ),
     false,
+    JSON.stringify(runnerPlan.diagnostics),
   );
 
   const flatPlan = await buildProfileRegistryImportPlan({

@@ -37,17 +37,21 @@ async function openAiResponsesClientConfig(
 ): Promise<OpenAiResponsesClientConfig> {
   if (context.profile.profile.modelConfig.credentialKind === "openai_oauth") {
     const bridge = context.bridge;
-    const providerAlias = context.profile.profile.providerAlias;
-    if (bridge === undefined || providerAlias === undefined) {
+    const credentialId = context.profile.profile.modelConfig.credentialId;
+    const legacyProviderAlias = context.profile.profile.providerAlias;
+    const credentialRef = credentialId ?? legacyProviderAlias;
+    if (bridge === undefined || credentialRef === undefined) {
       throw new Error(
-        "openai-responses OAuth live client requires native bridge and providerAlias",
+        "openai-responses OAuth live client requires native bridge and credentialId",
       );
     }
     const oauthCredentialSecret =
-      await bridge.getModelProviderSecret(providerAlias);
+      credentialId === undefined
+        ? await bridge.getModelProviderSecret(credentialRef)
+        : await bridge.getServiceCredentialSecret(credentialId);
     if (oauthCredentialSecret === undefined) {
       throw new Error(
-        `openai-responses OAuth live client requested but provider ${providerAlias} has no credential secret`,
+        `openai-responses OAuth live client requested but credential ${credentialRef} has no secret`,
       );
     }
     return {
@@ -56,7 +60,9 @@ async function openAiResponsesClientConfig(
         context.profile.profile.modelConfig.baseUrl ??
         "https://chatgpt.com/backend-api/codex",
       authKind: "openai_oauth",
-      providerAlias,
+      // Native Responses transport retains this field name for refresh
+      // correlation; normalized runtimes carry the credential ID in it.
+      providerAlias: credentialRef,
       oauthCredentialSecret,
     };
   }
@@ -92,6 +98,34 @@ async function persistOpenAiResponsesCredentialSecretUpdate(
   const bridge = context.bridge;
   if (bridge === undefined) {
     throw new Error("OpenAI Responses credential update requires bridge");
+  }
+  const credentialId = context.profile.profile.modelConfig.credentialId;
+  if (credentialId !== undefined && update.providerAlias === credentialId) {
+    const credential = await bridge.getServiceCredential(credentialId);
+    if (credential === undefined) {
+      throw new Error(
+        `OpenAI Responses credential update ${credentialId} was not found`,
+      );
+    }
+    await bridge.upsertServiceCredential({
+      credentialId,
+      displayName: credential.displayName,
+      providerKind: credential.providerKind,
+      credentialKind: credential.credentialKind,
+      secret: update.secret,
+      expectedRevision: credential.revision,
+      now: new Date().toISOString(),
+    });
+    if (
+      currentConfig.mode === "live" &&
+      currentConfig.authKind === "openai_oauth"
+    ) {
+      return {
+        ...currentConfig,
+        oauthCredentialSecret: update.secret,
+      };
+    }
+    return currentConfig;
   }
   const provider = await bridge.getModelProvider(update.providerAlias);
   if (provider === undefined) {

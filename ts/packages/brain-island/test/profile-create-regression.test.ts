@@ -40,13 +40,21 @@ test("profile create persists exact prompts through the public service mutation"
 
   try {
     const now = "2026-07-16T05:00:00.000Z";
-    await bridge.upsertModelProvider({
-      alias: "default",
+    await bridge.upsertModelEndpoint({
+      endpointId: "default-endpoint",
       status: "active",
       protocol: "chat_completions",
-      providerKind: "openai_compatible",
+      wireDialect: "standard",
+      baseUrl: "https://example.invalid/v1",
+      authScheme: "none",
+      metadataJson: {},
+      now,
+    });
+    await bridge.upsertModelConfiguration({
+      modelConfigId: "default",
+      endpointId: "default-endpoint",
+      status: "active",
       modelId: "profile-create-regression",
-      clearSecret: false,
       metadataJson: {},
       now,
     });
@@ -98,7 +106,7 @@ test("profile create persists exact prompts through the public service mutation"
       bridge,
       profilesDir,
       profileId: "prompt-round-trip" as ProfileId,
-      modelProviderResolver: async () => ({
+      modelConfigResolver: async () => ({
         provider: "openai_compatible",
         modelName: "profile-create-regression",
       }),
@@ -122,7 +130,7 @@ test("profile create persists exact prompts through the public service mutation"
       bridge,
       profilesDir,
       profileId: "prompt-round-trip" as ProfileId,
-      modelProviderResolver: async () => ({
+      modelConfigResolver: async () => ({
         provider: "openai_compatible",
         modelName: "profile-create-regression",
       }),
@@ -164,13 +172,21 @@ test("profile create rolls back files, registry, and runtime after late activati
 
   try {
     const now = "2026-07-16T05:30:00.000Z";
-    await bridge.upsertModelProvider({
-      alias: "missing-base-url",
+    await bridge.upsertModelEndpoint({
+      endpointId: "rollback-endpoint",
       status: "active",
       protocol: "chat_completions",
-      providerKind: "openai_compatible",
+      wireDialect: "standard",
+      baseUrl: "https://example.invalid/v1",
+      authScheme: "none",
+      metadataJson: {},
+      now,
+    });
+    await bridge.upsertModelConfiguration({
+      modelConfigId: "missing-base-url",
+      endpointId: "rollback-endpoint",
+      status: "active",
       modelId: "profile-create-rollback",
-      clearSecret: false,
       metadataJson: {},
       now,
     });
@@ -239,7 +255,7 @@ test("profile create rolls back files, registry, and runtime after late activati
         ...createProfileCommand(profileId, {}),
         body: {
           profileId,
-          providerAlias: "missing-base-url",
+          modelConfigId: "missing-base-url",
           workspaceCwd: "/home/dev/rusty-crew",
         },
       }),
@@ -282,7 +298,7 @@ function createProfileCommand(
     requestId: `request-${profileId}`,
     body: {
       profileId,
-      providerAlias: "default",
+      modelConfigId: "default",
       workspaceCwd: "/home/dev/rusty-crew",
       ...prompts,
     },

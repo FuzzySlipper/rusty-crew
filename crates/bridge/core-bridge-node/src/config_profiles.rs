@@ -360,6 +360,26 @@ pub(crate) fn to_brain_registration(
                 .collect(),
         },
         model_config: rusty_crew_core_bridge_api::BrainModelConfig {
+            model_config_id: registration.model_config.model_config_id,
+            model_config_revision: registration
+                .model_config
+                .model_config_revision
+                .map(|value| value as u64),
+            endpoint_id: registration.model_config.endpoint_id,
+            endpoint_revision: registration
+                .model_config
+                .endpoint_revision
+                .map(|value| value as u64),
+            credential_id: registration.model_config.credential_id,
+            credential_revision: registration
+                .model_config
+                .credential_revision
+                .map(|value| value as u64),
+            credential_kind: registration.model_config.credential_kind,
+            protocol: registration.model_config.protocol,
+            dialect: registration.model_config.dialect,
+            auth_scheme: registration.model_config.auth_scheme,
+            prompt_cache_transport: registration.model_config.prompt_cache_transport,
             provider: registration.model_config.provider,
             model_name: registration.model_config.model_name,
             temperature_milli: registration.model_config.temperature_milli,

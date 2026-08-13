@@ -68,7 +68,52 @@ export interface ModelEndpointAdminRouteContext {
   getModelConfiguration(
     modelConfigId: string,
   ): Promise<NativeModelConfigurationRecord | undefined>;
+  refreshAfterWrite?(input: {
+    kind: "endpoint" | "configuration";
+    id: string;
+  }): Promise<{ profileIds: string[] }>;
   now(): string;
+}
+
+export function normalizedModelRefreshProfileIds(input: {
+  kind: "endpoint" | "configuration";
+  id: string;
+  configurations: readonly Pick<
+    NativeModelConfigurationRecord,
+    "modelConfigId" | "endpointId"
+  >[];
+  profiles: readonly {
+    profileId: string;
+    activeRuntimeSettingsJson?: unknown;
+  }[];
+}): string[] {
+  const modelConfigIds =
+    input.kind === "configuration"
+      ? new Set([input.id])
+      : new Set(
+          input.configurations
+            .filter((configuration) => configuration.endpointId === input.id)
+            .map((configuration) => configuration.modelConfigId),
+        );
+  return input.profiles
+    .filter((profile) => {
+      const settings = refreshRecord(profile.activeRuntimeSettingsJson);
+      const nested = refreshRecord(settings.profile);
+      const modelConfigId =
+        refreshString(settings.modelConfigId) ??
+        refreshString(nested.modelConfigId);
+      return modelConfigId !== undefined && modelConfigIds.has(modelConfigId);
+    })
+    .map((profile) => profile.profileId)
+    .sort();
+}
+
+function refreshRecord(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
+function refreshString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 export async function handleModelEndpointAdminRequest(
@@ -300,8 +345,13 @@ async function endpointWrite(
 
   try {
     const endpoint = await context.upsertModelEndpoint(write);
+    const refresh = await context.refreshAfterWrite?.({
+      kind: "endpoint",
+      id: endpoint.endpointId,
+    });
     return successRoute(request.requestId, {
       endpoint: modelEndpointApiRecord(endpoint),
+      ...(refresh === undefined ? {} : { refresh }),
     });
   } catch (error) {
     const mismatch = revisionMismatch(
@@ -365,8 +415,13 @@ async function configurationWrite(
 
   try {
     const configuration = await context.upsertModelConfiguration(write);
+    const refresh = await context.refreshAfterWrite?.({
+      kind: "configuration",
+      id: configuration.modelConfigId,
+    });
     return successRoute(request.requestId, {
       configuration: modelConfigurationApiRecord(configuration),
+      ...(refresh === undefined ? {} : { refresh }),
     });
   } catch (error) {
     const mismatch = revisionMismatch(

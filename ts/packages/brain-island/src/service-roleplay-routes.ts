@@ -8,6 +8,7 @@ import type { AdminRouteResult } from "./admin-diagnostics-api.js";
 import { failure, successRoute } from "./service-route-results.js";
 import { loadProfileConfig } from "./profile-loading.js";
 import { createLocalToolProfileStore } from "./local-tool-profiles.js";
+import { resolveModelConfigurationForBrain } from "./model-runtime-resolution.js";
 import {
   narratorImageInputCapability,
   type NarratorImageInputCapability,
@@ -252,6 +253,7 @@ interface BrowserRoleplayNarratorConfig {
 interface BrowserRoleplayMechanicProfilePlan {
   config: {
     name: string;
+    modelConfigId?: string;
     providerAlias?: string;
     autoMonitor: {
       enabled: false;
@@ -3056,35 +3058,40 @@ async function readRoleplayNarratorImageCapability(
     state.runtimeConfig.profilesDir,
     profileId as ProfileId,
   );
-  if (!profile.providerAlias) {
+  if (!profile.modelConfigId) {
     return {
       supported: false,
       maxImages: 0,
       maxImageBytes: 0,
       maxTotalBytes: 0,
-      reasonCode: "narrator_provider_alias_missing",
+      reasonCode: "narrator_model_config_id_missing",
     };
   }
-  const provider = await state.bridge.getModelProvider(profile.providerAlias);
-  if (!provider || provider.status !== "active") {
+  let modelConfig;
+  try {
+    modelConfig = await resolveModelConfigurationForBrain(
+      state.bridge,
+      profile.modelConfigId,
+    );
+  } catch {
     return {
       supported: false,
       maxImages: 0,
       maxImageBytes: 0,
       maxTotalBytes: 0,
-      reasonCode: "narrator_provider_unavailable",
+      reasonCode: "narrator_model_configuration_unavailable",
     };
   }
-  if (provider.protocol !== "chat_completions") {
+  if (modelConfig.api !== "openai-completions") {
     return {
       supported: false,
       maxImages: 0,
       maxImageBytes: 0,
       maxTotalBytes: 0,
-      reasonCode: "narrator_provider_protocol_unsupported",
+      reasonCode: "narrator_model_protocol_unsupported",
     };
   }
-  return narratorImageInputCapability(provider.metadataJson);
+  return modelConfig.narratorImageInput ?? narratorImageInputCapability({});
 }
 
 async function writeRoleplayNarratorConfig(
@@ -3153,7 +3160,7 @@ async function readRoleplayMechanicConfig(
   );
   const plan = await planRoleplayMechanicProfile(state, {
     name: profile.displayName ?? profile.profileId,
-    providerAlias: profile.providerAlias,
+    modelConfigId: profile.modelConfigId,
     autoMonitor: profile.roleplayMechanic?.autoMonitor ?? false,
   });
   return {
@@ -3198,21 +3205,26 @@ async function writeRoleplayMechanicConfig(
     );
   }
   const configBody = isRecord(body.config) ? body.config : body;
-  const requestedProviderAlias =
-    optionalString(configBody.providerAlias ?? configBody.provider_alias) ??
+  const requestedLegacyAlias = optionalString(
+    configBody.providerAlias ?? configBody.provider_alias,
+  );
+  const requestedModelConfigId =
+    optionalString(configBody.modelConfigId ?? configBody.model_config_id) ??
+    requestedLegacyAlias ??
+    current.modelConfigId ??
     current.providerAlias;
-  if (requestedProviderAlias !== undefined) {
-    const provider = await state.bridge.getModelProvider(
-      requestedProviderAlias,
+  if (requestedModelConfigId !== undefined) {
+    const configuration = await state.bridge.getModelConfiguration(
+      requestedModelConfigId,
     );
-    if (provider === undefined) {
+    if (configuration === undefined) {
       throw new Error(
-        `model provider alias ${requestedProviderAlias} was not found`,
+        `model configuration ${requestedModelConfigId} was not found`,
       );
     }
-    if (provider.status !== "active") {
+    if (configuration.status !== "active") {
       throw new Error(
-        `model provider alias ${requestedProviderAlias} is ${provider.status}; active provider required`,
+        `model configuration ${requestedModelConfigId} is ${configuration.status}; active configuration required`,
       );
     }
   }
@@ -3221,7 +3233,10 @@ async function writeRoleplayMechanicConfig(
       optionalString(configBody.name ?? configBody.displayName) ??
       current.displayName ??
       profileId,
-    providerAlias: requestedProviderAlias,
+    modelConfigId: requestedModelConfigId,
+    ...(requestedLegacyAlias === undefined
+      ? {}
+      : { providerAlias: requestedLegacyAlias }),
     autoMonitor:
       configBody.autoMonitor ??
       configBody.auto_monitor ??
@@ -3232,17 +3247,20 @@ async function writeRoleplayMechanicConfig(
     bridge: state.bridge,
     now: state.now,
   }).resolve(plan.localToolProfileId);
-  await writeJsonFileAtomic(profilePath, {
+  const nextProfile: Record<string, unknown> = {
     ...raw,
     profileId,
     displayName: plan.config.name,
-    ...(plan.config.providerAlias === undefined
+    ...(plan.config.modelConfigId === undefined
       ? {}
-      : { providerAlias: plan.config.providerAlias }),
+      : { modelConfigId: plan.config.modelConfigId }),
     localToolProfileId: localToolProfile.id,
     toolPolicy: localToolProfile.toolPolicy,
     roleplayMechanic: { autoMonitor: false },
-  });
+  };
+  delete nextProfile.providerAlias;
+  delete nextProfile.modelConfig;
+  await writeJsonFileAtomic(profilePath, nextProfile);
   await state.applyServiceRuntimeConfigFromDisk({
     createMissingSessions: false,
     eventType: "roleplay_mechanic_config_updated",

@@ -4,6 +4,7 @@ import {
   handleModelRegistryAdminRequest,
   modelConfigurationApiRecord,
   modelEndpointApiRecord,
+  normalizedModelRefreshProfileIds,
   type ModelEndpointAdminRouteContext,
   type ModelEndpointAdminRouteRequest,
 } from "./service-model-endpoint-admin-routes.js";
@@ -17,6 +18,38 @@ import type {
 } from "./model-endpoint-admin-contract.js";
 
 const NOW = "2026-08-13T00:00:00.000Z";
+
+test("normalized refresh fans endpoint changes out but keeps model changes selective", () => {
+  const configurations = [
+    { modelConfigId: "model-a", endpointId: "shared" },
+    { modelConfigId: "model-b", endpointId: "shared" },
+    { modelConfigId: "model-c", endpointId: "other" },
+  ];
+  const profiles = configurations.map((configuration) => ({
+    profileId: `profile-${configuration.modelConfigId}`,
+    activeRuntimeSettingsJson: {
+      modelConfigId: configuration.modelConfigId,
+    },
+  }));
+  assert.deepEqual(
+    normalizedModelRefreshProfileIds({
+      kind: "endpoint",
+      id: "shared",
+      configurations,
+      profiles,
+    }),
+    ["profile-model-a", "profile-model-b"],
+  );
+  assert.deepEqual(
+    normalizedModelRefreshProfileIds({
+      kind: "configuration",
+      id: "model-a",
+      configurations,
+      profiles,
+    }),
+    ["profile-model-a"],
+  );
+});
 
 class MemoryModelRegistry implements ModelEndpointAdminRouteContext {
   readonly endpoints = new Map<string, NativeModelEndpointRecord>();

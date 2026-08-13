@@ -1630,6 +1630,28 @@ pub struct BrainImplementationRegistration {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct BrainModelConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_config_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_config_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub credential_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dialect: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_scheme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_transport: Option<String>,
     pub provider: String,
     pub model_name: String,
     pub temperature_milli: Option<u32>,

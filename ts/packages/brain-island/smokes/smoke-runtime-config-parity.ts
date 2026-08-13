@@ -195,7 +195,10 @@ try {
     profileRegistry,
     request: createRequest,
   });
-  assert.deepEqual(createPlan.diagnostics, []);
+  assert.deepEqual(
+    createPlan.diagnostics.map((diagnostic) => diagnostic.code),
+    ["legacy_provider_alias_selection", "inline_model_config_selection"],
+  );
   assert.equal(createPlan.profileSeed?.profileId, "parity-created");
   assert.equal(
     createPlan.runtimeBrain?.implementationId,

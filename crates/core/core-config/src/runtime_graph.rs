@@ -596,10 +596,14 @@ fn background_review_payload(
     insert_optional_u32(object, "maxFindings", review.max_findings);
     insert_optional_u32(object, "maxCandidates", review.max_candidates);
     insert_optional_u32(object, "captureMaxProposals", review.capture_max_proposals);
-    if let Some(alias) = &review.capture_provider_alias {
+    if let Some(model_config_id) = review
+        .capture_model_config_id
+        .as_ref()
+        .or(review.capture_provider_alias.as_ref())
+    {
         object.insert(
-            "captureProviderAlias".to_string(),
-            Value::String(alias.clone()),
+            "captureModelConfigId".to_string(),
+            Value::String(model_config_id.clone()),
         );
     }
     payload

@@ -175,6 +175,9 @@ function backgroundReviewPayload(input: unknown): BackgroundReviewPayload {
     maxCandidates:
       numberValue(raw.maxCandidates) ?? numberValue(raw.max_candidates),
     maxTokens: numberValue(raw.maxTokens) ?? numberValue(raw.max_tokens),
+    captureModelConfigId:
+      stringValue(raw.captureModelConfigId) ??
+      stringValue(raw.capture_model_config_id),
     captureProviderAlias:
       stringValue(raw.captureProviderAlias) ??
       stringValue(raw.capture_provider_alias),

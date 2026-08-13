@@ -1,7 +1,7 @@
 {
   "profileId": "vision-playtester",
   "displayName": "Vision Playtester",
-  "providerAlias": "deepseek-flash-responses",
+  "modelConfigId": "deepseek-flash-responses",
   "externalMessageDeliveryPolicy": "serial_next_turn",
   "brain": {
     "module": "openai-responses",

@@ -344,6 +344,17 @@ export interface JsBrainImplementationRegistration {
 }
 
 export interface JsBrainModelConfig {
+  modelConfigId?: string
+  modelConfigRevision?: number
+  endpointId?: string
+  endpointRevision?: number
+  credentialId?: string
+  credentialRevision?: number
+  credentialKind?: string
+  protocol?: string
+  dialect?: string
+  authScheme?: string
+  promptCacheTransport?: string
   provider: string
   modelName: string
   temperatureMilli?: number

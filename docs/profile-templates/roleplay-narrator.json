@@ -1,7 +1,7 @@
 {
   "profileId": "roleplay-narrator",
   "displayName": "Roleplay Narrator",
-  "providerAlias": "deepseek_flash",
+  "modelConfigId": "deepseek_flash",
   "brain": {
     "module": "chat-completions",
     "strategy": "roleplay_narrator"

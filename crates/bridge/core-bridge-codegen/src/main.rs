@@ -2492,6 +2492,7 @@ fn sample_create_profile_plan_input() -> CreateProfilePlanInput {
             revision: Some(7),
         }],
         request: CreateProfileRequest {
+            model_config_id: None,
             profile_id: "field-created-profile".to_owned(),
             display_name: Some("Field Created Profile".to_owned()),
             soul_markdown: Some("# Field soul\n\nKeep exact spacing.\n".to_owned()),
@@ -3423,6 +3424,17 @@ fn sample_brain_implementation_registration() -> BrainImplementationRegistration
 
 fn sample_brain_model_config() -> BrainModelConfig {
     BrainModelConfig {
+        model_config_id: None,
+        model_config_revision: None,
+        endpoint_id: None,
+        endpoint_revision: None,
+        credential_id: None,
+        credential_revision: None,
+        credential_kind: None,
+        protocol: None,
+        dialect: None,
+        auth_scheme: None,
+        prompt_cache_transport: None,
         provider: "openai-compatible".to_owned(),
         model_name: "gpt-fixture".to_owned(),
         temperature_milli: Some(500),
@@ -5056,6 +5068,7 @@ fn sample_roleplay_narrator_config() -> roleplay::RoleplayNarratorConfig {
 fn sample_roleplay_mechanic_profile_plan() -> roleplay::RoleplayMechanicProfilePlan {
     roleplay::RoleplayMechanicProfilePlan {
         config: roleplay::RoleplayMechanicConfig {
+            model_config_id: Some("validation-model".to_owned()),
             name: "Maren".to_owned(),
             provider_alias: Some("validation-provider".to_owned()),
             auto_monitor: roleplay::RoleplayMechanicAutoMonitorConfig {

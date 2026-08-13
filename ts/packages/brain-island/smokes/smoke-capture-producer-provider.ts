@@ -5,10 +5,7 @@ import type {
   SessionActivityDigest,
   SessionId,
 } from "@rusty-crew/contracts";
-import type {
-  NativeModelProviderRecord,
-  NativeBridgeModule,
-} from "@rusty-crew/native-bridge";
+import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 import {
   normalizeCaptureProviderOutput,
   runStructuredCaptureProvider,
@@ -30,11 +27,11 @@ const digest: SessionActivityDigest = {
   created_at: "2026-06-27T12:00:00.000Z",
 };
 
-const bridge = fakeBridge(provider({ alias: "capture", hasSecret: true }));
+const bridge = fakeBridge();
 const result = await runStructuredCaptureProvider({
   runId: "capture-run",
   profileId,
-  providerAlias: "capture",
+  modelConfigId: "capture",
   bridge,
   sessionActivityDigests: [digest],
   transport: async (url, init) => {
@@ -72,25 +69,25 @@ assert.deepEqual(invalid.skippedReasons, [
   "capture_provider_invalid_json",
 ]);
 
-const missingAlias = await runStructuredCaptureProvider({
+const missingId = await runStructuredCaptureProvider({
   runId: "capture-run",
   profileId,
-  providerAlias: "",
+  modelConfigId: "",
   bridge,
   sessionActivityDigests: [digest],
 });
-assert.deepEqual(missingAlias.skippedReasons, [
-  "capture_provider_alias_missing",
-]);
+assert.deepEqual(missingId.skippedReasons, ["capture_model_config_id_missing"]);
 
 const unavailable = await runStructuredCaptureProvider({
   runId: "capture-run",
   profileId,
-  providerAlias: "missing",
+  modelConfigId: "missing",
   bridge,
   sessionActivityDigests: [digest],
 });
-assert.deepEqual(unavailable.skippedReasons, ["capture_provider_unavailable"]);
+assert.deepEqual(unavailable.skippedReasons, [
+  "capture_model_configuration_unavailable",
+]);
 
 console.log("smoke-capture-producer-provider ok");
 
@@ -118,34 +115,67 @@ function profileDenseProposal(): Record<string, unknown> {
   };
 }
 
-function fakeBridge(
-  record: NativeModelProviderRecord,
-): Pick<NativeBridgeModule, "getModelProvider" | "getModelProviderSecret"> {
+function fakeBridge(): Pick<
+  NativeBridgeModule,
+  | "getModelConfiguration"
+  | "getModelEndpoint"
+  | "getServiceCredential"
+  | "getServiceCredentialSecret"
+> {
   return {
-    async getModelProvider(alias) {
-      return alias === record.alias ? record : undefined;
+    async getModelConfiguration(modelConfigId) {
+      return modelConfigId === "capture"
+        ? {
+            modelConfigId,
+            endpointId: "capture-endpoint",
+            status: "active",
+            modelId: "capture-model",
+            reasoningHistory: "provider_default",
+            thinkingMode: "provider_default",
+            promptCachingPolicy: "disabled",
+            capabilities: { version: 1, imageInput: false },
+            metadataJson: {},
+            revision: 1,
+            createdAt: "2026-06-27T12:00:00.000Z",
+            updatedAt: "2026-06-27T12:00:00.000Z",
+          }
+        : undefined;
     },
-    async getModelProviderSecret(alias) {
-      return alias === record.alias ? "secret-value" : undefined;
+    async getModelEndpoint(endpointId) {
+      return endpointId === "capture-endpoint"
+        ? {
+            endpointId,
+            status: "active",
+            baseUrl: "http://provider.local/v1",
+            protocol: "chat_completions",
+            wireDialect: "standard",
+            authScheme: "bearer_api_key",
+            credentialId: "capture-credential",
+            promptCacheTransport: "none",
+            metadataJson: {},
+            revision: 1,
+            createdAt: "2026-06-27T12:00:00.000Z",
+            updatedAt: "2026-06-27T12:00:00.000Z",
+          }
+        : undefined;
     },
-  };
-}
-
-function provider(input: {
-  alias: string;
-  hasSecret: boolean;
-}): NativeModelProviderRecord {
-  return {
-    alias: input.alias,
-    status: "active",
-    protocol: "chat_completions",
-    providerKind: "openai",
-    baseUrl: "http://provider.local/v1",
-    modelId: "capture-model",
-    credential: { hasSecret: input.hasSecret },
-    metadataJson: {},
-    revision: 1,
-    createdAt: "2026-06-27T12:00:00.000Z",
-    updatedAt: "2026-06-27T12:00:00.000Z",
+    async getServiceCredential(credentialId) {
+      return credentialId === "capture-credential"
+        ? {
+            credentialId,
+            displayName: "Capture credential",
+            providerKind: "display-only",
+            credentialKind: "api_key",
+            credential: { hasSecret: true, kind: "api_key", revision: 1 },
+            linkedProviderAliases: [],
+            revision: 1,
+            createdAt: "2026-06-27T12:00:00.000Z",
+            updatedAt: "2026-06-27T12:00:00.000Z",
+          }
+        : undefined;
+    },
+    async getServiceCredentialSecret(credentialId) {
+      return credentialId === "capture-credential" ? "secret-value" : undefined;
+    },
   };
 }

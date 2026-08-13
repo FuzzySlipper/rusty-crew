@@ -37,6 +37,7 @@ import {
   type NativeRoleplayLoreWrite,
   type NativeSimpleKvRecord,
 } from "@rusty-crew/native-bridge";
+import { resolveModelConfigurationForBrain } from "./model-runtime-resolution.js";
 import type {
   ChannelBindingDiagnostics,
   DenConversationChannelResolution,
@@ -123,6 +124,7 @@ import {
 } from "./service-model-provider-routes.js";
 import {
   handleModelRegistryAdminRequest,
+  normalizedModelRefreshProfileIds,
   type ModelEndpointAdminRouteContext,
 } from "./service-model-endpoint-admin-routes.js";
 import { handleServiceCredentialAdminRequest } from "./service-credential-admin-routes.js";
@@ -2054,6 +2056,8 @@ async function handleHttpRequest(
           normalizedModelBridge.listModelConfigurations(query),
         getModelConfiguration: (modelConfigId) =>
           normalizedModelBridge.getModelConfiguration(modelConfigId),
+        refreshAfterWrite: (input) =>
+          refreshNormalizedModelRuntimes(state, input),
         now: state.now,
       },
     );
@@ -2078,8 +2082,14 @@ async function handleHttpRequest(
         upsertModelProvider: (write) => state.bridge.upsertModelProvider(write),
         getServiceCredential: (credentialId) =>
           state.bridge.getServiceCredential(credentialId),
-        upsertServiceCredential: (write) =>
-          state.bridge.upsertServiceCredential(write),
+        upsertServiceCredential: async (write) => {
+          const credential = await state.bridge.upsertServiceCredential(write);
+          await refreshNormalizedCredentialRuntimes(
+            state,
+            credential.credentialId,
+          );
+          return credential;
+        },
         linkModelProviderCredential: (link) =>
           state.bridge.linkModelProviderCredential(link),
         unlinkModelProviderCredential: (unlink) =>
@@ -2424,6 +2434,82 @@ async function modelProviderRefreshAfterWrite(input: {
       outcomes,
     },
   };
+}
+
+async function refreshNormalizedModelRuntimes(
+  state: ServiceState,
+  input: { kind: "endpoint" | "configuration"; id: string },
+): Promise<{ profileIds: string[] }> {
+  const configurations = await state.bridge.listModelConfigurations({
+    ...(input.kind === "endpoint" ? { endpointId: input.id } : {}),
+    limit: 1_000,
+  });
+  const profiles = await state.bridge.listProfileRegistryRecords({
+    limit: 1_000,
+  });
+  const profileIds = normalizedModelRefreshProfileIds({
+    ...input,
+    configurations,
+    profiles,
+  });
+  for (const profileId of profileIds) {
+    await applyServiceRuntimeRebuild(state, {
+      name: "apply_runtime_rebuild",
+      target: { scope: "profile", profileId },
+      actor: { operatorId: "model-registry-admin" },
+      requestId: `model-registry-refresh:${input.kind}:${input.id}:${profileId}`,
+      reason: `${input.kind} ${input.id} updated`,
+      body: {},
+    });
+  }
+  return { profileIds };
+}
+
+async function refreshNormalizedCredentialRuntimes(
+  state: ServiceState,
+  credentialId: string,
+): Promise<{ profileIds: string[] }> {
+  const endpoints = await state.bridge.listModelEndpoints({ limit: 1_000 });
+  const endpointIds = new Set(
+    endpoints
+      .filter((endpoint) => endpoint.credentialId === credentialId)
+      .map((endpoint) => endpoint.endpointId),
+  );
+  const configurations = (
+    await state.bridge.listModelConfigurations({
+      limit: 1_000,
+    })
+  ).filter((configuration) => endpointIds.has(configuration.endpointId));
+  const profiles = await state.bridge.listProfileRegistryRecords({
+    limit: 1_000,
+  });
+  const modelConfigIds = new Set(
+    configurations.map((configuration) => configuration.modelConfigId),
+  );
+  const profileIds = profiles
+    .filter((profile) => {
+      const settings = isRecord(profile.activeRuntimeSettingsJson)
+        ? profile.activeRuntimeSettingsJson
+        : {};
+      const nested = isRecord(settings.profile) ? settings.profile : {};
+      const modelConfigId =
+        optionalString(settings.modelConfigId) ??
+        optionalString(nested.modelConfigId);
+      return modelConfigId !== undefined && modelConfigIds.has(modelConfigId);
+    })
+    .map((profile) => profile.profileId)
+    .sort();
+  for (const profileId of profileIds) {
+    await applyServiceRuntimeRebuild(state, {
+      name: "apply_runtime_rebuild",
+      target: { scope: "profile", profileId },
+      actor: { operatorId: "service-credential-admin" },
+      requestId: `credential-refresh:${credentialId}:${profileId}`,
+      reason: `credential ${credentialId} updated`,
+      body: {},
+    });
+  }
+  return { profileIds };
 }
 
 function modelProviderRefreshCommandName(
@@ -4032,6 +4118,8 @@ async function buildDirectDebugContext(
             profilesDir: state.runtimeConfig.profilesDir,
             skillsDir: state.runtimeConfig.skillsDir,
             profileId: session.profileId,
+            modelConfigResolver: (modelConfigId) =>
+              resolveModelConfigurationForBrain(state.bridge, modelConfigId),
             modelProviderResolver: (alias) =>
               resolveModelProviderForBrain(state.bridge, alias),
           });
@@ -6539,6 +6627,8 @@ function backgroundReviewContext(
         profilesDir: state.runtimeConfig.profilesDir,
         skillsDir: state.runtimeConfig.skillsDir,
         profileId,
+        modelConfigResolver: (modelConfigId) =>
+          resolveModelConfigurationForBrain(state.bridge, modelConfigId),
         modelProviderResolver: (alias) =>
           resolveModelProviderForBrain(state.bridge, alias),
       }),
@@ -6669,6 +6759,8 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
         profilesDir: state.runtimeConfig.profilesDir,
         skillsDir: state.runtimeConfig.skillsDir,
         profileId,
+        modelConfigResolver: (modelConfigId) =>
+          resolveModelConfigurationForBrain(state.bridge, modelConfigId),
         modelProviderResolver: (alias) =>
           resolveModelProviderForBrain(state.bridge, alias),
       }),

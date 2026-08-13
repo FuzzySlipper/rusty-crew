@@ -1559,6 +1559,7 @@ export const nativeMappingInventory = {
         ],
         "RoleplayMechanicConfig": [
           "autoMonitor",
+          "modelConfigId",
           "name",
           "providerAlias"
         ],

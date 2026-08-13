@@ -409,6 +409,9 @@ pub struct CreateProfileRequest {
     pub kind: Option<SessionKind>,
     #[serde(default)]
     pub workspace_cwd: Option<String>,
+    #[serde(default)]
+    pub model_config_id: Option<String>,
+    /// Compatibility-only legacy selector. New writes emit model_config_id.
     pub provider_alias: Option<String>,
     #[serde(default)]
     pub external_message_delivery_policy: Option<ExternalMessageDeliveryPolicy>,
@@ -535,7 +538,8 @@ pub struct ProfileRegistryMutationPlan {
 pub struct CreateProfileSeedMetadata {
     pub profile_id: ProfileId,
     pub display_name: Option<String>,
-    pub provider_alias: String,
+    pub model_config_id: String,
+    pub provider_alias: Option<String>,
     pub model_config: ProfileModelConfigSeed,
     pub brain: ProfileBrainMetadata,
     pub external_message_delivery_policy: ExternalMessageDeliveryPolicy,
@@ -714,6 +718,7 @@ pub struct ProfileBackgroundReviewConfig {
     pub max_findings: Option<u32>,
     pub max_candidates: Option<u32>,
     pub llm_review_enabled: Option<bool>,
+    pub capture_model_config_id: Option<String>,
     pub capture_provider_alias: Option<String>,
     pub capture_max_proposals: Option<u32>,
     pub dry_run: Option<bool>,
@@ -1324,12 +1329,19 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned);
-    let provider_alias = input
+    let legacy_provider_alias = input
         .request
         .provider_alias
         .as_deref()
         .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let model_config_id = input
+        .request
+        .model_config_id
+        .as_deref()
+        .map(str::trim)
         .filter(|value| !value.is_empty())
+        .or(legacy_provider_alias)
         .unwrap_or("default")
         .to_string();
     let external_message_delivery_policy = input
@@ -1456,12 +1468,26 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
             }
         }
     }
-    collect_non_empty_diagnostic(
+    collect_id_diagnostic(
         &mut diagnostics,
-        "invalid_provider_alias",
-        "request.providerAlias",
-        &provider_alias,
+        "invalid_model_config_id",
+        "request.modelConfigId",
+        &model_config_id,
     );
+    if let Some(provider_alias) = legacy_provider_alias {
+        diagnostics.push(RuntimeConfigDiagnostic::warning(
+            "legacy_provider_alias_selection",
+            "request.providerAlias",
+            format!("providerAlias {provider_alias} is compatibility-only; use modelConfigId"),
+        ));
+    }
+    if input.request.model_config.is_some() {
+        diagnostics.push(RuntimeConfigDiagnostic::warning(
+            "inline_model_config_selection",
+            "request.modelConfig",
+            "inline modelConfig is compatibility-only; resolve a registered modelConfigId",
+        ));
+    }
     collect_non_empty_diagnostic(
         &mut diagnostics,
         "invalid_model_provider",
@@ -1718,7 +1744,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         prompt_soul_markdown: input.request.soul_markdown.clone(),
         prompt_memory_markdown: input.request.memory_markdown.clone(),
         active_runtime_settings_json: create_profile_runtime_settings_json(
-            &provider_alias,
+            &model_config_id,
             &brain,
             external_message_delivery_policy,
             profile_mcp_config.as_ref(),
@@ -1867,7 +1893,8 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         profile_seed: Some(CreateProfileSeedMetadata {
             profile_id,
             display_name: input.request.display_name.clone(),
-            provider_alias,
+            model_config_id,
+            provider_alias: legacy_provider_alias.map(str::to_string),
             model_config,
             brain,
             external_message_delivery_policy,
@@ -2778,7 +2805,7 @@ fn derived_runtime_ref_status_for_lifecycle(
 }
 
 fn create_profile_runtime_settings_json(
-    provider_alias: &str,
+    model_config_id: &str,
     brain: &ProfileBrainMetadata,
     external_message_delivery_policy: ExternalMessageDeliveryPolicy,
     mcp_config: Option<&ProfileMcpConfig>,
@@ -2786,7 +2813,7 @@ fn create_profile_runtime_settings_json(
     source: Option<&CreateProfileSourceRequest>,
 ) -> Value {
     json!({
-        "provider_alias": provider_alias,
+        "modelConfigId": model_config_id,
         "brain": brain,
         "externalMessageDeliveryPolicy": external_message_delivery_policy,
         "skills_mode": "all",
@@ -4573,6 +4600,7 @@ mod tests {
             profiles: vec![profile("runner")],
             profile_registry: Vec::new(),
             request: CreateProfileRequest {
+                model_config_id: None,
                 profile_id: "field-created-profile".to_string(),
                 display_name: Some("Field Created Profile".to_string()),
                 soul_markdown: Some("# Field soul\n\n  Preserve spacing.\n".to_string()),
@@ -4713,6 +4741,7 @@ mod tests {
             profiles: vec![profile("runner")],
             profile_registry: Vec::new(),
             request: CreateProfileRequest {
+                model_config_id: None,
                 profile_id: "field-created-profile".to_string(),
                 display_name: None,
                 soul_markdown: None,
@@ -4817,6 +4846,7 @@ mod tests {
                 revision: Some(7),
             }],
             request: CreateProfileRequest {
+                model_config_id: None,
                 profile_id: "runner".to_string(),
                 display_name: None,
                 soul_markdown: None,
@@ -4865,6 +4895,7 @@ mod tests {
             profiles: vec![profile("runner")],
             profile_registry: Vec::new(),
             request: CreateProfileRequest {
+                model_config_id: None,
                 profile_id: "../bad".to_string(),
                 display_name: None,
                 soul_markdown: None,

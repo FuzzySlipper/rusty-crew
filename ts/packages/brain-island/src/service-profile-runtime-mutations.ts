@@ -7,7 +7,7 @@ import type {
 } from "@rusty-crew/contracts";
 import type {
   NativeBridgeModule,
-  NativeModelProviderRecord,
+  NativeModelEndpointRecord,
   NativeProfileRegistryMutationPlan,
   NativeProfileRegistryRecord,
   NativeProfileRegistryWrite,
@@ -38,7 +38,8 @@ export type ProfileRegistryWritePlan = NativeProfileRegistryMutationPlan;
 export interface ProfileRegistryRuntimeConfigMutationContext {
   bridge: Pick<
     NativeBridgeModule,
-    | "getModelProvider"
+    | "getModelConfiguration"
+    | "getModelEndpoint"
     | "getProfileRegistryRecord"
     | "listSimpleKv"
     | "putSimpleKv"
@@ -89,7 +90,7 @@ export interface EditableProfileMcpBinding {
 }
 
 interface EditableProfileRuntimeConfig {
-  providerAlias: string;
+  modelConfigId: string;
   externalMessageDeliveryPolicy: ExternalMessageDeliveryPolicy;
   brain?: { module?: string; strategy?: string };
   localToolProfileId?: string;
@@ -225,7 +226,7 @@ export async function planProfileRegistryRuntimeConfigWrite(
         JSON.stringify(runtimeConfig.mcpBindings),
       configReloadRequired: true,
       runtimeRebuildRecommended:
-        existing.runtimeConfig.providerAlias !== runtimeConfig.providerAlias ||
+        existing.runtimeConfig.modelConfigId !== runtimeConfig.modelConfigId ||
         JSON.stringify(existing.runtimeConfig.brain ?? {}) !==
           JSON.stringify(runtimeConfig.brain ?? {}) ||
         JSON.stringify(existing.runtimeConfig.contextPolicy) !==
@@ -371,7 +372,9 @@ async function editableRuntimeConfigForProfile(
     record.profileId as never,
   ).catch(() => undefined);
   const settings = optionalRecord(record.activeRuntimeSettingsJson) ?? {};
-  const providerAlias =
+  const modelConfigId =
+    optionalString(settings.modelConfigId) ??
+    profile?.modelConfigId ??
     optionalString(settings.providerAlias) ??
     optionalString(settings.provider_alias) ??
     profile?.providerAlias ??
@@ -388,17 +391,13 @@ async function editableRuntimeConfigForProfile(
       ? activeMcpBindings
       : profileMcpBindingsFromRegistryRecord(record);
   const runtimeConfig: EditableProfileRuntimeConfig = {
-    providerAlias,
+    modelConfigId,
     externalMessageDeliveryPolicy,
     brain:
       profile?.brain ??
       brainMetadataFromUnknown(settings.brain) ??
       defaultProfileBrainForModelProvider(
-        (await context.bridge.getModelProvider(providerAlias)) ??
-          ({
-            providerKind: "local",
-            protocol: "chat_completions",
-          } as NativeModelProviderRecord),
+        await modelEndpointForConfiguration(context, modelConfigId),
       ),
     localToolProfileId:
       profile?.localToolProfileId ??
@@ -428,9 +427,20 @@ async function editableRuntimeConfigFromBody(
   body: Record<string, unknown>,
   diagnostics: ProfileRegistryRuntimeConfigPlan["diagnostics"],
 ): Promise<EditableProfileRuntimeConfig> {
-  const providerAlias = Object.hasOwn(body, "providerAlias")
+  const legacyProviderAlias = Object.hasOwn(body, "providerAlias")
     ? requiredString(body.providerAlias, "providerAlias")
-    : existing.runtimeConfig.providerAlias;
+    : undefined;
+  if (legacyProviderAlias !== undefined) {
+    diagnostics.push({
+      severity: "warning",
+      code: "legacy_provider_alias_selection",
+      path: "providerAlias",
+      message: "providerAlias is compatibility-only; use modelConfigId",
+    });
+  }
+  const modelConfigId = Object.hasOwn(body, "modelConfigId")
+    ? requiredString(body.modelConfigId, "modelConfigId")
+    : (legacyProviderAlias ?? existing.runtimeConfig.modelConfigId);
   let externalMessageDeliveryPolicy =
     existing.runtimeConfig.externalMessageDeliveryPolicy;
   if (Object.hasOwn(body, "externalMessageDeliveryPolicy")) {
@@ -447,29 +457,45 @@ async function editableRuntimeConfigFromBody(
       });
     }
   }
-  const modelProvider = await context.bridge.getModelProvider(providerAlias);
-  if (modelProvider === undefined) {
+  const modelConfiguration =
+    await context.bridge.getModelConfiguration(modelConfigId);
+  let modelEndpoint: NativeModelEndpointRecord | undefined;
+  if (modelConfiguration === undefined) {
     diagnostics.push({
       severity: "error",
-      code: "model_provider_not_found",
-      path: "providerAlias",
-      message: `model provider alias ${providerAlias} was not found`,
+      code: "model_configuration_not_found",
+      path: "modelConfigId",
+      message: `model configuration ${modelConfigId} was not found`,
     });
-  } else if (modelProvider.status !== "active") {
+  } else if (modelConfiguration.status !== "active") {
     diagnostics.push({
       severity: "error",
-      code: "model_provider_not_active",
-      path: "providerAlias",
-      message: `model provider alias ${providerAlias} is ${modelProvider.status}; active provider required`,
+      code: "model_configuration_not_active",
+      path: "modelConfigId",
+      message: `model configuration ${modelConfigId} is ${modelConfiguration.status}; active configuration required`,
     });
+  } else {
+    modelEndpoint = await context.bridge.getModelEndpoint(
+      modelConfiguration.endpointId,
+    );
+    if (modelEndpoint === undefined || modelEndpoint.status !== "active") {
+      diagnostics.push({
+        severity: "error",
+        code: "model_endpoint_not_active",
+        path: "modelConfigId",
+        message: `model endpoint ${modelConfiguration.endpointId} is not active for model configuration ${modelConfigId}`,
+      });
+    }
   }
 
   let brain = Object.hasOwn(body, "brain")
     ? profileBrainFromBody(body.brain)
-    : Object.hasOwn(body, "providerAlias") && modelProvider !== undefined
-      ? defaultProfileBrainForModelProvider(modelProvider)
+    : (Object.hasOwn(body, "modelConfigId") ||
+          legacyProviderAlias !== undefined) &&
+        modelEndpoint !== undefined
+      ? defaultProfileBrainForModelProvider(modelEndpoint)
       : existing.runtimeConfig.brain;
-  if (modelProvider !== undefined && brain !== undefined) {
+  if (modelEndpoint !== undefined && brain !== undefined) {
     try {
       const selection = await context.bridge.planBrainSelection({
         ...(brain.module === undefined
@@ -478,8 +504,7 @@ async function editableRuntimeConfigFromBody(
         ...(brain.strategy === undefined
           ? {}
           : { configuredStrategyId: brain.strategy }),
-        providerProtocol: modelProvider.protocol,
-        providerKind: modelProvider.providerKind,
+        providerProtocol: modelEndpoint.protocol,
       });
       brain = {
         module: selection.module_id,
@@ -541,7 +566,7 @@ async function editableRuntimeConfigFromBody(
   diagnostics.push(...contextPolicy.diagnostics);
 
   return {
-    providerAlias,
+    modelConfigId,
     externalMessageDeliveryPolicy,
     brain,
     localToolProfileId,
@@ -557,8 +582,7 @@ function profileRuntimeSettingsJson(
   runtimeConfig: EditableProfileRuntimeConfig,
 ): Record<string, unknown> {
   return compactRecord({
-    provider_alias: runtimeConfig.providerAlias,
-    providerAlias: runtimeConfig.providerAlias,
+    modelConfigId: runtimeConfig.modelConfigId,
     externalMessageDeliveryPolicy: runtimeConfig.externalMessageDeliveryPolicy,
     brain: runtimeConfig.brain,
     skills_mode: "all",
@@ -583,7 +607,7 @@ function profileFileRuntimeConfig(
   runtimeConfig: EditableProfileRuntimeConfig,
 ): Record<string, unknown> {
   return compactRecord({
-    providerAlias: runtimeConfig.providerAlias,
+    modelConfigId: runtimeConfig.modelConfigId,
     externalMessageDeliveryPolicy: runtimeConfig.externalMessageDeliveryPolicy,
     brain: runtimeConfig.brain,
     localToolProfileId: runtimeConfig.localToolProfileId,
@@ -596,9 +620,10 @@ function applyEditableRuntimeConfigToProfileJson(
   profileConfig: Record<string, unknown>,
   runtimeConfig: EditableProfileRuntimeConfig,
 ): void {
-  profileConfig.providerAlias = runtimeConfig.providerAlias;
+  profileConfig.modelConfigId = runtimeConfig.modelConfigId;
   profileConfig.externalMessageDeliveryPolicy =
     runtimeConfig.externalMessageDeliveryPolicy;
+  delete profileConfig.providerAlias;
   delete profileConfig.modelConfig;
   if (runtimeConfig.brain === undefined) {
     delete profileConfig.brain;
@@ -836,12 +861,32 @@ function requiredRevision(body: Record<string, unknown>): number {
 }
 
 function defaultProfileBrainForModelProvider(
-  provider: NativeModelProviderRecord,
+  provider: Pick<NativeModelEndpointRecord, "protocol">,
 ): { module?: string; strategy?: string } {
   if (provider.protocol === "responses") {
     return { module: "openai-responses" };
   }
   return { module: "chat-completions" };
+}
+
+async function modelEndpointForConfiguration(
+  context: ProfileRegistryRuntimeConfigMutationContext,
+  modelConfigId: string,
+): Promise<NativeModelEndpointRecord> {
+  const configuration =
+    await context.bridge.getModelConfiguration(modelConfigId);
+  if (configuration === undefined) {
+    throw new Error(`model configuration ${modelConfigId} was not found`);
+  }
+  const endpoint = await context.bridge.getModelEndpoint(
+    configuration.endpointId,
+  );
+  if (endpoint === undefined) {
+    throw new Error(
+      `model configuration ${modelConfigId} references missing endpoint ${configuration.endpointId}`,
+    );
+  }
+  return endpoint;
 }
 
 function profileBrainFromBody(

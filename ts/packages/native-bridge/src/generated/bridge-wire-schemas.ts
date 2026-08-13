@@ -9602,11 +9602,17 @@ export const bridgeWireSchemaArtifact = {
               ],
               "type": "object"
             },
+            "model_config_id": {
+              "type": "string"
+            },
             "profile_id": {
               "type": "string"
             },
             "provider_alias": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "skills_mode": {
               "type": "string"
@@ -9614,7 +9620,7 @@ export const bridgeWireSchemaArtifact = {
           },
           "required": [
             "profile_id",
-            "provider_alias",
+            "model_config_id",
             "model_config",
             "brain",
             "external_message_delivery_policy",
@@ -28802,6 +28808,12 @@ export const bridgeWireSchemaArtifact = {
                 "status"
               ],
               "type": "object"
+            },
+            "modelConfigId": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "name": {
               "type": "string"

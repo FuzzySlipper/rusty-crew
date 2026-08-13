@@ -600,6 +600,15 @@ export interface RuntimeBufferView {
 }
 
 export interface BrainModelConfig {
+  /** Stable normalized selection identity. Absent only for compatibility imports. */
+  modelConfigId?: string;
+  modelConfigRevision?: number;
+  endpointId?: string;
+  endpointRevision?: number;
+  credentialId?: string;
+  credentialRevision?: number;
+  authScheme?: "none" | "bearer_api_key" | "openai_codex_oauth";
+  promptCacheTransport?: "none" | "openrouter_anthropic";
   provider: string;
   modelName: string;
   baseUrl?: string;

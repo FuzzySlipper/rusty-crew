@@ -1336,12 +1336,16 @@ export type LogicalTurnBindingSnapshot = {
   brainStrategyId: string;
   credentialId?: string | null;
   credentialRevision?: number | null;
+  endpointId: string;
+  endpointRevision: number;
+  modelConfigId: string;
+  modelConfigRevision: number;
   profileId: string;
   profileRevision: number;
   promptFingerprint: string;
-  providerAlias: string;
+  providerAlias?: string | null;
   providerFingerprint: string;
-  providerRevision: number;
+  providerRevision?: number | null;
   toolRegistryRevision: string;
   toolSelectionFingerprint: string;
 };

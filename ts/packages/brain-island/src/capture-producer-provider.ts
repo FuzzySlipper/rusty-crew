@@ -10,14 +10,18 @@ import type {
 } from "./capture-memory-proposals.js";
 import type { BackgroundReviewDenseMemoryRecord } from "./background-memory-skill-review.js";
 import type { LoadedSkill } from "./profile-loading.js";
+import { resolveModelConfigurationForBrain } from "./model-runtime-resolution.js";
 
 export interface CaptureProducerProviderInput {
   runId: string;
   profileId: ProfileId | string;
-  providerAlias: string;
+  modelConfigId: string;
   bridge: Pick<
     NativeBridgeModule,
-    "getModelProvider" | "getModelProviderSecret"
+    | "getModelConfiguration"
+    | "getModelEndpoint"
+    | "getServiceCredential"
+    | "getServiceCredentialSecret"
   >;
   sessionActivityDigests: readonly SessionActivityDigest[];
   denseProfileMemory?: readonly BackgroundReviewDenseMemoryRecord[];
@@ -54,11 +58,11 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 export async function runStructuredCaptureProvider(
   input: CaptureProducerProviderInput,
 ): Promise<CaptureProducerProviderResult> {
-  const providerAlias = input.providerAlias.trim();
-  if (!providerAlias) {
+  const modelConfigId = input.modelConfigId.trim();
+  if (!modelConfigId) {
     return {
       proposals: [],
-      skippedReasons: ["capture_provider_alias_missing"],
+      skippedReasons: ["capture_model_config_id_missing"],
     };
   }
   if (input.sessionActivityDigests.length === 0) {
@@ -67,22 +71,28 @@ export async function runStructuredCaptureProvider(
       skippedReasons: ["capture_no_session_activity_digests"],
     };
   }
-  const provider = await input.bridge.getModelProvider(providerAlias);
-  if (!provider || provider.status !== "active") {
+  let modelConfig;
+  try {
+    modelConfig = await resolveModelConfigurationForBrain(
+      input.bridge,
+      modelConfigId,
+    );
+  } catch {
     return {
       proposals: [],
-      skippedReasons: ["capture_provider_unavailable"],
+      skippedReasons: ["capture_model_configuration_unavailable"],
     };
   }
-  if (provider.protocol !== "chat_completions") {
+  if (modelConfig.api !== "openai-completions") {
     return {
       proposals: [],
-      skippedReasons: ["capture_provider_protocol_unsupported"],
+      skippedReasons: ["capture_model_protocol_unsupported"],
     };
   }
-  const secret = provider.credential.hasSecret
-    ? await input.bridge.getModelProviderSecret(providerAlias)
-    : undefined;
+  const secret =
+    modelConfig.apiKeyEnv === undefined
+      ? undefined
+      : process.env[modelConfig.apiKeyEnv];
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
@@ -90,7 +100,7 @@ export async function runStructuredCaptureProvider(
   );
   try {
     const output = (await (input.transport ?? fetchJson)(
-      `${(provider.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "")}/chat/completions`,
+      `${(modelConfig.baseUrl ?? "https://api.openai.com/v1").replace(/\/+$/, "")}/chat/completions`,
       {
         method: "POST",
         headers: {
@@ -98,12 +108,12 @@ export async function runStructuredCaptureProvider(
           ...(secret ? { authorization: `Bearer ${secret}` } : {}),
         },
         body: JSON.stringify({
-          model: provider.modelId,
+          model: modelConfig.modelName,
           temperature:
-            provider.temperatureMilli === undefined
+            modelConfig.temperatureMilli === undefined
               ? undefined
-              : provider.temperatureMilli / 1_000,
-          max_tokens: provider.maxOutputTokens,
+              : modelConfig.temperatureMilli / 1_000,
+          max_tokens: modelConfig.maxOutputTokens,
           response_format: { type: "json_object" },
           messages: [
             {

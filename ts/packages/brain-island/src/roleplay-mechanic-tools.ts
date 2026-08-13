@@ -24,6 +24,7 @@ export interface RoleplayMechanicToolDetails {
 interface RoleplayMechanicProfilePlan {
   config: {
     name: string;
+    modelConfigId?: string;
     providerAlias?: string;
     autoMonitor: {
       enabled: false;
@@ -182,7 +183,7 @@ export function getMechanicCapabilitiesTool(input: {
       try {
         const plan = (await input.bridge.planRoleplayMechanicProfile({
           name: input.profile.displayName ?? input.profile.profileId,
-          providerAlias: input.profile.providerAlias,
+          modelConfigId: input.profile.modelConfigId,
           autoMonitor: input.profile.roleplayMechanic.autoMonitor,
         })) as RoleplayMechanicProfilePlan;
         return mechanicResult("read", {
@@ -278,7 +279,7 @@ export function inspectRoleplaySceneTool(input: {
               status: "available",
               profileId: profile.profileId,
               displayName: profile.displayName,
-              providerAlias: activeSettings?.providerAlias,
+              modelConfigId: activeSettings?.modelConfigId,
               narratorConfig: activeSettings?.roleplayNarrator,
             }
           : { status: "missing" },

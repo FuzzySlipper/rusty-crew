@@ -126,6 +126,7 @@ function generatedProfileYaml(
       defaultSessionKind: record.defaultSessionKind,
       agentId: record.agentId,
       ownerId: record.ownerId,
+      modelConfigId: record.modelConfigId,
       source: record.source,
       fallbackStatus: record.fallbackStatus,
     }),
@@ -204,6 +205,7 @@ function generatedRegistryJson(
       defaultSessionKind: record.defaultSessionKind,
       agentId: record.agentId,
       ownerId: record.ownerId,
+      modelConfigId: record.modelConfigId,
       promptSoulMarkdown:
         record.source === "registry" ? record.promptSoulMarkdown : undefined,
       promptMemoryMarkdown:

@@ -5040,6 +5040,18 @@
             "minimum": 0,
             "type": ["integer", "null"]
           },
+          "endpointId": { "type": "string" },
+          "endpointRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "modelConfigId": { "type": "string" },
+          "modelConfigRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "profileId": { "type": "string" },
           "profileRevision": {
             "format": "uint64",
@@ -5047,12 +5059,12 @@
             "type": "integer"
           },
           "promptFingerprint": { "type": "string" },
-          "providerAlias": { "type": "string" },
+          "providerAlias": { "type": ["string", "null"] },
           "providerFingerprint": { "type": "string" },
           "providerRevision": {
             "format": "uint64",
             "minimum": 0,
-            "type": "integer"
+            "type": ["integer", "null"]
           },
           "toolRegistryRevision": { "type": "string" },
           "toolSelectionFingerprint": { "type": "string" }
@@ -5065,8 +5077,10 @@
           "toolRegistryRevision",
           "brainModuleId",
           "brainStrategyId",
-          "providerAlias",
-          "providerRevision",
+          "modelConfigId",
+          "modelConfigRevision",
+          "endpointId",
+          "endpointRevision",
           "providerFingerprint"
         ],
         "type": "object"

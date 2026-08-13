@@ -64,7 +64,7 @@
           "maxFindings": 10,
           "maxCandidates": 6,
           "llmReviewEnabled": true,
-          "captureProviderAlias": "review-provider",
+          "captureModelConfigId": "review-provider",
           "captureMaxProposals": 4,
           "dryRun": false,
           "reason": "profile parity-runner backgroundReview"

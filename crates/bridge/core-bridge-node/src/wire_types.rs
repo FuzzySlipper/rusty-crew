@@ -44,6 +44,17 @@ pub struct JsSessionWorkspace {
 
 #[napi_derive::napi(object)]
 pub struct JsBrainModelConfig {
+    pub model_config_id: Option<String>,
+    pub model_config_revision: Option<f64>,
+    pub endpoint_id: Option<String>,
+    pub endpoint_revision: Option<f64>,
+    pub credential_id: Option<String>,
+    pub credential_revision: Option<f64>,
+    pub credential_kind: Option<String>,
+    pub protocol: Option<String>,
+    pub dialect: Option<String>,
+    pub auth_scheme: Option<String>,
+    pub prompt_cache_transport: Option<String>,
     pub provider: String,
     pub model_name: String,
     pub temperature_milli: Option<u32>,

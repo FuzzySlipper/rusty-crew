@@ -25,6 +25,8 @@ pub enum RoleplayMechanicAutoMonitorStatus {
 pub struct RoleplayMechanicConfig {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_config_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_alias: Option<String>,
     pub auto_monitor: RoleplayMechanicAutoMonitorConfig,
 }
@@ -54,6 +56,11 @@ pub fn plan_mechanic_profile(
     if let Some(provider_alias) = provider_alias.as_deref() {
         validate_provider_alias(provider_alias)?;
     }
+    let model_config_id = optional_trimmed_string(raw, &["modelConfigId", "model_config_id"])
+        .or_else(|| provider_alias.clone());
+    if let Some(model_config_id) = model_config_id.as_deref() {
+        validate_model_config_id(model_config_id)?;
+    }
 
     let auto_monitor = optional_bool(raw, &["autoMonitor", "auto_monitor"])?
         .or_else(|| {
@@ -73,6 +80,7 @@ pub fn plan_mechanic_profile(
 
     let config = RoleplayMechanicConfig {
         name,
+        model_config_id,
         provider_alias,
         auto_monitor: RoleplayMechanicAutoMonitorConfig {
             enabled: false,
@@ -154,6 +162,20 @@ fn validate_provider_alias(value: &str) -> RoleplayDomainResult<()> {
     Ok(())
 }
 
+fn validate_model_config_id(value: &str) -> RoleplayDomainResult<()> {
+    if value.len() > 80
+        || !value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || "_.-".contains(character))
+    {
+        return Err(RoleplayDomainError::invalid(
+            "roleplay_mechanic_model_config_id_invalid",
+            "modelConfigId must contain only letters, numbers, underscore, dot, or hyphen and be at most 80 characters",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,16 +184,17 @@ mod tests {
     fn plans_mechanic_profile_with_explicit_inactive_auto_monitor() {
         let plan = plan_mechanic_profile(serde_json::json!({
             "name": "Maren",
-            "providerAlias": "deepseek-flash",
+            "modelConfigId": "deepseek-flash",
             "autoMonitor": false
         }))
         .expect("mechanic profile plan");
 
         assert_eq!(plan.config.name, "Maren");
         assert_eq!(
-            plan.config.provider_alias.as_deref(),
+            plan.config.model_config_id.as_deref(),
             Some("deepseek-flash")
         );
+        assert_eq!(plan.config.provider_alias, None);
         assert!(!plan.config.auto_monitor.enabled);
         assert!(!plan.config.auto_monitor.available);
         assert_eq!(

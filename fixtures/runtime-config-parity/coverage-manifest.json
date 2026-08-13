@@ -8,6 +8,10 @@
           "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
         },
         {
+          "path": "profiles[].background_review.capture_model_config_id",
+          "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
+        },
+        {
           "path": "profiles[].background_review.capture_provider_alias",
           "reason": "Background-review execution payload fields are owned by RuntimeGraphPlanInput; the legacy validation planner does not consume them."
         },
@@ -48,6 +52,10 @@
           "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
         },
         {
+          "path": "profiles[].background_review.capture_model_config_id",
+          "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
+        },
+        {
           "path": "profiles[].background_review.capture_provider_alias",
           "reason": "Existing-profile background-review execution fields do not participate in create-profile planning and are covered by RuntimeGraphPlanInput."
         },
@@ -83,6 +91,10 @@
     },
     "RuntimeGraphPlanInput": {
       "exemptFieldPaths": [
+        {
+          "path": "profiles[].background_review.capture_provider_alias",
+          "reason": "Compatibility-only capture selector is covered by legacy input diagnostics; canonical graph fixtures use capture_model_config_id."
+        },
         {
           "path": "runtime_config.brains[].implementation_id",
           "reason": "Intentionally omitted to prove canonical brain implementation-id defaulting; explicit ids are covered by RuntimeConfigValidationInput."

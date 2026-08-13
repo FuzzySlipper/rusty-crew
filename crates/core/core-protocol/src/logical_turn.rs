@@ -102,8 +102,14 @@ pub struct LogicalTurnBindingSnapshot {
     pub tool_registry_revision: String,
     pub brain_module_id: String,
     pub brain_strategy_id: String,
-    pub provider_alias: String,
-    pub provider_revision: u64,
+    pub model_config_id: String,
+    pub model_config_revision: u64,
+    pub endpoint_id: String,
+    pub endpoint_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_alias: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_revision: Option<u64>,
     pub provider_fingerprint: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_id: Option<String>,

@@ -18,6 +18,7 @@ import { buildProfileRoleAssembly } from "./profile-role-assembly.js";
 import { loadServiceProfileContext } from "./service-profile-context.js";
 import { defaultProfileBrainForModelProvider } from "./service-profile-admin-mutations.js";
 import { resolveReasoningEffort } from "./reasoning-effort-policy.js";
+import { resolveModelConfigurationForBrain } from "./model-runtime-resolution.js";
 import type { ToolCallDebugStore } from "./tool-call-debug-store.js";
 import type { ProviderRequestDebugStore } from "./provider-request-debug-store.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
@@ -554,31 +555,34 @@ export async function rustyViewSessionContextUsage(
 
   const settings =
     optionalRecord(registryRecord?.activeRuntimeSettingsJson) ?? {};
+  const modelConfigId = optionalString(settings.modelConfigId);
   const providerAlias =
     optionalString(settings.providerAlias) ??
     optionalString(settings.provider_alias) ??
     "default";
-  const provider = await context.bridge
-    .getModelProvider(providerAlias)
-    .catch((error) => {
-      diagnostics.push({
-        severity: "warning",
-        code: "model_provider_read_failed",
-        message: errorMessage(error, "model provider read failed"),
-      });
-      return undefined;
+  const provider = await (
+    modelConfigId === undefined
+      ? context.bridge.getModelProvider(providerAlias)
+      : normalizedDiagnosticProvider(context.bridge, modelConfigId)
+  ).catch((error) => {
+    diagnostics.push({
+      severity: "warning",
+      code: "model_selection_read_failed",
+      message: errorMessage(error, "model selection read failed"),
     });
+    return undefined;
+  });
   if (provider === undefined) {
     diagnostics.push({
       severity: "error",
-      code: "model_provider_missing",
-      message: `model provider alias ${providerAlias} was not found`,
+      code: "model_selection_missing",
+      message: `model selection ${modelConfigId ?? providerAlias} was not found`,
     });
   } else if (provider.status !== "active") {
     diagnostics.push({
       severity: "warning",
-      code: "model_provider_not_active",
-      message: `model provider alias ${providerAlias} is ${provider.status}`,
+      code: "model_selection_not_active",
+      message: `model selection ${modelConfigId ?? providerAlias} is ${provider.status}`,
     });
   }
 
@@ -635,6 +639,8 @@ export async function rustyViewSessionContextUsage(
     profilesDir: context.runtimeConfig.profilesDir,
     skillsDir: context.runtimeConfig.skillsDir,
     profileId: input.session.profileId,
+    modelConfigResolver: (modelConfigId) =>
+      resolveModelConfigurationForBrain(context.bridge, modelConfigId),
     modelProviderResolver: (alias) =>
       context.resolveModelProviderForBrain(alias),
   }).catch((error) => {
@@ -767,10 +773,24 @@ export async function rustyViewSessionContextUsage(
     agent_id: input.session.agentId,
     profile_id: input.session.profileId,
     provider: {
-      alias: providerAlias,
+      alias: modelConfigId ?? providerAlias,
+      model_config_id: modelConfigId,
+      model_config_revision:
+        modelConfigId === undefined ? undefined : provider?.revision,
+      endpoint_id:
+        modelConfigId === undefined
+          ? undefined
+          : optionalString(optionalRecord(provider?.metadataJson)?.endpointId),
+      endpoint_revision:
+        modelConfigId === undefined
+          ? undefined
+          : optionalNumber(
+              optionalRecord(provider?.metadataJson)?.endpointRevision,
+            ),
       status: provider?.status ?? "missing",
       protocol: provider?.protocol,
-      provider_kind: provider?.providerKind,
+      provider_kind:
+        modelConfigId === undefined ? provider?.providerKind : undefined,
       display_name: provider?.displayName,
       base_url_host: redactedUrl.host,
       base_url_redacted: redactedUrl.redacted,
@@ -999,6 +1019,51 @@ function providerBrainBackend(
     : "chat-completions";
 }
 
+async function normalizedDiagnosticProvider(
+  bridge: NativeBridgeModule,
+  modelConfigId: string,
+): Promise<NativeModelProviderRecord | undefined> {
+  const configuration = await bridge.getModelConfiguration(modelConfigId);
+  if (configuration === undefined) return undefined;
+  const endpoint = await bridge.getModelEndpoint(configuration.endpointId);
+  if (endpoint === undefined) return undefined;
+  return {
+    alias: configuration.modelConfigId,
+    status: configuration.status,
+    protocol: endpoint.protocol,
+    providerKind: "compatibility-only",
+    displayName: configuration.displayName,
+    description: configuration.description,
+    baseUrl: endpoint.baseUrl,
+    modelId: configuration.modelId,
+    contextWindowTokens: configuration.contextWindowTokens,
+    maxOutputTokens: configuration.maxOutputTokens,
+    temperatureMilli: configuration.temperatureMilli,
+    reasoningEffort: configuration.reasoningEffort,
+    reasoningFormat: configuration.reasoningFormat,
+    responsesDialect:
+      endpoint.protocol === "responses"
+        ? (endpoint.wireDialect as never)
+        : undefined,
+    chatCompletionsDialect:
+      endpoint.protocol === "chat_completions"
+        ? (endpoint.wireDialect as never)
+        : "standard",
+    thinkingMode: configuration.thinkingMode,
+    reasoningHistory: configuration.reasoningHistory,
+    reasoningBudgetTokens: configuration.reasoningBudgetTokens,
+    promptCaching: configuration.promptCachingPolicy,
+    credential: { hasSecret: endpoint.credentialId !== undefined },
+    metadataJson: {
+      endpointId: endpoint.endpointId,
+      endpointRevision: endpoint.revision,
+    },
+    revision: configuration.revision,
+    createdAt: configuration.createdAt,
+    updatedAt: configuration.updatedAt,
+  };
+}
+
 function redactedProviderUrl(baseUrl: string | undefined): {
   host?: string;
   redacted?: string;
@@ -1010,6 +1075,12 @@ function redactedProviderUrl(baseUrl: string | undefined): {
   } catch {
     return { redacted: "invalid-url" };
   }
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 export async function listRustyViewMessageSlots(

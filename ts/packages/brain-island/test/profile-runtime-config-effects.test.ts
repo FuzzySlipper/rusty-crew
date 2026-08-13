@@ -56,7 +56,7 @@ test("runtime config effects rebuild the active brain when the plan requires it"
       next: record,
       nextWrite: {} as never,
       runtimeConfig: {
-        providerAlias: "provider-next",
+        modelConfigId: "model-next",
         externalMessageDeliveryPolicy: "serial_next_turn",
         brain: { module: "chat-completions" },
         contextPolicy: {
@@ -93,11 +93,11 @@ test("runtime config effects rebuild the active brain when the plan requires it"
     assert.deepEqual(calls, ["apply", "rebuild:profile-alpha"]);
     assert.equal(result.brainRebuilt, true);
     const saved = JSON.parse(await readFile(profilePath, "utf8")) as {
-      providerAlias?: string;
+      modelConfigId?: string;
       externalMessageDeliveryPolicy?: string;
       contextPolicy?: { strategyId?: string };
     };
-    assert.equal(saved.providerAlias, "provider-next");
+    assert.equal(saved.modelConfigId, "model-next");
     assert.equal(saved.externalMessageDeliveryPolicy, "serial_next_turn");
     assert.equal(saved.contextPolicy?.strategyId, "rolling_summary_compaction");
     assert.equal(result.externalBindingRebuildRecommended, true);

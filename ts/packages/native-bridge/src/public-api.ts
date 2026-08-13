@@ -1552,7 +1552,8 @@ export interface NativeBrainSelectionRequest {
   configuredModuleId?: string;
   configuredStrategyId?: string;
   providerProtocol: NativeBrainProviderProtocol;
-  providerKind: string;
+  /** Compatibility-only vendor label; brain selection is protocol-driven. */
+  providerKind?: string;
   roleplayNarratorEnabled?: boolean;
 }
 
@@ -1693,6 +1694,7 @@ export interface NativeCreateProfileRequest {
   implementationId?: string;
   kind?: "full" | "worker" | "delegated";
   workspaceCwd?: string;
+  modelConfigId?: string;
   providerAlias?: string;
   externalMessageDeliveryPolicy?: ExternalMessageDeliveryPolicy;
   modelConfig?: NativeProfileModelConfigSeed;
@@ -1823,7 +1825,8 @@ export interface NativeCreateProfileDerivedRuntimeAction {
 export interface NativeCreateProfileSeedMetadata {
   profileId: string;
   displayName?: string;
-  providerAlias: string;
+  modelConfigId: string;
+  providerAlias?: string;
   modelConfig: NativeProfileModelConfigSeed;
   brain: {
     module?: string;
