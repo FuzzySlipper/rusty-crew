@@ -49,7 +49,7 @@ pub(super) fn apply_postgres_telegram_operator_consults(
     schema: &str,
 ) -> CoreResult<()> {
     tx.batch_execute(&format!(
-        "CREATE TABLE {schema}.telegram_operator_consults (
+        "CREATE TABLE IF NOT EXISTS {schema}.telegram_operator_consults (
             consult_id TEXT PRIMARY KEY,
             idempotency_key TEXT NOT NULL UNIQUE,
             binding_id TEXT NOT NULL REFERENCES {schema}.telegram_install_diplomat_bindings(binding_id),
@@ -59,9 +59,9 @@ pub(super) fn apply_postgres_telegram_operator_consults(
             updated_at TEXT NOT NULL,
             record_json TEXT NOT NULL
          );
-         CREATE INDEX telegram_operator_consult_delivery_idx
+         CREATE INDEX IF NOT EXISTS telegram_operator_consult_delivery_idx
             ON {schema}.telegram_operator_consults(status, updated_at);
-         CREATE INDEX telegram_operator_consult_session_idx
+         CREATE INDEX IF NOT EXISTS telegram_operator_consult_session_idx
             ON {schema}.telegram_operator_consults(session_id, updated_at DESC);"
     ))
     .map_err(|error| postgres_error("create PostgreSQL Telegram operator consult state", error))
