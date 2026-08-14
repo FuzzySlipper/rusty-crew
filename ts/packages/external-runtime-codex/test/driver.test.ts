@@ -1171,3 +1171,32 @@ test("every driver response has a consumed contract and malformed results fail c
   assert.equal(authority.faults.at(-1)?.reasonCode, "malformed_response");
   assert.equal(authority.faults.at(-1)?.fatal, true);
 });
+
+test("thread start rejects the Codex-reserved mcp dynamic namespace before transport", async () => {
+  const transport = new FakeTransport();
+  const authority = new FakeAuthority();
+  configureInitialize(transport);
+  const driver = new CodexAppServerDriver(transport, authority);
+  await driver.connect();
+  const sentBefore = transport.sent.length;
+
+  assert.throws(
+    () =>
+      driver.threadStart({
+        cwd: "/tmp",
+        approvalPolicy: "never",
+        sandbox: "danger-full-access",
+        ephemeral: false,
+        dynamicTools: [
+          {
+            type: "namespace",
+            name: "mcp",
+            description: "Reserved namespace probe",
+            tools: [],
+          },
+        ],
+      }),
+    /dynamic tool namespace mcp is reserved by Codex/,
+  );
+  assert.equal(transport.sent.length, sentBefore);
+});

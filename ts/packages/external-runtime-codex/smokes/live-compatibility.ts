@@ -11,6 +11,7 @@ import {
   UnixWebSocketTransport,
   type CodexControllerAuthority,
   type CodexProtocolFault,
+  type DynamicToolSpec,
   type NeutralExternalRuntimeEvent,
   type ServerRequestResolution,
 } from "../src/index.js";
@@ -26,6 +27,24 @@ const scratch =
   process.env.CODEX_APP_SERVER_DRIVER_SMOKE_ROOT ??
   `/tmp/rusty-crew-codex-driver-${Date.now()}`;
 const token = randomUUID();
+const PROFILE_MCP_NAMESPACE_PROBE: DynamicToolSpec = {
+  type: "namespace",
+  name: "rusty_crew_mcp",
+  description: "Rusty Crew exact-session profile MCP namespace probe",
+  tools: [
+    {
+      type: "function",
+      name: "den__get_task",
+      description: "Profile MCP namespace acceptance probe",
+      inputSchema: {
+        type: "object",
+        properties: { task_id: { type: "integer" } },
+        required: ["task_id"],
+        additionalProperties: false,
+      },
+    },
+  ],
+};
 
 class LiveAuthority implements CodexControllerAuthority {
   readonly events: NeutralExternalRuntimeEvent[] = [];
@@ -141,7 +160,10 @@ try {
     approvalPolicy: "never",
     sandbox: "danger-full-access",
     ephemeral: false,
-    dynamicTools: [...CODEX_COORDINATION_DYNAMIC_TOOLS],
+    dynamicTools: [
+      ...CODEX_COORDINATION_DYNAMIC_TOOLS,
+      PROFILE_MCP_NAMESPACE_PROBE,
+    ],
   });
   stage = "dynamic-tool turn start";
   const turn = await first.turnStart({

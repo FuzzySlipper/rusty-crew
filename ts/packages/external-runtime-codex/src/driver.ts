@@ -435,6 +435,13 @@ export class CodexAppServerDriver {
     params: ThreadStartParams,
     signal?: AbortSignal,
   ): Promise<ThreadStartResponse> {
+    for (const dynamicTool of params.dynamicTools ?? []) {
+      if (dynamicTool.type === "namespace" && dynamicTool.name === "mcp") {
+        throw new Error(
+          "dynamic tool namespace mcp is reserved by Codex; use an adapter-owned namespace",
+        );
+      }
+    }
     return this.#request("thread/start", params, signal);
   }
 

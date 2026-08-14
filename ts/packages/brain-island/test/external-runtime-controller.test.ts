@@ -1535,7 +1535,7 @@ test("external creation reconciles the exact Crew session before composing profi
         return [
           {
             type: "namespace" as const,
-            name: "mcp",
+            name: "rusty_crew_mcp",
             description: "Exact-session profile MCP tools",
             tools: [
               {
@@ -1573,19 +1573,22 @@ test("external creation reconciles the exact Crew session before composing profi
       name?: string;
       tools?: Array<{ name?: string }>;
     }>;
-    assert.deepEqual(namespaces.find((entry) => entry.name === "mcp")?.tools, [
-      {
-        type: "function",
-        name: "den__get_task",
-        description: "Read one Den task",
-        inputSchema: {
-          type: "object",
-          properties: { taskId: { type: "number" } },
-          required: ["taskId"],
-          additionalProperties: false,
+    assert.deepEqual(
+      namespaces.find((entry) => entry.name === "rusty_crew_mcp")?.tools,
+      [
+        {
+          type: "function",
+          name: "den__get_task",
+          description: "Read one Den task",
+          inputSchema: {
+            type: "object",
+            properties: { taskId: { type: "number" } },
+            required: ["taskId"],
+            additionalProperties: false,
+          },
         },
-      },
-    ]);
+      ],
+    );
   } finally {
     await fixture.cleanup();
   }
@@ -1606,7 +1609,7 @@ test("dynamic tool refresh preserves the applied prompt and exact Crew identity 
       profileDynamicTools: async () => [
         {
           type: "namespace" as const,
-          name: "mcp",
+          name: "rusty_crew_mcp",
           description: "Exact-session profile MCP tools",
           tools: [
             {
@@ -1690,7 +1693,7 @@ test("dynamic tool refresh preserves the applied prompt and exact Crew identity 
     }>;
     assert.deepEqual(
       namespaces
-        .find((entry) => entry.name === "mcp")
+        .find((entry) => entry.name === "rusty_crew_mcp")
         ?.tools?.map((tool) => tool.name),
       ["den__get_task_v2"],
     );

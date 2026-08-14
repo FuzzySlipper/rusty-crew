@@ -3841,6 +3841,11 @@ async function externalProfileMcpCandidates(
   return catalog.candidatesForSession(session);
 }
 
+// Codex reserves the literal `mcp` dynamic-tool namespace for its native MCP
+// integration. Crew profile MCP tools are adapter-provided dynamic tools, so
+// they need a Crew-owned namespace at the app-server boundary.
+const EXTERNAL_PROFILE_MCP_NAMESPACE = "rusty_crew_mcp";
+
 async function externalProfileMcpDynamicTools(
   state: ServiceState,
   binding: ExternalAgentBinding,
@@ -3850,7 +3855,7 @@ async function externalProfileMcpDynamicTools(
   return [
     {
       type: "namespace" as const,
-      name: "mcp",
+      name: EXTERNAL_PROFILE_MCP_NAMESPACE,
       description:
         "MCP capabilities selected by this Rusty Crew profile and materialized for this exact session.",
       tools: candidates.map(({ candidate }) => ({
@@ -3872,7 +3877,7 @@ async function resolveExternalProfileMcpToolCall(
   },
   externalBinding: ExternalAgentBinding,
 ) {
-  if (params.namespace !== "mcp") return undefined;
+  if (params.namespace !== EXTERNAL_PROFILE_MCP_NAMESPACE) return undefined;
   const candidates = await externalProfileMcpCandidates(state, externalBinding);
   const selected = candidates.find(
     ({ candidate }) => candidate.name === params.tool,
