@@ -1830,6 +1830,18 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
       },
       expectedRevision: before.revision,
     });
+    await fixture.bridge.putAgentRoute({
+      routeKey: "dynamic-catalog-reconnect-route",
+      label: "Dynamic catalog reconnect route",
+      enabled: true,
+      target: {
+        type: "managed_external",
+        agentId: stale.agentId ?? "missing-agent",
+        bindingId: stale.bindingId,
+        bindingRevision: stale.revision,
+      },
+      updatedAt: new Date().toISOString(),
+    });
     await fixture.controller.stop();
 
     recoveredController = new ServiceExternalRuntimeController({
@@ -1853,6 +1865,16 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
     assert.equal(after.sessionId, before.sessionId);
     assert.equal(after.agentId, before.agentId);
     assert.equal(after.label, before.label);
+    const routeAfterReconnect = await fixture.bridge.getAgentRouteResolution(
+      "dynamic-catalog-reconnect-route",
+    );
+    assert.equal(routeAfterReconnect?.routable, true);
+    assert.equal(
+      routeAfterReconnect?.route?.target.type === "managed_external"
+        ? routeAfterReconnect.route.target.bindingRevision
+        : undefined,
+      after.revision,
+    );
     assert.ok(
       fixture.transport.archivedThreadIds.has(before.nativeThreadId as string),
     );
@@ -1921,6 +1943,66 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
     );
   } finally {
     await recoveredController?.stop().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
+test("profile refresh repairs a curated route after dynamic catalog replacement", async () => {
+  const fixture = await externalCreationFixture(false);
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "profile-refresh-dynamic-catalog-route",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const before = created.creation.binding;
+    const stale = await fixture.bridge.bindExternalAgent({
+      binding: {
+        ...before,
+        dynamicToolCatalogFingerprint: null,
+        updatedAt: new Date().toISOString(),
+      },
+      expectedRevision: before.revision,
+    });
+    await fixture.bridge.putAgentRoute({
+      routeKey: "profile-refresh-dynamic-catalog-route",
+      label: "Profile refresh dynamic catalog route",
+      enabled: true,
+      target: {
+        type: "managed_external",
+        agentId: stale.agentId ?? "missing-agent",
+        bindingId: stale.bindingId,
+        bindingRevision: stale.revision,
+      },
+      updatedAt: new Date().toISOString(),
+    });
+
+    const receipt = await fixture.controller.refreshBindingProfileInstructions({
+      bindingId: stale.bindingId,
+      expectedBindingRevision: stale.revision,
+      expectedNativeThreadId: stale.nativeThreadId as string,
+      expectedProfileRevision: stale.profileRevision as number,
+      expectedProfilePromptHash: stale.profilePromptHash as string,
+    });
+
+    assert.equal(receipt.outcome, "thread_replaced");
+    assert.equal(receipt.binding.bindingId, stale.bindingId);
+    assert.equal(receipt.binding.sessionId, stale.sessionId);
+    assert.equal(receipt.binding.agentId, stale.agentId);
+    assert.notEqual(receipt.binding.nativeThreadId, stale.nativeThreadId);
+    const route = await fixture.bridge.getAgentRouteResolution(
+      "profile-refresh-dynamic-catalog-route",
+    );
+    assert.equal(route?.routable, true);
+    assert.equal(
+      route?.route?.target.type === "managed_external"
+        ? route.route.target.bindingRevision
+        : undefined,
+      receipt.binding.revision,
+    );
+  } finally {
     await fixture.cleanup();
   }
 });

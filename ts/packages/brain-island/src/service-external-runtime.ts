@@ -1614,13 +1614,12 @@ export class ServiceExternalRuntimeController {
           continue;
         }
         const controlled = await this.#requireControlled(binding.runtimeId);
-        const refreshedBinding = await this.#refreshBindingDynamicTools(
+        await this.#refreshBindingDynamicTools(
           controlled,
           currentBinding,
           promptContext.developerInstructions,
           fingerprint,
         );
-        await this.#syncCuratedRoutesToBinding(refreshedBinding.binding);
         refreshed.push(binding.bindingId);
       } catch (error) {
         pending.push({ bindingId: binding.bindingId, reason: String(error) });
@@ -2609,6 +2608,7 @@ export class ServiceExternalRuntimeController {
         },
       },
     });
+    await this.#syncCuratedRoutesToBinding(updated);
     return {
       binding: updated,
       nativeThreadId: started.thread.id,
