@@ -1568,7 +1568,10 @@ export class ServiceExternalRuntimeController {
     );
   }
 
-  async refreshProfileDynamicTools(profileId: string): Promise<{
+  async refreshProfileDynamicTools(
+    profileId: string,
+    options: { readonly force?: boolean } = {},
+  ): Promise<{
     profileId: string;
     refreshed: string[];
     unchanged: string[];
@@ -1602,17 +1605,22 @@ export class ServiceExternalRuntimeController {
         };
         const fingerprint =
           await this.#dynamicToolCatalogFingerprint(currentBinding);
-        if (currentBinding.dynamicToolCatalogFingerprint === fingerprint) {
+        if (
+          currentBinding.dynamicToolCatalogFingerprint === fingerprint &&
+          options.force !== true
+        ) {
+          await this.#syncCuratedRoutesToBinding(currentBinding);
           unchanged.push(binding.bindingId);
           continue;
         }
         const controlled = await this.#requireControlled(binding.runtimeId);
-        await this.#refreshBindingDynamicTools(
+        const refreshedBinding = await this.#refreshBindingDynamicTools(
           controlled,
           currentBinding,
           promptContext.developerInstructions,
           fingerprint,
         );
+        await this.#syncCuratedRoutesToBinding(refreshedBinding.binding);
         refreshed.push(binding.bindingId);
       } catch (error) {
         pending.push({ bindingId: binding.bindingId, reason: String(error) });
@@ -4025,6 +4033,60 @@ export class ServiceExternalRuntimeController {
       moved += 1;
     }
     return moved;
+  }
+
+  async #syncCuratedRoutesToBinding(
+    binding: ExternalAgentBinding,
+  ): Promise<number> {
+    if (binding.agentId == null) return 0;
+    const resolutions = await this.#bridge.listAgentRouteResolutions();
+    let updated = 0;
+    for (const resolution of [...resolutions].sort((left, right) =>
+      left.address.localeCompare(right.address),
+    )) {
+      const route = resolution.route;
+      if (
+        route == null ||
+        route.target.type !== "managed_external" ||
+        route.target.bindingId !== binding.bindingId ||
+        (route.target.agentId === binding.agentId &&
+          route.target.bindingRevision === binding.revision)
+      ) {
+        continue;
+      }
+      try {
+        await this.#bridge.putAgentRoute({
+          routeKey: route.routeKey,
+          label: route.label,
+          description: route.description,
+          enabled: route.enabled,
+          target: {
+            type: "managed_external",
+            agentId: binding.agentId,
+            bindingId: binding.bindingId,
+            bindingRevision: binding.revision,
+          },
+          requiredRuntimeKind: route.requiredRuntimeKind,
+          requiredDeliveryPolicy: route.requiredDeliveryPolicy,
+          expectedRevision: route.revision,
+          updatedAt: this.#now().toISOString(),
+        });
+      } catch (error) {
+        const current = await this.#bridge.getAgentRouteResolution(
+          route.routeKey,
+        );
+        if (
+          current?.route?.target.type !== "managed_external" ||
+          current.route.target.bindingId !== binding.bindingId ||
+          current.route.target.agentId !== binding.agentId ||
+          current.route.target.bindingRevision !== binding.revision
+        ) {
+          throw error;
+        }
+      }
+      updated += 1;
+    }
+    return updated;
   }
 
   async #refreshThreadSettings(

@@ -1637,6 +1637,18 @@ test("dynamic tool refresh preserves the applied prompt and exact Crew identity 
       requestedAt: new Date().toISOString(),
     });
     const before = created.creation.binding;
+    await fixture.bridge.putAgentRoute({
+      routeKey: "profile-mcp-refresh-route",
+      label: "Profile MCP refresh route",
+      enabled: true,
+      target: {
+        type: "managed_external",
+        agentId: before.agentId ?? "missing-agent",
+        bindingId: before.bindingId,
+        bindingRevision: before.revision,
+      },
+      updatedAt: new Date().toISOString(),
+    });
     const profile = await fixture.bridge.getProfileRegistryRecord(
       fixture.profileId,
     );
@@ -1679,6 +1691,16 @@ test("dynamic tool refresh preserves the applied prompt and exact Crew identity 
     assert.equal(after.profileRevision, before.profileRevision);
     assert.equal(after.profilePromptHash, before.profilePromptHash);
     assert.notEqual(after.nativeThreadId, before.nativeThreadId);
+    const routeAfterRefresh = await fixture.bridge.getAgentRouteResolution(
+      "profile-mcp-refresh-route",
+    );
+    assert.equal(routeAfterRefresh?.routable, true);
+    assert.equal(
+      routeAfterRefresh?.route?.target.type === "managed_external"
+        ? routeAfterRefresh.route.target.bindingRevision
+        : undefined,
+      after.revision,
+    );
     const refreshStart = fixture.transport.sent
       .filter((message) => message.method === "thread/start")
       .at(-1);
@@ -1696,6 +1718,34 @@ test("dynamic tool refresh preserves the applied prompt and exact Crew identity 
         .find((entry) => entry.name === "rusty_crew_mcp")
         ?.tools?.map((tool) => tool.name),
       ["den__get_task_v2"],
+    );
+
+    const forced = await fixture.controller.refreshProfileDynamicTools(
+      fixture.profileId,
+      { force: true },
+    );
+    assert.deepEqual(forced, {
+      profileId: fixture.profileId,
+      refreshed: [before.bindingId],
+      unchanged: [],
+      pending: [],
+    });
+    const afterForced = await fixture.bridge.getExternalBinding(
+      before.bindingId,
+    );
+    assert.ok(afterForced);
+    assert.equal(afterForced.bindingId, before.bindingId);
+    assert.equal(afterForced.sessionId, before.sessionId);
+    assert.equal(afterForced.agentId, before.agentId);
+    assert.notEqual(afterForced.nativeThreadId, after.nativeThreadId);
+    const routeAfterForcedRefresh =
+      await fixture.bridge.getAgentRouteResolution("profile-mcp-refresh-route");
+    assert.equal(routeAfterForcedRefresh?.routable, true);
+    assert.equal(
+      routeAfterForcedRefresh?.route?.target.type === "managed_external"
+        ? routeAfterForcedRefresh.route.target.bindingRevision
+        : undefined,
+      afterForced.revision,
     );
   } finally {
     await fixture.cleanup();

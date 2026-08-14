@@ -5528,6 +5528,12 @@ function createServiceReloadMcpExecutor(
         },
       });
       const rebuildCompleted = rebuild.apply.status === "completed";
+      const externalMcpRefresh = rebuildCompleted
+        ? await state.externalRuntimeController.refreshProfileDynamicTools(
+            String(binding.profileId),
+            { force: true },
+          )
+        : undefined;
       return {
         status: rebuildCompleted ? "completed" : "failed",
         summary: rebuildCompleted
@@ -5541,6 +5547,7 @@ function createServiceReloadMcpExecutor(
         result: {
           reload: outcome.result,
           rebuild,
+          externalMcpRefresh,
           followUpAction: rebuildCompleted
             ? "none"
             : "retry_runtime_rebuild_when_unblocked",
