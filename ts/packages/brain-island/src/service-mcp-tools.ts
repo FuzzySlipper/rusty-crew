@@ -164,7 +164,7 @@ export async function buildServiceMcpToolCatalog(
             ? undefined
             : await integrateMcpToolsWithRegistry({
                 catalogId: `service:mcp:${profile.profileId}`,
-                candidates: profile.candidates.map((item) => item.candidate),
+                candidates: profileIntegrationCandidates(profile.candidates),
                 metadataPolicyValidator:
                   createBridgeToolMetadataPolicyValidator(input.bridge),
                 inventoryRequest: {
@@ -386,6 +386,33 @@ function providerThreadIdentity(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function profileIntegrationCandidates(
+  candidates: readonly ServiceMcpToolCandidate[],
+): McpRegistryCandidate[] {
+  const unique = new Map<string, McpRegistryCandidate>();
+  for (const { binding, candidate } of candidates) {
+    const templateBindingId = materializedBindingTemplateId(binding.bindingId);
+    const signature = JSON.stringify({
+      templateBindingId,
+      candidate: {
+        ...candidate,
+        source: {
+          ...candidate.source,
+          bindingId: templateBindingId,
+        },
+      },
+    });
+    if (!unique.has(signature)) unique.set(signature, candidate);
+  }
+  return [...unique.values()];
+}
+
+function materializedBindingTemplateId(bindingId: string): string {
+  const delimiter = "--session--";
+  const index = bindingId.lastIndexOf(delimiter);
+  return index < 1 ? bindingId : bindingId.slice(0, index);
 }
 
 function profileAccumulator(
