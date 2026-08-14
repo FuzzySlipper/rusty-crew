@@ -1591,6 +1591,114 @@ test("external creation reconciles the exact Crew session before composing profi
   }
 });
 
+test("dynamic tool refresh preserves the applied prompt and exact Crew identity when the profile prompt is stale", async () => {
+  let toolRevision = 1;
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    undefined,
+    false,
+    "stale-prompt-dynamic-tools",
+    undefined,
+    undefined,
+    undefined,
+    {
+      profileDynamicTools: async () => [
+        {
+          type: "namespace" as const,
+          name: "mcp",
+          description: "Exact-session profile MCP tools",
+          tools: [
+            {
+              type: "function" as const,
+              name: `den__get_task_v${toolRevision}`,
+              description: "Read one Den task",
+              inputSchema: {
+                type: "object",
+                properties: { taskId: { type: "number" } },
+                required: ["taskId"],
+                additionalProperties: false,
+              },
+            },
+          ],
+        },
+      ],
+    },
+  );
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "stale-prompt-dynamic-tools",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    const before = created.creation.binding;
+    const profile = await fixture.bridge.getProfileRegistryRecord(
+      fixture.profileId,
+    );
+    assert.ok(profile);
+    await fixture.bridge.updateProfileRegistryRecord({
+      write: {
+        profileId: profile.profileId,
+        lifecycleStatus: profile.lifecycleStatus,
+        displayName: profile.displayName,
+        summary: profile.summary,
+        defaultSessionKind: profile.defaultSessionKind,
+        agentId: profile.agentId,
+        ownerId: profile.ownerId,
+        promptSoulMarkdown: "NEW_PROFILE_PROMPT_NOT_YET_APPLIED",
+        promptMemoryMarkdown: profile.promptMemoryMarkdown,
+        activeRuntimeSettingsJson: profile.activeRuntimeSettingsJson,
+        sourceAssetRefs: profile.sourceAssetRefs,
+        derivedRuntimeRefs: profile.derivedRuntimeRefs,
+        importExport: profile.importExport,
+        now: new Date().toISOString(),
+      },
+      expectedRevision: profile.revision,
+    });
+    toolRevision = 2;
+
+    const refresh = await fixture.controller.refreshProfileDynamicTools(
+      fixture.profileId,
+    );
+    assert.deepEqual(refresh, {
+      profileId: fixture.profileId,
+      refreshed: [before.bindingId],
+      unchanged: [],
+      pending: [],
+    });
+    const after = await fixture.bridge.getExternalBinding(before.bindingId);
+    assert.ok(after);
+    assert.equal(after.bindingId, before.bindingId);
+    assert.equal(after.sessionId, before.sessionId);
+    assert.equal(after.agentId, before.agentId);
+    assert.equal(after.profileRevision, before.profileRevision);
+    assert.equal(after.profilePromptHash, before.profilePromptHash);
+    assert.notEqual(after.nativeThreadId, before.nativeThreadId);
+    const refreshStart = fixture.transport.sent
+      .filter((message) => message.method === "thread/start")
+      .at(-1);
+    assert.equal(
+      (refreshStart?.params as Record<string, unknown>).developerInstructions,
+      "CREATION_PROFILE_SOUL_MARKER",
+    );
+    const namespaces = (refreshStart?.params as Record<string, unknown>)
+      .dynamicTools as Array<{
+      name?: string;
+      tools?: Array<{ name?: string }>;
+    }>;
+    assert.deepEqual(
+      namespaces
+        .find((entry) => entry.name === "mcp")
+        ?.tools?.map((tool) => tool.name),
+      ["den__get_task_v2"],
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("reconnect replaces a native thread when its dynamic tool catalog is stale", async () => {
   const fixture = await externalCreationFixture(
     false,

@@ -1584,17 +1584,33 @@ export class ServiceExternalRuntimeController {
         typeof binding.nativeThreadId === "string",
     );
     for (const binding of bindings) {
-      const fingerprint = await this.#dynamicToolCatalogFingerprint(binding);
-      if (binding.dynamicToolCatalogFingerprint === fingerprint) {
-        unchanged.push(binding.bindingId);
-        continue;
-      }
       try {
+        const promptContext = await this.#bindingPromptContext(
+          binding,
+          "preserve_applied",
+        );
+        if (
+          promptContext.developerInstructions === undefined ||
+          typeof promptContext.binding.nativeThreadId !== "string"
+        ) {
+          throw new Error(
+            `external binding ${binding.bindingId} has no recoverable applied profile prompt`,
+          );
+        }
+        const currentBinding = promptContext.binding as ExternalAgentBinding & {
+          nativeThreadId: string;
+        };
+        const fingerprint =
+          await this.#dynamicToolCatalogFingerprint(currentBinding);
+        if (currentBinding.dynamicToolCatalogFingerprint === fingerprint) {
+          unchanged.push(binding.bindingId);
+          continue;
+        }
         const controlled = await this.#requireControlled(binding.runtimeId);
         await this.#refreshBindingDynamicTools(
           controlled,
-          binding as ExternalAgentBinding & { nativeThreadId: string },
-          await this.#developerInstructionsForBinding(binding),
+          currentBinding,
+          promptContext.developerInstructions,
           fingerprint,
         );
         refreshed.push(binding.bindingId);
