@@ -104,6 +104,43 @@ test("changing desired selection replaces every concurrent exact-session materia
   );
 });
 
+test("archiving one concurrent session removes only that session materialization", () => {
+  const active = session("session-active");
+  const archived = {
+    ...session("session-archived"),
+    status: "archived" as const,
+  };
+  const initial = reconcileProfileMcpBindings({
+    profileId: "ambassador",
+    desired: [{ serverId: "den", bindingId: "ambassador-den" }],
+    sessions: [active, { ...archived, status: "active" }],
+    existing: [],
+  });
+
+  const reconciled = reconcileProfileMcpBindings({
+    profileId: "ambassador",
+    desired: [{ serverId: "den", bindingId: "ambassador-den" }],
+    sessions: [active, archived],
+    existing: initial.bindings,
+  });
+
+  assert.deepEqual(reconciled.removedBindingIds, [
+    "ambassador-den--session--session-archived",
+  ]);
+  assert.deepEqual(
+    reconciled.materialized.map(({ bindingId, sessionId }) => ({
+      bindingId,
+      sessionId,
+    })),
+    [
+      {
+        bindingId: "ambassador-den--session--session-active",
+        sessionId: "session-active",
+      },
+    ],
+  );
+});
+
 test("persists intent without inventing a session when none is active", () => {
   const result = reconcileProfileMcpBindings({
     profileId: "reviewer",
