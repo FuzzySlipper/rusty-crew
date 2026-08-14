@@ -243,7 +243,11 @@ test("startup incident reconciliation retires twelve terminal tasks and dispatch
     revision: 3,
   })) as ReviewSubmissionRecord[];
   const terminalTransitions: string[] = [];
-  const deliveries: string[] = [];
+  const deliveries: Array<{
+    deliveryId: string;
+    createdAt: string;
+    expiresAt: string;
+  }> = [];
   const context = {
     bridge: {
       listReviewSubmissions: async () => records,
@@ -287,8 +291,10 @@ test("startup incident reconciliation retires twelve terminal tasks and dispatch
       deliverAgentMessage: async (request: {
         deliveryId: string;
         messageId: string;
+        createdAt: string;
+        expiresAt: string;
       }) => {
-        deliveries.push(request.deliveryId);
+        deliveries.push(request);
         return {
           status: "accepted",
           request: { ...request, toSessionId: "reviewer-session" },
@@ -326,6 +332,10 @@ test("startup incident reconciliation retires twelve terminal tasks and dispatch
     ),
   );
   assert.equal(deliveries.length, 1);
+  assert.equal(
+    Date.parse(deliveries[0]!.expiresAt) - Date.parse(deliveries[0]!.createdAt),
+    24 * 60 * 60_000,
+  );
   assert.equal(
     records.filter((record) => record.phase === "superseded").length,
     12,

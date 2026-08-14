@@ -1370,6 +1370,7 @@ async function deliverReviewReceipt(
     );
   }
   const identity = record.submissionId.replaceAll(":", "-");
+  const createdAt = context.now();
   const initial = await context.bridge.replyAgentMessage({
     caller: { type: "review_submission", submissionId: record.submissionId },
     deliveryId: `review-reply-delivery:${identity}`,
@@ -1377,8 +1378,8 @@ async function deliverReviewReceipt(
     messageId: `review-reply-message:${identity}`,
     inReplyToMessageId: dispatchMessageId,
     body: reviewReceiptBody(record),
-    createdAt: context.now(),
-    expiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+    createdAt,
+    expiresAt: reviewMessageExpiresAt(createdAt),
   });
   const receipt = await context.applyCoordinationDelivery(initial);
   if (receipt.status !== "accepted") {
@@ -1714,6 +1715,7 @@ async function dispatchReviewer(
     );
     const deliveryId = `review-delivery:${attemptIdentity}`;
     const existing = await context.bridge.getAgentMessageDelivery(deliveryId);
+    const createdAt = context.now();
     const initial =
       existing ??
       (await context.bridge.deliverAgentMessage({
@@ -1729,8 +1731,8 @@ async function dispatchReviewer(
         body: reviewerRequestBody(record),
         correlationId: `review:${record.taskId}:${record.commitSha}`,
         requireWake: true,
-        createdAt: context.now(),
-        expiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+        createdAt,
+        expiresAt: reviewMessageExpiresAt(createdAt),
       }));
     const receipt = await context.applyCoordinationDelivery(initial);
     if (receipt.status !== "accepted") {
@@ -1766,6 +1768,10 @@ async function dispatchReviewer(
       now: context.now(),
     });
   }
+}
+
+function reviewMessageExpiresAt(createdAt: string): string {
+  return new Date(Date.parse(createdAt) + 24 * 60 * 60_000).toISOString();
 }
 
 export function reviewerDispatchIdentity(
