@@ -188,6 +188,151 @@ test("failed dynamic tool completion preserves a bounded readable result", () =>
   assert.ok(event.rawDetail.redactedKeys.includes("imageUrl"));
 });
 
+test("dynamic tool completion unwraps CallToolResult text without mirrored details or cursor", () => {
+  const detailRef = "d1.opaque-review-findings-cursor";
+  const envelope = JSON.stringify({
+    content: [
+      { type: "text", text: "[]" },
+      { type: "text", text: JSON.stringify(detailRef) },
+    ],
+    details: {
+      content: [
+        { type: "text", text: "[]" },
+        { type: "text", text: JSON.stringify(detailRef) },
+      ],
+      isError: false,
+      structuredContent: { detail_ref: detailRef, items: [] },
+    },
+    isError: false,
+    structuredContent: { detail_ref: detailRef, items: [] },
+  });
+  const event = mapNotification(
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          id: "item-envelope",
+          type: "dynamicToolCall",
+          tool: "den_list_review_findings",
+          status: "completed",
+          success: true,
+          contentItems: [{ type: "inputText", text: envelope }],
+        },
+      },
+    },
+    12,
+    16_384,
+    true,
+  );
+
+  assert.equal(event.payload.text, "[]");
+  assert.doesNotMatch(event.payload.text ?? "", /detail_ref|structuredContent/);
+  assert.match(event.rawDetail.json, /structuredContent/);
+});
+
+test("dynamic tool completion formats primary structured text and still bounds it", () => {
+  const envelope = JSON.stringify({
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          task: { id: 6961, title: "Remove PNG flipping" },
+          description: "x".repeat(5_000),
+        }),
+      },
+    ],
+    details: { content: [] },
+    isError: false,
+    structuredContent: { task: { id: 6961 } },
+  });
+  const event = mapNotification(
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          id: "item-large-envelope",
+          type: "dynamicToolCall",
+          tool: "den_get_task",
+          status: "completed",
+          success: true,
+          contentItems: [{ type: "inputText", text: envelope }],
+        },
+      },
+    },
+    13,
+    16_384,
+    true,
+  );
+
+  assert.match(event.payload.text ?? "", /^\{\n  "task":/);
+  assert.doesNotMatch(event.payload.text ?? "", /structuredContent|details/);
+  assert.equal(event.payload.text?.length, 4_096);
+  assert.match(event.payload.text ?? "", /\.\.\.\[truncated\]$/);
+});
+
+test("dynamic tool completion preserves plain and malformed result text", () => {
+  for (const [sequence, text] of [
+    [14, "Message delivered."],
+    [15, '{"content": not-json'],
+  ] as const) {
+    const event = mapNotification(
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            id: `item-${sequence}`,
+            type: "dynamicToolCall",
+            tool: "send_agent_message",
+            status: "completed",
+            success: true,
+            contentItems: [{ type: "inputText", text }],
+          },
+        },
+      },
+      sequence,
+      16_384,
+      true,
+    );
+    assert.equal(event.payload.text, text);
+  }
+});
+
+test("failed empty CallToolResult remains a readable failure", () => {
+  const event = mapNotification(
+    {
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: {
+          id: "item-empty-failure",
+          type: "dynamicToolCall",
+          tool: "complete_routed_review",
+          status: "failed",
+          success: false,
+          contentItems: [
+            {
+              type: "inputText",
+              text: JSON.stringify({ content: [], isError: true }),
+            },
+          ],
+        },
+      },
+    },
+    16,
+    16_384,
+    true,
+  );
+
+  assert.equal(event.payload.text, "Tool call failed without text output.");
+});
+
 test("input-image raw detail redacts unsupported URLs by semantic item type", () => {
   for (const [index, imageUrl] of [
     "data:IMAGE/PNG;base64,TOPSECRET",

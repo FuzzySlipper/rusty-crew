@@ -298,6 +298,7 @@ function dynamicToolResultText(value: unknown): string | undefined {
     .filter((item) => stringValue(item.type) === "inputText")
     .map((item) => stringValue(item.text))
     .filter((item): item is string => item !== undefined)
+    .map(projectDynamicToolResultDisplayText)
     .join("\n")
     .replace(UNSAFE_RESULT_CONTROL_CHARACTERS, " ");
   if (result.length === 0) return undefined;
@@ -307,6 +308,67 @@ function dynamicToolResultText(value: unknown): string | undefined {
   let end = contentLength;
   if (end > 0 && isHighSurrogate(result.charCodeAt(end - 1))) end -= 1;
   return `${result.slice(0, end)}${DYNAMIC_TOOL_RESULT_TRUNCATION_MARKER}`;
+}
+
+/**
+ * Codex dynamic tools expose their result through an inputText item. Newer
+ * app-server revisions serialize the complete MCP CallToolResult envelope into
+ * that item. Keep transport bookkeeping in raw detail and expose only the
+ * envelope's primary text blocks as the neutral event's readable result.
+ */
+export function projectDynamicToolResultDisplayText(value: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return value;
+  }
+  if (!isPlainRecord(parsed) || !Array.isArray(parsed.content)) return value;
+  const detailRef = callToolResultDetailRef(parsed.structuredContent);
+  const text = parsed.content
+    .filter(isPlainRecord)
+    .filter((item) => stringValue(item.type) === "text")
+    .map((item) => stringValue(item.text))
+    .filter((item): item is string => item !== undefined)
+    .filter((item) => !isDetailReferenceText(item, detailRef))
+    .map(readableJsonText)
+    .join("\n");
+  if (text.length > 0) return text;
+  return parsed.isError === true
+    ? "Tool call failed without text output."
+    : "Tool call completed without text output.";
+}
+
+function callToolResultDetailRef(value: unknown): string | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  return stringValue(value.detail_ref) ?? stringValue(value.detailRef);
+}
+
+function isDetailReferenceText(
+  value: string,
+  detailRef: string | undefined,
+): boolean {
+  if (detailRef === undefined) return false;
+  if (value === detailRef) return true;
+  try {
+    return JSON.parse(value) === detailRef;
+  } catch {
+    return false;
+  }
+}
+
+function readableJsonText(value: string): string {
+  try {
+    const parsed = JSON.parse(value);
+    if (typeof parsed === "string") return parsed;
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isHighSurrogate(codeUnit: number): boolean {

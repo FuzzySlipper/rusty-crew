@@ -14,6 +14,7 @@ export {
 } from "./coordination.js";
 export { CODEX_APP_SERVER_PROTOCOL } from "./protocol-manifest.js";
 export { captureBoundedRawDetail } from "./raw-detail.js";
+export { projectDynamicToolResultDisplayText } from "./event-mapper.js";
 export {
   type CodexJsonRpcTransport,
   type CodexTransportHandlers,

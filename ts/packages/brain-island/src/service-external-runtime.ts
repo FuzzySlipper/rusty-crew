@@ -28,6 +28,7 @@ import {
   UnixWebSocketTransport,
   captureBoundedRawDetail,
   projectCodexErrorDiagnostic,
+  projectDynamicToolResultDisplayText,
   type CollaborationMode,
   type CodexControllerAuthority,
   type DynamicToolSpec,
@@ -5895,7 +5896,10 @@ function durableExternalThreadItemText(
       .join("/");
     if (value.length > 0) return value;
   }
-  if (kind === "dynamicToolCall" && snapshotText === undefined) {
+  if (kind === "dynamicToolCall") {
+    if (snapshotText !== undefined) {
+      return projectDynamicToolResultDisplayText(snapshotText);
+    }
     const tool = stringValue(payload.tool);
     if (tool !== undefined) return tool;
   }
