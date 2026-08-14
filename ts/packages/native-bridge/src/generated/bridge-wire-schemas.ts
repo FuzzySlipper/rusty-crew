@@ -5802,6 +5802,144 @@ export const bridgeWireSchemaArtifact = {
       "title": "Array_of_InstallDiplomatBindingRecord",
       "type": "array"
     },
+    "alloc::vec::Vec<rusty_crew_core_protocol::install_diplomat::TelegramOperatorConsultRecord>": {
+      "items": {
+        "properties": {
+          "adapterId": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "bindingId": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "category": {
+            "enum": [
+              "network_trouble",
+              "ambiguous_request",
+              "unfamiliar_machine_state",
+              "other",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consultId": {
+            "type": "string"
+          },
+          "deliveryAttempts": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "externalChatId": {
+            "type": "string"
+          },
+          "externalMessageIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "externalThreadId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "idempotencyKey": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "originatingWakeKind": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "profileId": {
+            "type": "string"
+          },
+          "reasonCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestedAt": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schemaVersion": {
+            "type": "string"
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "sent",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "toolCallId": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "wakeId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "consultId",
+          "idempotencyKey",
+          "revision",
+          "bindingId",
+          "adapterId",
+          "agentId",
+          "sessionId",
+          "profileId",
+          "wakeId",
+          "toolCallId",
+          "body",
+          "externalChatId",
+          "status",
+          "deliveryAttempts",
+          "externalMessageIds",
+          "requestedAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "title": "Array_of_TelegramOperatorConsultRecord",
+      "type": "array"
+    },
     "alloc::vec::Vec<rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord>": {
       "items": {
         "properties": {
@@ -24710,6 +24848,141 @@ export const bridgeWireSchemaArtifact = {
       "title": "TelegramDiplomatIngressPlan",
       "type": "object"
     },
+    "rusty_crew_core_protocol::install_diplomat::TelegramOperatorConsultRecord": {
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "network_trouble",
+            "ambiguous_request",
+            "unfamiliar_machine_state",
+            "other",
+            null
+          ],
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consultId": {
+          "type": "string"
+        },
+        "deliveryAttempts": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "externalChatId": {
+          "type": "string"
+        },
+        "externalMessageIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "externalThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "originatingWakeKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestedAt": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "sentAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "sent",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "wakeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "consultId",
+        "idempotencyKey",
+        "revision",
+        "bindingId",
+        "adapterId",
+        "agentId",
+        "sessionId",
+        "profileId",
+        "wakeId",
+        "toolCallId",
+        "body",
+        "externalChatId",
+        "status",
+        "deliveryAttempts",
+        "externalMessageIds",
+        "requestedAt",
+        "updatedAt"
+      ],
+      "title": "TelegramOperatorConsultRecord",
+      "type": "object"
+    },
     "rusty_crew_core_protocol::memory_space::BackgroundMemoryAutoMutationPlan": {
       "properties": {
         "accepted_count": {
@@ -29403,6 +29676,7 @@ export const bridgeWireSchemaArtifact = {
     "list_roleplay_session_metadata": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplaySessionMetadataRecord>",
     "list_scheduled_jobs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledJobWireOutput>",
     "list_scheduled_runs": "alloc::vec::Vec<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
+    "list_telegram_operator_consults": "alloc::vec::Vec<rusty_crew_core_protocol::install_diplomat::TelegramOperatorConsultRecord>",
     "lore_entry_provenance_events": "alloc::vec::Vec<rusty_crew_core_persistence::contracts::RoleplayLoreProvenanceEvent>",
     "manual_context_compaction": "rusty_crew_core_protocol::types::ManualContextCompactionResponse",
     "mark_external_agent_session_native_starting": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
@@ -29433,6 +29707,7 @@ export const bridgeWireSchemaArtifact = {
     "plan_tool_availability": "rusty_crew_core_tool_registry::ToolAvailabilityPlan",
     "plan_web_browser_resource_policy": "rusty_crew_core_tool_registry::WebBrowserResourcePolicyPlan",
     "prepare_external_agent_session_creation": "rusty_crew_core_protocol::external_runtime::ExternalAgentSessionCreationRecord",
+    "prepare_telegram_operator_consult_delivery": "rusty_crew_core_protocol::install_diplomat::TelegramOperatorConsultRecord",
     "progress_runtime_activity": "rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord",
     "promote_lore_entry": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerEntryJoin",
     "put_agent_route": "rusty_crew_core_protocol::external_runtime::AgentRouteRecord",
@@ -29480,6 +29755,7 @@ export const bridgeWireSchemaArtifact = {
     "reply_agent_message": "rusty_crew_core_protocol::external_runtime::AgentMessageDeliveryReceipt",
     "request_scheduled_host_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
     "request_scheduled_job_run": "core::option::Option<rusty_crew_core_bridge_api::scheduler_wire::ScheduledRunWireOutput>",
+    "request_telegram_operator_consult": "rusty_crew_core_protocol::install_diplomat::TelegramOperatorConsultRecord",
     "resolve_agent_address": "rusty_crew_core_protocol::external_runtime::AgentRouteResolution",
     "resolve_conversation_jump": "rusty_crew_core_persistence::contracts::ConversationJumpResult",
     "resolve_external_interaction": "rusty_crew_core_protocol::external_runtime::ExternalInteractionRecord",
@@ -29500,6 +29776,7 @@ export const bridgeWireSchemaArtifact = {
     "set_install_diplomat_binding_status": "rusty_crew_core_protocol::install_diplomat::InstallDiplomatBindingRecord",
     "set_lore_layer_config": "rusty_crew_core_persistence::contracts::RoleplayLoreLayerConfigRecord",
     "settle_runtime_activity_wake": "alloc::vec::Vec<rusty_crew_core_protocol::runtime_activity::RuntimeActivityRecord>",
+    "settle_telegram_operator_consult": "rusty_crew_core_protocol::install_diplomat::TelegramOperatorConsultRecord",
     "start_roleplay_narrator_turn": "rusty_crew_roleplay_core::RoleplayNarratorTurnReceipt",
     "submit_external_control": "rusty_crew_core_protocol::external_runtime::ExternalControlReceipt",
     "supersede_lore_entry": "(rusty_crew_core_persistence::contracts::RoleplayLoreRecord, rusty_crew_core_persistence::contracts::RoleplayLoreRecord)",

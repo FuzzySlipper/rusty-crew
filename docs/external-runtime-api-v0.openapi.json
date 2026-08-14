@@ -7917,6 +7917,155 @@
         "enum": ["human", "bot", "sender_chat"],
         "type": "string"
       },
+      "TelegramOperatorConsultCategory": {
+        "enum": [
+          "network_trouble",
+          "ambiguous_request",
+          "unfamiliar_machine_state",
+          "other"
+        ],
+        "type": "string"
+      },
+      "TelegramOperatorConsultQuery": {
+        "properties": {
+          "bindingId": { "type": ["string", "null"] },
+          "consultId": { "type": ["string", "null"] },
+          "limit": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": ["integer", "null"]
+          },
+          "sessionId": { "type": ["string", "null"] },
+          "status": {
+            "anyOf": [
+              { "$ref": "#/components/schemas/TelegramOperatorConsultStatus" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "TelegramOperatorConsultRecord": {
+        "properties": {
+          "adapterId": { "type": "string" },
+          "agentId": { "type": "string" },
+          "bindingId": { "type": "string" },
+          "body": { "type": "string" },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TelegramOperatorConsultCategory"
+              },
+              { "type": "null" }
+            ]
+          },
+          "consultId": { "type": "string" },
+          "deliveryAttempts": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "externalChatId": { "type": "string" },
+          "externalMessageIds": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "externalThreadId": { "type": ["string", "null"] },
+          "idempotencyKey": { "type": "string" },
+          "lastError": { "type": ["string", "null"] },
+          "originatingWakeKind": { "type": ["string", "null"] },
+          "profileId": { "type": "string" },
+          "reasonCode": { "type": ["string", "null"] },
+          "requestedAt": { "type": "string" },
+          "revision": { "format": "uint64", "minimum": 0, "type": "integer" },
+          "schemaVersion": { "type": "string" },
+          "sentAt": { "type": ["string", "null"] },
+          "sessionId": { "type": "string" },
+          "status": {
+            "$ref": "#/components/schemas/TelegramOperatorConsultStatus"
+          },
+          "toolCallId": { "type": "string" },
+          "updatedAt": { "type": "string" },
+          "wakeId": { "type": "string" }
+        },
+        "required": [
+          "schemaVersion",
+          "consultId",
+          "idempotencyKey",
+          "revision",
+          "bindingId",
+          "adapterId",
+          "agentId",
+          "sessionId",
+          "profileId",
+          "wakeId",
+          "toolCallId",
+          "body",
+          "externalChatId",
+          "status",
+          "deliveryAttempts",
+          "externalMessageIds",
+          "requestedAt",
+          "updatedAt"
+        ],
+        "type": "object"
+      },
+      "TelegramOperatorConsultRequest": {
+        "properties": {
+          "body": { "type": "string" },
+          "caller": { "$ref": "#/components/schemas/AgentCoordinationCaller" },
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TelegramOperatorConsultCategory"
+              },
+              { "type": "null" }
+            ]
+          },
+          "originatingWakeKind": { "type": ["string", "null"] },
+          "requestedAt": { "type": "string" }
+        },
+        "required": ["caller", "body", "requestedAt"],
+        "type": "object"
+      },
+      "TelegramOperatorConsultSettlement": {
+        "properties": {
+          "consultId": { "type": "string" },
+          "deliveryAttempts": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "expectedRevision": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "externalMessageIds": {
+            "items": { "type": "string" },
+            "type": "array"
+          },
+          "lastError": { "type": ["string", "null"] },
+          "reasonCode": { "type": ["string", "null"] },
+          "settledAt": { "type": "string" },
+          "status": {
+            "$ref": "#/components/schemas/TelegramOperatorConsultStatus"
+          }
+        },
+        "required": [
+          "consultId",
+          "expectedRevision",
+          "status",
+          "deliveryAttempts",
+          "externalMessageIds",
+          "settledAt"
+        ],
+        "type": "object"
+      },
+      "TelegramOperatorConsultStatus": {
+        "enum": ["pending", "sent", "failed"],
+        "type": "string"
+      },
       "ToolCallMetadata": {
         "properties": {
           "adapter_id": { "type": ["string", "null"] },

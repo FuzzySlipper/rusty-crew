@@ -40,6 +40,29 @@ pub(crate) fn migrate_v72_add_install_diplomat_state(
     .map_err(|error| persistence_error("apply schema migration 72", error))
 }
 
+pub(crate) fn migrate_v76_add_telegram_operator_consults(
+    tx: &rusqlite::Transaction<'_>,
+) -> CoreResult<()> {
+    tx.execute_batch(
+        "CREATE TABLE telegram_operator_consults (
+            consult_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            binding_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            record_json TEXT NOT NULL,
+            FOREIGN KEY(binding_id) REFERENCES telegram_install_diplomat_bindings(binding_id)
+         );
+         CREATE INDEX idx_telegram_operator_consult_delivery
+            ON telegram_operator_consults(status, updated_at);
+         CREATE INDEX idx_telegram_operator_consult_session
+            ON telegram_operator_consults(session_id, updated_at DESC);",
+    )
+    .map_err(|error| persistence_error("apply schema migration 76", error))
+}
+
 impl CoordinationStore {
     pub fn get_install_diplomat_binding(
         &self,
@@ -256,6 +279,152 @@ impl CoordinationStore {
         }
         Ok(record.clone())
     }
+
+    pub fn get_telegram_operator_consult(
+        &self,
+        consult_id: &str,
+    ) -> CoreResult<Option<TelegramOperatorConsultRecord>> {
+        self.read_telegram_operator_consult("consult_id", consult_id)
+    }
+
+    pub fn get_telegram_operator_consult_by_idempotency_key(
+        &self,
+        idempotency_key: &str,
+    ) -> CoreResult<Option<TelegramOperatorConsultRecord>> {
+        self.read_telegram_operator_consult("idempotency_key", idempotency_key)
+    }
+
+    fn read_telegram_operator_consult(
+        &self,
+        column: &str,
+        value: &str,
+    ) -> CoreResult<Option<TelegramOperatorConsultRecord>> {
+        let sql = match column {
+            "consult_id" => {
+                "SELECT record_json FROM telegram_operator_consults WHERE consult_id = ?1"
+            }
+            "idempotency_key" => {
+                "SELECT record_json FROM telegram_operator_consults WHERE idempotency_key = ?1"
+            }
+            _ => unreachable!("whitelisted Telegram consult lookup column"),
+        };
+        let conn = self.conn()?;
+        conn.query_row(sql, params![value], |row| row.get::<_, String>(0))
+            .optional()
+            .map_err(|error| persistence_error("get Telegram operator consult", error))?
+            .map(|raw| decode_operator_consult(&raw))
+            .transpose()
+    }
+
+    pub fn list_telegram_operator_consults(
+        &self,
+        query: &TelegramOperatorConsultQuery,
+    ) -> CoreResult<Vec<TelegramOperatorConsultRecord>> {
+        let conn = self.conn()?;
+        let mut statement = conn
+            .prepare(
+                "SELECT record_json FROM telegram_operator_consults
+                 ORDER BY updated_at DESC, consult_id DESC",
+            )
+            .map_err(|error| persistence_error("prepare Telegram operator consult list", error))?;
+        let mut records = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| persistence_error("query Telegram operator consults", error))?
+            .map(|raw| {
+                let raw = raw.map_err(|error| {
+                    persistence_error("read Telegram operator consult row", error)
+                })?;
+                decode_operator_consult(&raw)
+            })
+            .collect::<CoreResult<Vec<_>>>()?;
+        records.retain(|record| operator_consult_matches_query(record, query));
+        records.truncate(query.limit.unwrap_or(100).min(1_000) as usize);
+        Ok(records)
+    }
+
+    pub fn insert_telegram_operator_consult(
+        &self,
+        record: &TelegramOperatorConsultRecord,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        let conn = self.conn()?;
+        conn.execute(
+            "INSERT INTO telegram_operator_consults (
+                consult_id, idempotency_key, binding_id, session_id, status,
+                revision, updated_at, record_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                record.consult_id,
+                record.idempotency_key,
+                record.binding_id,
+                record.session_id.0,
+                telegram_operator_consult_status_as_str(record.status),
+                record.revision as i64,
+                record.updated_at,
+                to_json_text(record)?,
+            ],
+        )
+        .map_err(|error| {
+            if error.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) {
+                CoreError::new(
+                    CoreErrorKind::AlreadyExists,
+                    "telegram_operator_consult_exists",
+                )
+            } else {
+                persistence_error("insert Telegram operator consult", error)
+            }
+        })?;
+        Ok(record.clone())
+    }
+
+    pub fn update_telegram_operator_consult(
+        &self,
+        record: &TelegramOperatorConsultRecord,
+        expected_revision: u64,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        let conn = self.conn()?;
+        let changed = conn
+            .execute(
+                "UPDATE telegram_operator_consults
+                    SET status = ?1, revision = ?2, updated_at = ?3, record_json = ?4
+                  WHERE consult_id = ?5 AND revision = ?6",
+                params![
+                    telegram_operator_consult_status_as_str(record.status),
+                    record.revision as i64,
+                    record.updated_at,
+                    to_json_text(record)?,
+                    record.consult_id,
+                    expected_revision as i64,
+                ],
+            )
+            .map_err(|error| persistence_error("update Telegram operator consult", error))?;
+        if changed != 1 {
+            return revision_conflict(
+                "Telegram operator consult",
+                &record.consult_id,
+                expected_revision,
+            );
+        }
+        Ok(record.clone())
+    }
+}
+
+pub(crate) fn operator_consult_matches_query(
+    record: &TelegramOperatorConsultRecord,
+    query: &TelegramOperatorConsultQuery,
+) -> bool {
+    query
+        .consult_id
+        .as_ref()
+        .is_none_or(|value| value == &record.consult_id)
+        && query
+            .binding_id
+            .as_ref()
+            .is_none_or(|value| value == &record.binding_id)
+        && query
+            .session_id
+            .as_ref()
+            .is_none_or(|value| value == &record.session_id)
+        && query.status.is_none_or(|value| value == record.status)
 }
 
 pub(crate) fn binding_matches_query(
@@ -307,6 +476,15 @@ fn decode_interaction(raw: &str) -> CoreResult<TelegramDiplomatInteractionRecord
     })
 }
 
+fn decode_operator_consult(raw: &str) -> CoreResult<TelegramOperatorConsultRecord> {
+    from_json_text(raw).map_err(|error| {
+        CoreError::new(
+            CoreErrorKind::PersistenceFailure,
+            format!("decode Telegram operator consult: {error}"),
+        )
+    })
+}
+
 fn map_binding_write_error(context: &str, error: rusqlite::Error) -> CoreError {
     if error.sqlite_error_code() == Some(rusqlite::ErrorCode::ConstraintViolation) {
         CoreError::new(
@@ -347,5 +525,15 @@ pub(crate) fn telegram_diplomat_terminal_reason_as_str(
         TelegramDiplomatInteractionTerminalReason::InteractionExpired => "interaction_expired",
         TelegramDiplomatInteractionTerminalReason::BotPairRateLimited => "bot_pair_rate_limited",
         TelegramDiplomatInteractionTerminalReason::BindingUnavailable => "binding_unavailable",
+    }
+}
+
+pub(crate) fn telegram_operator_consult_status_as_str(
+    status: TelegramOperatorConsultStatus,
+) -> &'static str {
+    match status {
+        TelegramOperatorConsultStatus::Pending => "pending",
+        TelegramOperatorConsultStatus::Sent => "sent",
+        TelegramOperatorConsultStatus::Failed => "failed",
     }
 }

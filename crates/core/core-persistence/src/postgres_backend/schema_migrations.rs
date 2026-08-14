@@ -1,6 +1,8 @@
 //! PostgreSQL schema migration catalog and application logic.
 
-use super::install_diplomat::apply_postgres_install_diplomat_state;
+use super::install_diplomat::{
+    apply_postgres_install_diplomat_state, apply_postgres_telegram_operator_consults,
+};
 use super::logical_turns::apply_postgres_logical_turns;
 use super::review_submissions::{
     allow_external_review_submitters, apply_postgres_review_submissions,
@@ -8,7 +10,7 @@ use super::review_submissions::{
 use super::runtime_activities::apply_postgres_runtime_activities;
 use super::*;
 
-pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 60;
+pub(super) const POSTGRES_SCHEMA_VERSION: i64 = 61;
 const POSTGRES_MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 
 #[allow(dead_code)]
@@ -320,6 +322,11 @@ const POSTGRES_SCHEMA_MIGRATIONS: &[PostgresSchemaMigration] = &[
         version: 60,
         description: "add logical import batch idempotency records",
         apply: Some(apply_postgres_logical_import_batches),
+    },
+    PostgresSchemaMigration {
+        version: 61,
+        description: "add durable Telegram operator consult delivery state",
+        apply: Some(apply_postgres_telegram_operator_consults),
     },
 ];
 

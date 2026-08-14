@@ -157,8 +157,9 @@ label = "Install Diplomat"
 owns = [
   "telegram_install_diplomat_bindings",
   "telegram_diplomat_interactions",
+  "telegram_operator_consults",
 ]
-notes = "Session-scoped installation diplomat bindings and durable Telegram interaction/loop coordination. These records are not profile-owned and Telegram remains an external adapter."
+notes = "Session-scoped installation diplomat bindings, durable Telegram interaction/loop coordination, and proactive operator-consult delivery intent. These records are not profile-owned and Telegram remains an external adapter."
 
 [[scope]]
 id = "conversations_attachments"

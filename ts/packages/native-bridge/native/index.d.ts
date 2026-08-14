@@ -66,6 +66,10 @@ export declare class NativeBridgeBinding {
   getInstallDiplomatBindingJson(bindingId: string): string
   listInstallDiplomatBindingsJson(inputJson: string): string
   planTelegramDiplomatIngressJson(inputJson: string): string
+  requestTelegramOperatorConsultJson(inputJson: string): string
+  prepareTelegramOperatorConsultDeliveryJson(consultId: string): string
+  settleTelegramOperatorConsultJson(inputJson: string): string
+  listTelegramOperatorConsultsJson(inputJson: string): string
   modelProviderRefreshImpactJson(requestJson: string): string
   planModelProviderRefreshJson(requestJson: string): string
   saveMessageSlotJson(inputJson: string): void

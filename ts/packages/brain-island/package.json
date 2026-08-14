@@ -27,6 +27,8 @@
     "smoke:completion-tools": "tsx smokes/smoke-completion-tools.ts",
     "smoke:coordination-tools": "tsx smokes/smoke-coordination-tools.ts",
     "smoke:review-submission-tools": "tsx smokes/smoke-review-submission-tools.ts",
+    "smoke:telegram-consult-tools": "tsx smokes/smoke-telegram-consult-tools.ts",
+    "smoke:telegram-consult-runtime": "tsx smokes/smoke-telegram-consult-runtime.ts",
     "smoke:review-agent-prompt-guidance": "tsx smokes/review-agent-prompt-guidance.ts",
     "smoke:coordination-tools-live": "tsx ../../smokes/brain-island/smoke-coordination-tools-live.ts",
     "smoke:cron-expression": "tsx smokes/smoke-cron-expression.ts",

@@ -558,6 +558,71 @@ impl NativeBridgeBinding {
     }
 
     #[napi]
+    pub fn request_telegram_operator_consult_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<TelegramOperatorConsultRequest>(
+            &input_json,
+            "telegram operator consult request",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .request_telegram_operator_consult(input)
+                .map_err(to_napi_error)?,
+            "telegram operator consult record",
+        )
+    }
+
+    #[napi]
+    pub fn prepare_telegram_operator_consult_delivery_json(
+        &self,
+        consult_id: String,
+    ) -> napi::Result<String> {
+        serialize_json(
+            &self
+                .bridge()?
+                .prepare_telegram_operator_consult_delivery(&consult_id)
+                .map_err(to_napi_error)?,
+            "telegram operator consult record",
+        )
+    }
+
+    #[napi]
+    pub fn settle_telegram_operator_consult_json(
+        &self,
+        input_json: String,
+    ) -> napi::Result<String> {
+        let input = parse_json::<TelegramOperatorConsultSettlement>(
+            &input_json,
+            "telegram operator consult settlement",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .settle_telegram_operator_consult(input)
+                .map_err(to_napi_error)?,
+            "telegram operator consult record",
+        )
+    }
+
+    #[napi]
+    pub fn list_telegram_operator_consults_json(&self, input_json: String) -> napi::Result<String> {
+        let input = parse_json::<TelegramOperatorConsultQuery>(
+            &input_json,
+            "telegram operator consult query",
+        )?;
+        serialize_json(
+            &self
+                .bridge()?
+                .list_telegram_operator_consults(&input)
+                .map_err(to_napi_error)?,
+            "telegram operator consult records",
+        )
+    }
+
+    #[napi]
     pub fn model_provider_refresh_impact_json(&self, request_json: String) -> napi::Result<String> {
         let bridge = self.bridge()?;
         let request = parse_json::<ModelProviderRefreshImpactRequest>(

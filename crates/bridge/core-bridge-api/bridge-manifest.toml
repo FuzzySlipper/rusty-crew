@@ -2311,6 +2311,42 @@ errors = "core_protocol::CoreError"
 summary = "Apply durable loop budgets and resolve one Telegram update to its exact diplomat session."
 
 [[operation]]
+name = "request_telegram_operator_consult"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::TelegramOperatorConsultRequest"
+output = "core_protocol::TelegramOperatorConsultRecord"
+errors = "core_protocol::CoreError"
+summary = "Authorize and persist one idempotent proactive consult for the exact active diplomat session."
+
+[[operation]]
+name = "prepare_telegram_operator_consult_delivery"
+surface = "stable"
+direction = "ts_to_rust"
+input = "consult_id: String"
+output = "core_protocol::TelegramOperatorConsultRecord"
+errors = "core_protocol::CoreError"
+summary = "Revalidate a pending consult against its exact current binding before adapter delivery or restart recovery."
+
+[[operation]]
+name = "settle_telegram_operator_consult"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::TelegramOperatorConsultSettlement"
+output = "core_protocol::TelegramOperatorConsultRecord"
+errors = "core_protocol::CoreError"
+summary = "Revision-settle a pending Telegram operator consult as sent or failed."
+
+[[operation]]
+name = "list_telegram_operator_consults"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::TelegramOperatorConsultQuery"
+output = "Vec<core_protocol::TelegramOperatorConsultRecord>"
+errors = "core_protocol::CoreError"
+summary = "Read bounded consult diagnostics and pending work for restart recovery."
+
+[[operation]]
 name = "model_provider_refresh_impact"
 surface = "stable"
 direction = "ts_to_rust"

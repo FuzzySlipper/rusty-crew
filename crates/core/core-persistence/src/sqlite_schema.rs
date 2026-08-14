@@ -7,7 +7,7 @@
 
 use super::*;
 
-pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 75;
+pub(crate) const CURRENT_SCHEMA_VERSION: i64 = 76;
 const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
 pub(crate) const SQLITE_BUSY_TIMEOUT_MS: u64 = 5_000;
 pub(crate) const SQLITE_WAL_AUTOCHECKPOINT_PAGES: u32 = 1_000;
@@ -393,6 +393,11 @@ pub(crate) const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[
         version: 75,
         description: "add normalized model endpoint and configuration registries",
         apply: repos::model_registry::migrate_v75_add_model_registry,
+    },
+    SchemaMigration {
+        version: 76,
+        description: "add durable Telegram operator consult delivery state",
+        apply: repos::install_diplomat::migrate_v76_add_telegram_operator_consults,
     },
 ];
 

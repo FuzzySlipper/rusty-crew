@@ -335,6 +335,12 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:coordination-tools",
   },
   {
+    name: "request_telegram_consult",
+    implementationModule:
+      "./telegram-consult-tools.js#requestTelegramConsultTool",
+    inventoryTest: "smoke:telegram-consult-tools",
+  },
+  {
     name: "submit_task_for_review",
     implementationModule:
       "./review-submission-tools.js#submitTaskForReviewTool",

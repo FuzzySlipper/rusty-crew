@@ -10574,6 +10574,275 @@
       ],
       "type": "string"
     },
+    "TelegramOperatorConsultCategory": {
+      "enum": [
+        "network_trouble",
+        "ambiguous_request",
+        "unfamiliar_machine_state",
+        "other"
+      ],
+      "type": "string"
+    },
+    "TelegramOperatorConsultQuery": {
+      "properties": {
+        "bindingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consultId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TelegramOperatorConsultStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TelegramOperatorConsultRecord": {
+      "properties": {
+        "adapterId": {
+          "type": "string"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "bindingId": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TelegramOperatorConsultCategory"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consultId": {
+          "type": "string"
+        },
+        "deliveryAttempts": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "externalChatId": {
+          "type": "string"
+        },
+        "externalMessageIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "externalThreadId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idempotencyKey": {
+          "type": "string"
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "originatingWakeKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profileId": {
+          "type": "string"
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestedAt": {
+          "type": "string"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schemaVersion": {
+          "type": "string"
+        },
+        "sentAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TelegramOperatorConsultStatus"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "wakeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "consultId",
+        "idempotencyKey",
+        "revision",
+        "bindingId",
+        "adapterId",
+        "agentId",
+        "sessionId",
+        "profileId",
+        "wakeId",
+        "toolCallId",
+        "body",
+        "externalChatId",
+        "status",
+        "deliveryAttempts",
+        "externalMessageIds",
+        "requestedAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "TelegramOperatorConsultRequest": {
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "caller": {
+          "$ref": "#/$defs/AgentCoordinationCaller"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TelegramOperatorConsultCategory"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "originatingWakeKind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "caller",
+        "body",
+        "requestedAt"
+      ],
+      "type": "object"
+    },
+    "TelegramOperatorConsultSettlement": {
+      "properties": {
+        "consultId": {
+          "type": "string"
+        },
+        "deliveryAttempts": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "expectedRevision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "externalMessageIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reasonCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "settledAt": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/TelegramOperatorConsultStatus"
+        }
+      },
+      "required": [
+        "consultId",
+        "expectedRevision",
+        "status",
+        "deliveryAttempts",
+        "externalMessageIds",
+        "settledAt"
+      ],
+      "type": "object"
+    },
+    "TelegramOperatorConsultStatus": {
+      "enum": [
+        "pending",
+        "sent",
+        "failed"
+      ],
+      "type": "string"
+    },
     "ToolCallMetadata": {
       "properties": {
         "adapter_id": {
@@ -11231,6 +11500,18 @@
     "telegram_diplomat_ingress_request": {
       "$ref": "#/$defs/TelegramDiplomatIngressRequest"
     },
+    "telegram_operator_consult_query": {
+      "$ref": "#/$defs/TelegramOperatorConsultQuery"
+    },
+    "telegram_operator_consult_record": {
+      "$ref": "#/$defs/TelegramOperatorConsultRecord"
+    },
+    "telegram_operator_consult_request": {
+      "$ref": "#/$defs/TelegramOperatorConsultRequest"
+    },
+    "telegram_operator_consult_settlement": {
+      "$ref": "#/$defs/TelegramOperatorConsultSettlement"
+    },
     "turn_projection_id": {
       "type": "string"
     }
@@ -11353,6 +11634,10 @@
     "install_diplomat_binding_query",
     "telegram_diplomat_ingress_request",
     "telegram_diplomat_ingress_plan",
+    "telegram_operator_consult_request",
+    "telegram_operator_consult_record",
+    "telegram_operator_consult_settlement",
+    "telegram_operator_consult_query",
     "crew_agent_session_creation_request",
     "crew_agent_session_creation_record",
     "external_runtime_registration",

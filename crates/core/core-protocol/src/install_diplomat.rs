@@ -1,9 +1,13 @@
-use crate::{AdapterId, AgentId, AgentInstanceId, IsoTimestamp, SessionId};
+use crate::{
+    AdapterId, AgentCoordinationCaller, AgentId, AgentInstanceId, IsoTimestamp, ProfileId,
+    SessionId,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 pub const TELEGRAM_INSTALL_DIPLOMAT_BINDING_VERSION: &str = "telegram_install_diplomat.v1";
 pub const TELEGRAM_DIPLOMAT_INTERACTION_VERSION: &str = "telegram_diplomat_interaction.v1";
+pub const TELEGRAM_OPERATOR_CONSULT_VERSION: &str = "telegram_operator_consult.v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -185,4 +189,83 @@ pub struct TelegramDiplomatIngressPlan {
     pub sender: TelegramDiplomatSender,
     pub reply_to_external_message_id: Option<String>,
     pub crew_correlation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TelegramOperatorConsultCategory {
+    NetworkTrouble,
+    AmbiguousRequest,
+    UnfamiliarMachineState,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TelegramOperatorConsultStatus {
+    Pending,
+    Sent,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramOperatorConsultRequest {
+    pub caller: AgentCoordinationCaller,
+    pub body: String,
+    pub category: Option<TelegramOperatorConsultCategory>,
+    pub originating_wake_kind: Option<String>,
+    pub requested_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramOperatorConsultRecord {
+    pub schema_version: String,
+    pub consult_id: String,
+    pub idempotency_key: String,
+    pub revision: u64,
+    pub binding_id: String,
+    pub adapter_id: AdapterId,
+    pub agent_id: AgentId,
+    pub session_id: SessionId,
+    pub profile_id: ProfileId,
+    pub wake_id: String,
+    pub tool_call_id: String,
+    pub originating_wake_kind: Option<String>,
+    pub category: Option<TelegramOperatorConsultCategory>,
+    pub body: String,
+    pub external_chat_id: String,
+    pub external_thread_id: Option<String>,
+    pub status: TelegramOperatorConsultStatus,
+    pub delivery_attempts: u32,
+    pub external_message_ids: Vec<String>,
+    pub reason_code: Option<String>,
+    pub last_error: Option<String>,
+    pub requested_at: IsoTimestamp,
+    pub updated_at: IsoTimestamp,
+    pub sent_at: Option<IsoTimestamp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramOperatorConsultSettlement {
+    pub consult_id: String,
+    pub expected_revision: u64,
+    pub status: TelegramOperatorConsultStatus,
+    pub delivery_attempts: u32,
+    pub external_message_ids: Vec<String>,
+    pub reason_code: Option<String>,
+    pub last_error: Option<String>,
+    pub settled_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TelegramOperatorConsultQuery {
+    pub consult_id: Option<String>,
+    pub binding_id: Option<String>,
+    pub session_id: Option<SessionId>,
+    pub status: Option<TelegramOperatorConsultStatus>,
+    pub limit: Option<u32>,
 }

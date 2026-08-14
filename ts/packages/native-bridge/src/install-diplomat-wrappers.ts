@@ -3,6 +3,7 @@ import type {
   NativeInstallDiplomatBindingRecord,
   NativeInstallDiplomatBridgeMethods,
   NativeTelegramDiplomatIngressPlan,
+  NativeTelegramOperatorConsultRecord,
 } from "./install-diplomat-public-api.js";
 
 export function createNativeBridgeInstallDiplomatMethods(
@@ -33,5 +34,21 @@ export function createNativeBridgeInstallDiplomatMethods(
       JSON.parse(
         binding.planTelegramDiplomatIngressJson(JSON.stringify(request)),
       ) as NativeTelegramDiplomatIngressPlan,
+    requestTelegramOperatorConsult: async (request) =>
+      JSON.parse(
+        binding.requestTelegramOperatorConsultJson(JSON.stringify(request)),
+      ) as NativeTelegramOperatorConsultRecord,
+    prepareTelegramOperatorConsultDelivery: async (consultId) =>
+      JSON.parse(
+        binding.prepareTelegramOperatorConsultDeliveryJson(consultId),
+      ) as NativeTelegramOperatorConsultRecord,
+    settleTelegramOperatorConsult: async (settlement) =>
+      JSON.parse(
+        binding.settleTelegramOperatorConsultJson(JSON.stringify(settlement)),
+      ) as NativeTelegramOperatorConsultRecord,
+    listTelegramOperatorConsults: async (query = {}) =>
+      JSON.parse(
+        binding.listTelegramOperatorConsultsJson(JSON.stringify(query)),
+      ) as NativeTelegramOperatorConsultRecord[],
   };
 }

@@ -123,7 +123,8 @@ use rusty_crew_core_protocol::{
     SessionActivityDigestQuery, SessionConfig, SessionHandle, SessionHistoryWindow, SessionId,
     SessionIdentityRecord, SessionKind, SessionState, SessionStatus, SessionWorkspace,
     SourceSystemReference, TaskId, TelegramDiplomatInteractionRecord,
-    TelegramDiplomatInteractionTerminalReason, ToolCallMetadata, ToolProfile,
+    TelegramDiplomatInteractionTerminalReason, TelegramOperatorConsultQuery,
+    TelegramOperatorConsultRecord, TelegramOperatorConsultStatus, ToolCallMetadata, ToolProfile,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value as JsonValue;

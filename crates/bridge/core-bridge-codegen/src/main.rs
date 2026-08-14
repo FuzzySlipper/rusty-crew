@@ -658,6 +658,22 @@ fn bridge_wire_schema_artifact() -> Result<BridgeWireSchemaArtifact> {
         "plan_telegram_diplomat_ingress",
         protocol::TelegramDiplomatIngressPlan
     );
+    schema!(
+        "request_telegram_operator_consult",
+        protocol::TelegramOperatorConsultRecord
+    );
+    schema!(
+        "prepare_telegram_operator_consult_delivery",
+        protocol::TelegramOperatorConsultRecord
+    );
+    schema!(
+        "settle_telegram_operator_consult",
+        protocol::TelegramOperatorConsultRecord
+    );
+    schema!(
+        "list_telegram_operator_consults",
+        Vec<protocol::TelegramOperatorConsultRecord>
+    );
     schema!("plan_brain_selection", brain_runtime::BrainSelectionPlan);
     schema!("list_agent_directory", Vec<protocol::AgentDirectoryEntry>);
     schema!(

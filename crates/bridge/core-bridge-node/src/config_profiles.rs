@@ -298,6 +298,35 @@ impl NativeBridge {
         self.engine()?.plan_telegram_diplomat_ingress(request)
     }
 
+    pub fn request_telegram_operator_consult(
+        &self,
+        request: TelegramOperatorConsultRequest,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        self.engine()?.request_telegram_operator_consult(request)
+    }
+
+    pub fn prepare_telegram_operator_consult_delivery(
+        &self,
+        consult_id: &str,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        self.engine()?
+            .prepare_telegram_operator_consult_delivery(consult_id)
+    }
+
+    pub fn settle_telegram_operator_consult(
+        &self,
+        settlement: TelegramOperatorConsultSettlement,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        self.engine()?.settle_telegram_operator_consult(settlement)
+    }
+
+    pub fn list_telegram_operator_consults(
+        &self,
+        query: &TelegramOperatorConsultQuery,
+    ) -> CoreResult<Vec<TelegramOperatorConsultRecord>> {
+        self.engine()?.list_telegram_operator_consults(query)
+    }
+
     pub fn list_model_providers(
         &self,
         query: &ModelProviderQuery,

@@ -6,6 +6,10 @@ import type {
   InstallDiplomatRebindRequest,
   TelegramDiplomatIngressPlan,
   TelegramDiplomatIngressRequest,
+  TelegramOperatorConsultQuery,
+  TelegramOperatorConsultRecord,
+  TelegramOperatorConsultRequest,
+  TelegramOperatorConsultSettlement,
 } from "@rusty-crew/contracts";
 
 export type NativeInstallDiplomatBindingQuery = InstallDiplomatBindingQuery;
@@ -17,6 +21,12 @@ export type NativeInstallDiplomatRebindRequest = InstallDiplomatRebindRequest;
 export type NativeTelegramDiplomatIngressPlan = TelegramDiplomatIngressPlan;
 export type NativeTelegramDiplomatIngressRequest =
   TelegramDiplomatIngressRequest;
+export type NativeTelegramOperatorConsultQuery = TelegramOperatorConsultQuery;
+export type NativeTelegramOperatorConsultRecord = TelegramOperatorConsultRecord;
+export type NativeTelegramOperatorConsultRequest =
+  TelegramOperatorConsultRequest;
+export type NativeTelegramOperatorConsultSettlement =
+  TelegramOperatorConsultSettlement;
 
 export interface NativeInstallDiplomatBridgeMethods {
   putInstallDiplomatBinding(
@@ -37,4 +47,16 @@ export interface NativeInstallDiplomatBridgeMethods {
   planTelegramDiplomatIngress(
     request: NativeTelegramDiplomatIngressRequest,
   ): Promise<NativeTelegramDiplomatIngressPlan>;
+  requestTelegramOperatorConsult(
+    request: NativeTelegramOperatorConsultRequest,
+  ): Promise<NativeTelegramOperatorConsultRecord>;
+  prepareTelegramOperatorConsultDelivery(
+    consultId: string,
+  ): Promise<NativeTelegramOperatorConsultRecord>;
+  settleTelegramOperatorConsult(
+    settlement: NativeTelegramOperatorConsultSettlement,
+  ): Promise<NativeTelegramOperatorConsultRecord>;
+  listTelegramOperatorConsults(
+    query?: NativeTelegramOperatorConsultQuery,
+  ): Promise<NativeTelegramOperatorConsultRecord[]>;
 }

@@ -5,7 +5,9 @@ use rusty_crew_core_protocol::{
     InstallDiplomatBindingQuery, InstallDiplomatBindingStatus, InstallDiplomatBindingWrite,
     InstallDiplomatParticipationMode, InstallDiplomatRebindRequest,
     TelegramDiplomatIngressDecision, TelegramDiplomatIngressRequest, TelegramDiplomatSender,
-    TelegramDiplomatSenderKind,
+    TelegramDiplomatSenderKind, TelegramOperatorConsultCategory, TelegramOperatorConsultQuery,
+    TelegramOperatorConsultRequest, TelegramOperatorConsultSettlement,
+    TelegramOperatorConsultStatus,
 };
 
 #[test]
@@ -415,6 +417,159 @@ fn diplomat_uses_normal_crew_messaging_and_specialist_needs_no_telegram_binding(
         reply.request.correlation_id.as_deref(),
         Some(correlation_id.as_str())
     );
+}
+
+#[test]
+fn operator_consult_is_exact_session_scoped_idempotent_and_restart_readable() {
+    let data_dir = unique_data_dir("telegram-operator-consult");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let diplomat = engine
+        .create_session(session_config(
+            "diplomat-session",
+            "install-diplomat",
+            "diplomat-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let unbound = engine
+        .create_session(session_config(
+            "unbound-session",
+            "other-agent",
+            "diplomat-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .put_install_diplomat_binding(binding_write(
+            "diplomat-binding",
+            &diplomat,
+            "-100500",
+            Some("42"),
+        ))
+        .unwrap();
+
+    let request_for = |session_id: SessionId| TelegramOperatorConsultRequest {
+        caller: AgentCoordinationCaller::DirectBrain {
+            session_id,
+            wake_id: "view-wake-1".to_string(),
+            tool_call_id: "consult-call-1".to_string(),
+        },
+        body: "Network diagnostics are ambiguous; should I inspect the router?".to_string(),
+        category: Some(TelegramOperatorConsultCategory::NetworkTrouble),
+        originating_wake_kind: Some("user_prompt".to_string()),
+        requested_at: "2026-06-19T00:02:00Z".to_string(),
+    };
+    let rejected = engine
+        .request_telegram_operator_consult(request_for(unbound.session_id))
+        .unwrap_err();
+    assert_eq!(
+        rejected.message,
+        "telegram_operator_consult_active_binding_required"
+    );
+
+    let record = engine
+        .request_telegram_operator_consult(request_for(diplomat.session_id.clone()))
+        .unwrap();
+    assert_eq!(record.status, TelegramOperatorConsultStatus::Pending);
+    assert_eq!(record.binding_id, "diplomat-binding");
+    assert_eq!(record.external_chat_id, "-100500");
+    assert_eq!(record.external_thread_id.as_deref(), Some("42"));
+    let duplicate = engine
+        .request_telegram_operator_consult(request_for(diplomat.session_id.clone()))
+        .unwrap();
+    assert_eq!(duplicate.consult_id, record.consult_id);
+    assert_eq!(
+        engine
+            .list_telegram_operator_consults(&TelegramOperatorConsultQuery {
+                session_id: Some(diplomat.session_id.clone()),
+                ..TelegramOperatorConsultQuery::default()
+            })
+            .unwrap()
+            .len(),
+        1
+    );
+
+    for (index, status) in [
+        InstallDiplomatBindingStatus::Paused,
+        InstallDiplomatBindingStatus::NeedsRebind,
+        InstallDiplomatBindingStatus::Removed,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let binding = engine
+            .get_install_diplomat_binding("diplomat-binding")
+            .unwrap()
+            .unwrap();
+        engine
+            .set_install_diplomat_binding_status(
+                rusty_crew_core_protocol::InstallDiplomatBindingStatusUpdate {
+                    binding_id: binding.binding_id,
+                    expected_revision: binding.revision,
+                    status,
+                    degraded_reason: None,
+                    updated_at: format!("2026-06-19T00:02:0{}Z", index + 1),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .prepare_telegram_operator_consult_delivery(&record.consult_id)
+                .unwrap_err()
+                .message,
+            "telegram_operator_consult_binding_unavailable"
+        );
+        assert_eq!(
+            engine
+                .request_telegram_operator_consult(request_for(diplomat.session_id.clone()))
+                .unwrap_err()
+                .message,
+            "telegram_operator_consult_active_binding_required"
+        );
+    }
+
+    let binding = engine
+        .get_install_diplomat_binding("diplomat-binding")
+        .unwrap()
+        .unwrap();
+    engine
+        .set_install_diplomat_binding_status(
+            rusty_crew_core_protocol::InstallDiplomatBindingStatusUpdate {
+                binding_id: binding.binding_id,
+                expected_revision: binding.revision,
+                status: InstallDiplomatBindingStatus::Active,
+                degraded_reason: None,
+                updated_at: "2026-06-19T00:02:04Z".to_string(),
+            },
+        )
+        .unwrap();
+    engine
+        .prepare_telegram_operator_consult_delivery(&record.consult_id)
+        .unwrap();
+    let sent = engine
+        .settle_telegram_operator_consult(TelegramOperatorConsultSettlement {
+            consult_id: record.consult_id.clone(),
+            expected_revision: record.revision,
+            status: TelegramOperatorConsultStatus::Sent,
+            delivery_attempts: 1,
+            external_message_ids: vec!["telegram-message-123".to_string()],
+            reason_code: Some("telegram_operator_consult_sent".to_string()),
+            last_error: None,
+            settled_at: "2026-06-19T00:02:05Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(sent.status, TelegramOperatorConsultStatus::Sent);
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let hydrated = restarted
+        .get_telegram_operator_consult(&record.consult_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(hydrated.status, TelegramOperatorConsultStatus::Sent);
+    assert_eq!(hydrated.external_message_ids, vec!["telegram-message-123"]);
+    drop(restarted);
+    let _ = std::fs::remove_dir_all(data_dir);
 }
 
 fn binding_write(

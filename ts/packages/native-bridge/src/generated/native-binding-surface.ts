@@ -66,6 +66,10 @@ export interface NativeBridgeBinding {
   getInstallDiplomatBindingJson(bindingId: string): string
   listInstallDiplomatBindingsJson(inputJson: string): string
   planTelegramDiplomatIngressJson(inputJson: string): string
+  requestTelegramOperatorConsultJson(inputJson: string): string
+  prepareTelegramOperatorConsultDeliveryJson(consultId: string): string
+  settleTelegramOperatorConsultJson(inputJson: string): string
+  listTelegramOperatorConsultsJson(inputJson: string): string
   modelProviderRefreshImpactJson(requestJson: string): string
   planModelProviderRefreshJson(requestJson: string): string
   saveMessageSlotJson(inputJson: string): void
@@ -939,7 +943,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 306,
+  "manifestOperationCount": 310,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -1460,6 +1464,38 @@ export const nativeBridgeBindingSurface = {
       "returnType": "string",
       "returnKind": "string",
       "operationName": "plan_telegram_diplomat_ingress"
+    },
+    {
+      "name": "requestTelegramOperatorConsultJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "request_telegram_operator_consult"
+    },
+    {
+      "name": "prepareTelegramOperatorConsultDeliveryJson",
+      "parameterSource": "consultId: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "prepare_telegram_operator_consult_delivery"
+    },
+    {
+      "name": "settleTelegramOperatorConsultJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "settle_telegram_operator_consult"
+    },
+    {
+      "name": "listTelegramOperatorConsultsJson",
+      "parameterSource": "inputJson: string",
+      "parameterCount": 1,
+      "returnType": "string",
+      "returnKind": "string",
+      "operationName": "list_telegram_operator_consults"
     },
     {
       "name": "modelProviderRefreshImpactJson",

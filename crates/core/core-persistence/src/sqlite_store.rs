@@ -380,6 +380,70 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn get_telegram_operator_consult(
+        &self,
+        consult_id: &str,
+    ) -> CoreResult<Option<TelegramOperatorConsultRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.get_telegram_operator_consult(consult_id),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.get_telegram_operator_consult(consult_id),
+        }
+    }
+
+    pub fn get_telegram_operator_consult_by_idempotency_key(
+        &self,
+        idempotency_key: &str,
+    ) -> CoreResult<Option<TelegramOperatorConsultRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.get_telegram_operator_consult_by_idempotency_key(idempotency_key)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.get_telegram_operator_consult_by_idempotency_key(idempotency_key)
+            }
+        }
+    }
+
+    pub fn list_telegram_operator_consults(
+        &self,
+        query: &TelegramOperatorConsultQuery,
+    ) -> CoreResult<Vec<TelegramOperatorConsultRecord>> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.list_telegram_operator_consults(query),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.list_telegram_operator_consults(query),
+        }
+    }
+
+    pub fn insert_telegram_operator_consult(
+        &self,
+        record: &TelegramOperatorConsultRecord,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        match self {
+            Self::Sqlite(sqlite) => sqlite.insert_telegram_operator_consult(record),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => postgres.insert_telegram_operator_consult(record),
+        }
+    }
+
+    pub fn update_telegram_operator_consult(
+        &self,
+        record: &TelegramOperatorConsultRecord,
+        expected_revision: u64,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        match self {
+            Self::Sqlite(sqlite) => {
+                sqlite.update_telegram_operator_consult(record, expected_revision)
+            }
+            #[cfg(feature = "postgres")]
+            Self::Postgres(postgres) => {
+                postgres.update_telegram_operator_consult(record, expected_revision)
+            }
+        }
+    }
+
     pub fn insert_runtime_activity(
         &self,
         record: &RuntimeActivityRecord,

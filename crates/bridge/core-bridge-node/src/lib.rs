@@ -132,6 +132,8 @@ use rusty_crew_core_protocol::{
     ReviewSubmissionTransitionRequest, ServiceCredentialDelete, ServiceCredentialQuery,
     ServiceCredentialRecord, ServiceCredentialWrite, SessionActivityDigest,
     SessionActivityDigestQuery, TelegramDiplomatIngressPlan, TelegramDiplomatIngressRequest,
+    TelegramOperatorConsultQuery, TelegramOperatorConsultRecord, TelegramOperatorConsultRequest,
+    TelegramOperatorConsultSettlement,
 };
 use rusty_crew_core_tool_registry::{
     plan_local_code_resource_policy, plan_tool_availability, plan_web_browser_resource_policy,

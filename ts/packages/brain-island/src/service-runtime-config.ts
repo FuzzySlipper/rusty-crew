@@ -46,6 +46,10 @@ import {
   createReviewSubmissionToolResolver,
   type ReviewSubmissionToolRuntime,
 } from "./review-submission-tools.js";
+import {
+  createTelegramConsultToolResolver,
+  type TelegramConsultToolRuntime,
+} from "./telegram-consult-tools.js";
 import { resolveCompletionTools } from "./completion-tools.js";
 import { createBuiltInBrainHost } from "./built-in-brain-host.js";
 import { providerRequestTimeoutDiagnostics } from "./provider-request-timeout.js";
@@ -836,6 +840,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   externalMemoryReadiness?: ExternalMemoryReadiness;
   coordinationRuntime?: CoordinationToolRuntime;
   reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
+  telegramConsultRuntime?: TelegramConsultToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
@@ -955,6 +960,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             externalMemoryReadiness,
             coordinationRuntime: input.coordinationRuntime,
             reviewSubmissionRuntime: input.reviewSubmissionRuntime,
+            telegramConsultRuntime: input.telegramConsultRuntime,
             toolCallDebugStore: input.toolCallDebugStore,
             providerRequestDebugStore: input.providerRequestDebugStore,
             browserResources,
@@ -1039,6 +1045,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
   externalMemoryReadiness?: ExternalMemoryReadiness;
   coordinationRuntime?: CoordinationToolRuntime;
+  telegramConsultRuntime?: TelegramConsultToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
   browserResources?: ServiceBrowserResources;
@@ -1130,6 +1137,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         adapterFactories: input.adapterFactories,
         externalMemoryReadiness,
         coordinationRuntime: input.coordinationRuntime,
+        telegramConsultRuntime: input.telegramConsultRuntime,
         toolCallDebugStore: input.toolCallDebugStore,
         providerRequestDebugStore: input.providerRequestDebugStore,
         browserResources,
@@ -1466,6 +1474,7 @@ async function createConfiguredBrain(
     externalMemoryReadiness: ExternalMemoryReadiness;
     coordinationRuntime?: CoordinationToolRuntime;
     reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
+    telegramConsultRuntime?: TelegramConsultToolRuntime;
     toolCallDebugStore?: ToolCallDebugStore;
     providerRequestDebugStore?: ProviderRequestDebugStore;
     browserResources: ServiceBrowserResources;
@@ -1532,6 +1541,7 @@ function createServiceToolResolver(
     externalMemoryReadiness: ExternalMemoryReadiness;
     coordinationRuntime?: CoordinationToolRuntime;
     reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
+    telegramConsultRuntime?: TelegramConsultToolRuntime;
     browserResources: ServiceBrowserResources;
     localCodeResourcePolicy: NativeLocalCodeResourcePolicyPlan;
   },
@@ -1606,6 +1616,7 @@ function createServiceToolResolver(
     resolveCompletionTools,
     createCoordinationToolResolver(options.coordinationRuntime),
     createReviewSubmissionToolResolver(options.reviewSubmissionRuntime),
+    createTelegramConsultToolResolver(options.telegramConsultRuntime),
     createPlanningToolResolver({
       bridge: options.bridge,
       runtimeConfig: options.runtimeConfig,

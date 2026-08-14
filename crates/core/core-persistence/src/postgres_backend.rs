@@ -123,11 +123,12 @@ use crate::{
     SessionMemorySelectedRecordDiagnostic, SessionMemorySupersede, SessionMessageVariantPageQuery,
     SessionState, SessionStatus, SimpleKvCompareAndSwap, SimpleKvDelete, SimpleKvQuery,
     SimpleKvRecord, SimpleKvScope, SimpleKvWrite, TaskId, TelegramDiplomatInteractionRecord,
-    ToolCallPhase, ToolCallRecord, UpdateBranchHeadRequest, UpdateBranchHeadResult,
-    WorkerPoolClaimRecord, WorkerPoolClaimRequest, WorkerPoolCompletionRequest,
-    WorkerPoolLeaseRecord, WorkerPoolLeaseStatus, WorkerPoolMemberRecord, WorkerPoolMemberStatus,
-    WorkerPoolNoCapacityReason, WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunQuery,
-    WorkerRunRecord, WorkerRunStatus,
+    TelegramOperatorConsultQuery, TelegramOperatorConsultRecord, ToolCallPhase, ToolCallRecord,
+    UpdateBranchHeadRequest, UpdateBranchHeadResult, WorkerPoolClaimRecord, WorkerPoolClaimRequest,
+    WorkerPoolCompletionRequest, WorkerPoolLeaseRecord, WorkerPoolLeaseStatus,
+    WorkerPoolMemberRecord, WorkerPoolMemberStatus, WorkerPoolNoCapacityReason,
+    WorkerPoolWorkItemRecord, WorkerPoolWorkStatus, WorkerRunQuery, WorkerRunRecord,
+    WorkerRunStatus,
 };
 use postgres::{types::ToSql, Client, GenericClient, Row, Transaction};
 use rusty_crew_core_protocol::{

@@ -20,6 +20,7 @@ import type {
   SessionState,
   SessionWorkspaceUpdateRecord,
   SubscriptionHandle,
+  TelegramOperatorConsultRecord,
 } from "@rusty-crew/contracts";
 import {
   loadNativeBridge,
@@ -55,6 +56,10 @@ import {
   type DeliveryIntentWakeDecision,
 } from "./channel-wake-policy.js";
 import type { CoordinationToolRuntime } from "./coordination-tools.js";
+import type {
+  TelegramConsultToolReceipt,
+  TelegramConsultToolRuntime,
+} from "./telegram-consult-tools.js";
 import { resolveRawDeliveryTarget } from "./coordination-addressing.js";
 import {
   createMemoryAdminControlAuditSink,
@@ -1145,6 +1150,9 @@ export async function createRustyCrewServiceApp(
           ? undefined
           : reviewSubmissionContext(liveState),
       ),
+      telegramConsultRuntime: createServiceTelegramConsultRuntime(
+        () => liveState,
+      ),
       toolCallDebugStore,
       providerRequestDebugStore,
       browserResources,
@@ -1275,6 +1283,7 @@ export async function createRustyCrewServiceApp(
       adapterLifecycleContext(state),
     );
     await startTelegramConnectorFromModule(adapterLifecycleContext(state));
+    await recoverPendingTelegramOperatorConsults(state);
     await reconcileReviewSubmissions(reviewSubmissionContext(state));
     const backgroundLoops: ServiceBackgroundLoopPort = {
       intervals: {
@@ -2184,8 +2193,12 @@ async function handleHttpRequest(
         bridge: state.bridge,
         config: state.config.telegram,
         connector: () => state.telegramConnector,
-        restartConnector: () =>
-          restartTelegramConnectorFromModule(adapterLifecycleContext(state)),
+        restartConnector: async () => {
+          await restartTelegramConnectorFromModule(
+            adapterLifecycleContext(state),
+          );
+          await recoverPendingTelegramOperatorConsults(state);
+        },
         now: state.now,
       },
     );
@@ -4135,6 +4148,7 @@ async function applyServiceRuntimeConfigFromDisk(
     reviewSubmissionRuntime: createServiceReviewSubmissionRuntime(() =>
       reviewSubmissionContext(state),
     ),
+    telegramConsultRuntime: createServiceTelegramConsultRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
     browserResources: state.browserResources,
@@ -4158,6 +4172,7 @@ async function applyServiceRuntimeConfigFromDisk(
   await previousMcpManager.shutdown();
   await ensureDenConversationChannelsFromModule(adapterLifecycleContext(state));
   await restartTelegramConnectorFromModule(adapterLifecycleContext(state));
+  await recoverPendingTelegramOperatorConsults(state);
   recordServiceEvent(state, {
     source: "service-host",
     eventType: options.eventType,
@@ -4180,6 +4195,7 @@ async function rebuildServiceBrainRuntime(
     adapterFactories: state.adapterFactories,
     externalMemoryReadiness: state.externalMemoryReadiness,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    telegramConsultRuntime: createServiceTelegramConsultRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
     browserResources: state.browserResources,
@@ -6389,6 +6405,237 @@ function createServiceCoordinationRuntime(
     },
   };
   return runtime;
+}
+
+export function createServiceTelegramConsultRuntime(
+  getState: () => ServiceState | undefined,
+): TelegramConsultToolRuntime {
+  return {
+    async request(input): Promise<TelegramConsultToolReceipt> {
+      const state = getState();
+      if (state === undefined) {
+        return {
+          ok: false,
+          reasonCode: "telegram_consult_runtime_not_ready",
+          summary: "The Telegram consult runtime is not ready.",
+        };
+      }
+      const requested = await state.bridge.requestTelegramOperatorConsult({
+        caller: input.caller,
+        body: input.message,
+        ...(input.category === undefined ? {} : { category: input.category }),
+        ...(input.originatingWakeKind === undefined
+          ? {}
+          : { originatingWakeKind: input.originatingWakeKind }),
+        requestedAt: state.now(),
+      });
+      if (requested.status === "sent") {
+        return consultReceipt(requested, true);
+      }
+      if (requested.status === "failed") {
+        return consultReceipt(requested, true);
+      }
+      const connector = state.telegramConnector;
+      if (connector === undefined) {
+        const failed = await settleTelegramConsultFailure(
+          state,
+          requested,
+          "telegram_connector_unavailable",
+          "Telegram connector is disabled or unavailable.",
+        );
+        return consultReceipt(failed, false);
+      }
+      let prepared: TelegramOperatorConsultRecord;
+      try {
+        prepared = await state.bridge.prepareTelegramOperatorConsultDelivery(
+          requested.consultId,
+        );
+      } catch (error) {
+        const failed = await settleTelegramConsultFailure(
+          state,
+          requested,
+          "telegram_consult_binding_unavailable",
+          telegramConsultErrorMessage(error),
+        );
+        return consultReceipt(failed, false);
+      }
+      if (prepared.status !== "pending") {
+        return consultReceipt(prepared, true);
+      }
+      try {
+        const rawReceipt = await connector.sendOutbound({
+          kind: "channel_outbound_message.v1",
+          adapterId: prepared.adapterId as AdapterId,
+          bindingId: prepared.bindingId,
+          runtime: {
+            agentId: prepared.agentId as AgentId,
+            sessionId: prepared.sessionId as SessionId,
+            profileId: prepared.profileId as ProfileId,
+          },
+          providerRefs: {
+            provider: "telegram",
+            externalChannelId: prepared.externalChatId,
+            ...(prepared.externalThreadId == null
+              ? {}
+              : { externalThreadId: prepared.externalThreadId }),
+          },
+          body: prepared.body,
+          correlationId: `telegram-consult:${prepared.consultId}`,
+          idempotencyKey: prepared.idempotencyKey,
+          visibility: "conversation",
+          deliveryPolicy: "must_ack",
+        });
+        const delivery = telegramConsultDeliveryReceipt(rawReceipt);
+        const sent = await state.bridge.settleTelegramOperatorConsult({
+          consultId: prepared.consultId,
+          expectedRevision: prepared.revision,
+          status: "sent",
+          deliveryAttempts: delivery.attempts,
+          externalMessageIds: delivery.externalMessageIds,
+          reasonCode: "telegram_operator_consult_sent",
+          settledAt: state.now(),
+        });
+        recordServiceEvent(state, {
+          source: "telegram",
+          eventType: "telegram_operator_consult_sent",
+          summary: `Telegram operator consult ${sent.consultId} sent for session ${sent.sessionId}.`,
+        });
+        return consultReceipt(sent, false);
+      } catch (error) {
+        const failed = await settleTelegramConsultFailure(
+          state,
+          prepared,
+          "telegram_operator_consult_delivery_failed",
+          telegramConsultErrorMessage(error),
+        );
+        return consultReceipt(failed, false);
+      }
+    },
+  };
+}
+
+export async function recoverPendingTelegramOperatorConsults(
+  state: ServiceState,
+): Promise<void> {
+  if (state.telegramConnector === undefined) return;
+  const records = await state.bridge
+    .listTelegramOperatorConsults({ status: "pending", limit: 100 })
+    .catch((error) => {
+      recordServiceEvent(state, {
+        source: "telegram",
+        eventType: "telegram_operator_consult_recovery_read_failed",
+        summary: `Pending Telegram consult recovery read failed: ${telegramConsultErrorMessage(error)}`,
+        severity: "warning",
+      });
+      return [];
+    });
+  const runtime = createServiceTelegramConsultRuntime(() => state);
+  for (const record of records.reverse()) {
+    await runtime
+      .request({
+        caller: {
+          type: "direct_brain",
+          sessionId: record.sessionId as SessionId,
+          wakeId: record.wakeId,
+          toolCallId: record.toolCallId,
+        },
+        message: record.body,
+        ...(record.category == null ? {} : { category: record.category }),
+        ...(record.originatingWakeKind == null
+          ? {}
+          : { originatingWakeKind: record.originatingWakeKind }),
+      })
+      .catch((error) => {
+        recordServiceEvent(state, {
+          source: "telegram",
+          eventType: "telegram_operator_consult_recovery_failed",
+          summary: `Telegram consult ${record.consultId} recovery failed: ${telegramConsultErrorMessage(error)}`,
+          severity: "warning",
+        });
+      });
+  }
+}
+
+async function settleTelegramConsultFailure(
+  state: ServiceState,
+  record: TelegramOperatorConsultRecord,
+  reasonCode: string,
+  lastError: string,
+): Promise<TelegramOperatorConsultRecord> {
+  if (record.status !== "pending") return record;
+  const failed = await state.bridge.settleTelegramOperatorConsult({
+    consultId: record.consultId,
+    expectedRevision: record.revision,
+    status: "failed",
+    deliveryAttempts:
+      reasonCode === "telegram_operator_consult_delivery_failed"
+        ? Math.max(record.deliveryAttempts, 1)
+        : record.deliveryAttempts,
+    externalMessageIds: record.externalMessageIds,
+    reasonCode,
+    lastError,
+    settledAt: state.now(),
+  });
+  recordServiceEvent(state, {
+    source: "telegram",
+    eventType: "telegram_operator_consult_failed",
+    summary: `Telegram operator consult ${failed.consultId} failed: ${reasonCode}.`,
+    severity: "warning",
+  });
+  return failed;
+}
+
+function telegramConsultDeliveryReceipt(value: unknown): {
+  attempts: number;
+  externalMessageIds: string[];
+} {
+  if (typeof value !== "object" || value === null) {
+    return { attempts: 1, externalMessageIds: [] };
+  }
+  const receipt = value as {
+    attempts?: unknown;
+    externalMessageIds?: unknown;
+  };
+  return {
+    attempts:
+      typeof receipt.attempts === "number" &&
+      Number.isSafeInteger(receipt.attempts) &&
+      receipt.attempts > 0
+        ? receipt.attempts
+        : 1,
+    externalMessageIds: Array.isArray(receipt.externalMessageIds)
+      ? receipt.externalMessageIds.filter(
+          (candidate): candidate is string => typeof candidate === "string",
+        )
+      : [],
+  };
+}
+
+function consultReceipt(
+  record: TelegramOperatorConsultRecord,
+  duplicate: boolean,
+): TelegramConsultToolReceipt {
+  const ok = record.status === "sent";
+  return {
+    ok,
+    consultId: record.consultId,
+    status: record.status,
+    duplicate,
+    bindingId: record.bindingId,
+    externalMessageIds: record.externalMessageIds,
+    ...(record.reasonCode == null ? {} : { reasonCode: record.reasonCode }),
+    summary: ok
+      ? duplicate
+        ? "This Telegram consult was already sent; it was not sent again."
+        : "Telegram consult sent to the bound remote operator."
+      : `Telegram consult was not sent${
+          record.reasonCode == null ? "." : `: ${record.reasonCode}.`
+        } The current turn can continue.`,
+  };
+}
+
+function telegramConsultErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function reviewSubmissionContext(

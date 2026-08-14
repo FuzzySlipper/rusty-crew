@@ -2443,6 +2443,64 @@ export type TelegramDiplomatSender = {
 
 export type TelegramDiplomatSenderKind = "human" | "bot" | "sender_chat";
 
+export type TelegramOperatorConsultCategory = "network_trouble" | "ambiguous_request" | "unfamiliar_machine_state" | "other";
+
+export type TelegramOperatorConsultQuery = {
+  bindingId?: string | null;
+  consultId?: string | null;
+  limit?: number | null;
+  sessionId?: string | null;
+  status?: TelegramOperatorConsultStatus | null;
+};
+
+export type TelegramOperatorConsultRecord = {
+  adapterId: string;
+  agentId: string;
+  bindingId: string;
+  body: string;
+  category?: TelegramOperatorConsultCategory | null;
+  consultId: string;
+  deliveryAttempts: number;
+  externalChatId: string;
+  externalMessageIds: Array<string>;
+  externalThreadId?: string | null;
+  idempotencyKey: string;
+  lastError?: string | null;
+  originatingWakeKind?: string | null;
+  profileId: string;
+  reasonCode?: string | null;
+  requestedAt: string;
+  revision: number;
+  schemaVersion: string;
+  sentAt?: string | null;
+  sessionId: string;
+  status: TelegramOperatorConsultStatus;
+  toolCallId: string;
+  updatedAt: string;
+  wakeId: string;
+};
+
+export type TelegramOperatorConsultRequest = {
+  body: string;
+  caller: AgentCoordinationCaller;
+  category?: TelegramOperatorConsultCategory | null;
+  originatingWakeKind?: string | null;
+  requestedAt: string;
+};
+
+export type TelegramOperatorConsultSettlement = {
+  consultId: string;
+  deliveryAttempts: number;
+  expectedRevision: number;
+  externalMessageIds: Array<string>;
+  lastError?: string | null;
+  reasonCode?: string | null;
+  settledAt: string;
+  status: TelegramOperatorConsultStatus;
+};
+
+export type TelegramOperatorConsultStatus = "pending" | "sent" | "failed";
+
 export type ToolCallMetadata = {
   adapterId?: AdapterId;
   bindingId?: string | null;

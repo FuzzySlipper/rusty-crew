@@ -1,13 +1,16 @@
 use super::*;
 use rusty_crew_core_protocol::{
-    InstallDiplomatBindingQuery, InstallDiplomatBindingRecord, InstallDiplomatBindingStatus,
-    InstallDiplomatBindingStatusUpdate, InstallDiplomatBindingWrite,
+    AgentCoordinationCaller, InstallDiplomatBindingQuery, InstallDiplomatBindingRecord,
+    InstallDiplomatBindingStatus, InstallDiplomatBindingStatusUpdate, InstallDiplomatBindingWrite,
     InstallDiplomatParticipationMode, InstallDiplomatRebindRequest,
     TelegramDiplomatIngressDecision, TelegramDiplomatIngressPlan, TelegramDiplomatIngressRequest,
     TelegramDiplomatInteractionRecord, TelegramDiplomatInteractionTerminalReason,
-    TelegramDiplomatSenderKind, TELEGRAM_DIPLOMAT_INTERACTION_VERSION,
-    TELEGRAM_INSTALL_DIPLOMAT_BINDING_VERSION,
+    TelegramDiplomatSenderKind, TelegramOperatorConsultQuery, TelegramOperatorConsultRecord,
+    TelegramOperatorConsultRequest, TelegramOperatorConsultSettlement,
+    TelegramOperatorConsultStatus, TELEGRAM_DIPLOMAT_INTERACTION_VERSION,
+    TELEGRAM_INSTALL_DIPLOMAT_BINDING_VERSION, TELEGRAM_OPERATOR_CONSULT_VERSION,
 };
+use sha2::{Digest, Sha256};
 
 const DEFAULT_TELEGRAM_BOT_DEPTH_LIMIT: u32 = 6;
 const DEFAULT_TELEGRAM_BOT_MESSAGE_LIMIT: u32 = 8;
@@ -327,6 +330,214 @@ impl CoreEngine {
         })
     }
 
+    pub fn request_telegram_operator_consult(
+        &self,
+        request: TelegramOperatorConsultRequest,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        let _guard = self.install_diplomat_lock.lock().map_err(|_| {
+            CoreError::new(
+                CoreErrorKind::InternalError,
+                "install diplomat consult lock poisoned",
+            )
+        })?;
+        validate_operator_consult_request(&request)?;
+        let AgentCoordinationCaller::DirectBrain {
+            session_id,
+            wake_id,
+            tool_call_id,
+        } = &request.caller
+        else {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "telegram_operator_consult_direct_brain_required",
+            ));
+        };
+        let (agent_id, resolved_session_id, _) =
+            self.resolve_coordination_caller(&request.caller)?;
+        if resolved_session_id.as_ref() != Some(session_id) {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "telegram_operator_consult_caller_session_mismatch",
+            ));
+        }
+        let session = self.validate_diplomat_session(session_id, &agent_id)?;
+        let bindings = self
+            .store
+            .list_install_diplomat_bindings(&InstallDiplomatBindingQuery {
+                session_id: Some(session_id.clone()),
+                status: Some(InstallDiplomatBindingStatus::Active),
+                ..InstallDiplomatBindingQuery::default()
+            })?;
+        let binding = match bindings.as_slice() {
+            [binding] => binding,
+            [] => {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "telegram_operator_consult_active_binding_required",
+                ));
+            }
+            _ => {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "telegram_operator_consult_binding_ambiguous",
+                ));
+            }
+        };
+        self.validate_diplomat_session(&binding.session_id, &binding.agent_id)?;
+        let idempotency_key = format!("{}:{}:{}", session_id.0, wake_id, tool_call_id);
+        if let Some(existing) = self
+            .store
+            .get_telegram_operator_consult_by_idempotency_key(&idempotency_key)?
+        {
+            if existing.session_id != *session_id
+                || existing.binding_id != binding.binding_id
+                || existing.body != request.body.trim()
+                || existing.category != request.category
+            {
+                return Err(CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "telegram_operator_consult_idempotency_conflict",
+                ));
+            }
+            return Ok(existing);
+        }
+        let consult_id = format!(
+            "telegram-consult-{}",
+            sha256_hex(idempotency_key.as_bytes())
+        );
+        self.store
+            .insert_telegram_operator_consult(&TelegramOperatorConsultRecord {
+                schema_version: TELEGRAM_OPERATOR_CONSULT_VERSION.to_string(),
+                consult_id,
+                idempotency_key,
+                revision: 1,
+                binding_id: binding.binding_id.clone(),
+                adapter_id: binding.adapter_id.clone(),
+                agent_id: session.agent_id,
+                session_id: session.session_id,
+                profile_id: session.profile_id,
+                wake_id: wake_id.clone(),
+                tool_call_id: tool_call_id.clone(),
+                originating_wake_kind: normalize_optional(request.originating_wake_kind),
+                category: request.category,
+                body: request.body.trim().to_string(),
+                external_chat_id: binding.external_chat_id.clone(),
+                external_thread_id: binding.external_thread_id.clone(),
+                status: TelegramOperatorConsultStatus::Pending,
+                delivery_attempts: 0,
+                external_message_ids: Vec::new(),
+                reason_code: None,
+                last_error: None,
+                requested_at: request.requested_at.clone(),
+                updated_at: request.requested_at,
+                sent_at: None,
+            })
+    }
+
+    pub fn prepare_telegram_operator_consult_delivery(
+        &self,
+        consult_id: &str,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        let record = self
+            .store
+            .get_telegram_operator_consult(consult_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    "telegram_operator_consult_not_found",
+                )
+            })?;
+        if record.status != TelegramOperatorConsultStatus::Pending {
+            return Ok(record);
+        }
+        let binding = self
+            .store
+            .get_install_diplomat_binding(&record.binding_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::ActionRejected,
+                    "telegram_operator_consult_binding_unavailable",
+                )
+            })?;
+        if binding.status != InstallDiplomatBindingStatus::Active
+            || binding.session_id != record.session_id
+            || binding.agent_id != record.agent_id
+            || binding.adapter_id != record.adapter_id
+            || binding.external_chat_id != record.external_chat_id
+            || binding.external_thread_id != record.external_thread_id
+        {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "telegram_operator_consult_binding_unavailable",
+            ));
+        }
+        self.validate_diplomat_session(&record.session_id, &record.agent_id)?;
+        Ok(record)
+    }
+
+    pub fn settle_telegram_operator_consult(
+        &self,
+        settlement: TelegramOperatorConsultSettlement,
+    ) -> CoreResult<TelegramOperatorConsultRecord> {
+        if settlement.status == TelegramOperatorConsultStatus::Pending {
+            return Err(CoreError::new(
+                CoreErrorKind::InvalidInput,
+                "telegram_operator_consult_terminal_status_required",
+            ));
+        }
+        parse_rfc3339(&settlement.settled_at)?;
+        let mut record = self
+            .store
+            .get_telegram_operator_consult(&settlement.consult_id)?
+            .ok_or_else(|| {
+                CoreError::new(
+                    CoreErrorKind::NotFound,
+                    "telegram_operator_consult_not_found",
+                )
+            })?;
+        if record.status != TelegramOperatorConsultStatus::Pending {
+            if record.status == settlement.status {
+                return Ok(record);
+            }
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "telegram_operator_consult_already_terminal",
+            ));
+        }
+        if record.revision != settlement.expected_revision {
+            return Err(CoreError::new(
+                CoreErrorKind::ActionRejected,
+                "telegram_operator_consult_revision_conflict",
+            ));
+        }
+        record.revision += 1;
+        record.status = settlement.status;
+        record.delivery_attempts = settlement.delivery_attempts;
+        record.external_message_ids = settlement.external_message_ids;
+        record.reason_code = normalize_optional(settlement.reason_code);
+        record.last_error = normalize_optional(settlement.last_error)
+            .map(|value| value.chars().take(1_024).collect());
+        record.updated_at = settlement.settled_at.clone();
+        record.sent_at = (settlement.status == TelegramOperatorConsultStatus::Sent)
+            .then_some(settlement.settled_at);
+        self.store
+            .update_telegram_operator_consult(&record, settlement.expected_revision)
+    }
+
+    pub fn get_telegram_operator_consult(
+        &self,
+        consult_id: &str,
+    ) -> CoreResult<Option<TelegramOperatorConsultRecord>> {
+        self.store.get_telegram_operator_consult(consult_id)
+    }
+
+    pub fn list_telegram_operator_consults(
+        &self,
+        query: &TelegramOperatorConsultQuery,
+    ) -> CoreResult<Vec<TelegramOperatorConsultRecord>> {
+        self.store.list_telegram_operator_consults(query)
+    }
+
     pub(crate) fn degrade_install_diplomat_bindings_for_session(
         &self,
         session_id: &SessionId,
@@ -429,6 +640,34 @@ fn validate_binding_write(write: &InstallDiplomatBindingWrite) -> CoreResult<()>
         }
     }
     parse_rfc3339(&write.updated_at)?;
+    Ok(())
+}
+
+fn validate_operator_consult_request(request: &TelegramOperatorConsultRequest) -> CoreResult<()> {
+    let body = request.body.trim();
+    if body.is_empty() {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "telegram_operator_consult_body_required",
+        ));
+    }
+    if body.chars().count() > 4_096 {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "telegram_operator_consult_body_too_long",
+        ));
+    }
+    if request
+        .originating_wake_kind
+        .as_ref()
+        .is_some_and(|value| value.chars().count() > 128)
+    {
+        return Err(CoreError::new(
+            CoreErrorKind::InvalidInput,
+            "telegram_operator_consult_wake_kind_too_long",
+        ));
+    }
+    parse_rfc3339(&request.requested_at)?;
     Ok(())
 }
 
@@ -614,4 +853,8 @@ fn normalize_optional(value: Option<String>) -> Option<String> {
         let value = value.trim().to_string();
         (!value.is_empty()).then_some(value)
     })
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
