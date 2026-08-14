@@ -105,18 +105,34 @@ export function createReloadMcpControlExecutor(
     }
 
     const binding = await options.resolveBinding(sessionId, command);
-    const plan = await options.planReloadMcpControl({
-      command: {
-        commandKind: command.name,
-        targetSessionId: sessionId,
-        requestId: command.requestId,
-        idempotencyKey: command.idempotencyKey,
-        operatorReason: reason,
-        operatorReasonCode: command.reasonCode,
-      },
-      binding: binding ? reloadPlanBinding(binding) : undefined,
-      reloadHandlerAvailable: true,
-    });
+    let plan: Awaited<ReturnType<typeof options.planReloadMcpControl>>;
+    try {
+      plan = await options.planReloadMcpControl({
+        command: {
+          commandKind: command.name,
+          targetSessionId: sessionId,
+          requestId: command.requestId,
+          idempotencyKey: command.idempotencyKey,
+          operatorReason: reason,
+          operatorReasonCode: command.reasonCode,
+        },
+        binding: binding ? reloadPlanBinding(binding) : undefined,
+        reloadHandlerAvailable: true,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return message.includes(
+        "native bridge operation plan_reload_mcp_control is unavailable",
+      )
+        ? failed(
+            "native_reload_mcp_planner_unavailable",
+            "The native bridge fallback is active; no Rust reload-MCP planner was loaded.",
+          )
+        : failed(
+            "native_reload_mcp_planner_failed",
+            `The loaded Rust reload-MCP planner failed: ${message}`,
+          );
+    }
     if (!plan.accepted) {
       return failed(
         plan.denial?.reasonCode ?? "reload_mcp_plan_denied",

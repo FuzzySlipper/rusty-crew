@@ -546,6 +546,9 @@ export interface McpBindingDiagnostics {
   lastError?: string;
   lastCheckedAt?: string;
   notes?: string;
+  reconciliationSource?: "profile_registry";
+  desiredProfileBindingId?: string;
+  connectionState?: string;
 }
 
 export interface McpBindingRecord {

@@ -2736,6 +2736,37 @@ fn profile_registry_supports_lifecycle_revisions_and_asset_refs() {
 }
 
 #[test]
+fn profile_mcp_intent_survives_restart_without_materialized_bindings() {
+    let db_path = temp_db_path("profile-mcp-intent-without-materialization");
+    let store = CoordinationStore::open_file(&db_path).unwrap();
+    let mut write = profile_registry_write("ambassador-profile");
+    write.active_runtime_settings_json = json!({
+        "mcpBindings": [{
+            "serverId": "den",
+            "bindingId": "ambassador-den",
+            "serverNames": ["den"],
+            "transport": "streamable_http"
+        }]
+    });
+    store.create_profile_registry_record(&write).unwrap();
+    assert_eq!(store.count_rows("mcp_bindings").unwrap(), 0);
+    drop(store);
+
+    let reopened = CoordinationStore::open_file(&db_path).unwrap();
+    let profile = reopened
+        .get_profile_registry_record(&ProfileId::new("ambassador-profile"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        profile.active_runtime_settings_json["mcpBindings"][0]["serverId"],
+        "den"
+    );
+    assert_eq!(reopened.count_rows("mcp_bindings").unwrap(), 0);
+    drop(reopened);
+    remove_temp_db(&db_path);
+}
+
+#[test]
 fn profile_purge_removes_registry_sessions_and_profile_owned_readbacks() {
     let db_path = temp_db_path("profile-purge");
     let store = CoordinationStore::open_file(&db_path).unwrap();

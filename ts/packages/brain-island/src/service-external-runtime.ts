@@ -30,6 +30,9 @@ import {
   projectCodexErrorDiagnostic,
   type CollaborationMode,
   type CodexControllerAuthority,
+  type DynamicToolSpec,
+  type DynamicToolCallParams,
+  type DynamicToolCallResponse,
   type CodexInitializeIdentity,
   type Model,
   type CodexProtocolFault,
@@ -354,6 +357,14 @@ export class ServiceExternalRuntimeController {
     sessionId: string,
     storageUrl: string,
   ) => Promise<string>;
+  readonly #profileDynamicTools?: (
+    binding: ExternalAgentBinding,
+  ) => Promise<readonly DynamicToolSpec[]>;
+  readonly #resolveProfileDynamicToolCall?: (input: {
+    params: DynamicToolCallParams;
+    binding: ExternalAgentBinding;
+  }) => Promise<DynamicToolCallResponse | undefined>;
+  readonly #onCrewSessionPrepared?: (profileId: string) => Promise<unknown>;
   readonly #driverFactory: (
     registration: ExternalRuntimeRegistration,
     authority: CodexControllerAuthority,
@@ -395,6 +406,14 @@ export class ServiceExternalRuntimeController {
       sessionId: string,
       storageUrl: string,
     ) => Promise<string>;
+    profileDynamicTools?: (
+      binding: ExternalAgentBinding,
+    ) => Promise<readonly DynamicToolSpec[]>;
+    resolveProfileDynamicToolCall?: (input: {
+      params: DynamicToolCallParams;
+      binding: ExternalAgentBinding;
+    }) => Promise<DynamicToolCallResponse | undefined>;
+    onCrewSessionPrepared?: (profileId: string) => Promise<unknown>;
     recoveryBaseDelayMs?: number;
     recoveryMaxDelayMs?: number;
   }) {
@@ -407,6 +426,9 @@ export class ServiceExternalRuntimeController {
     this.#mediaCaptureSink = input.mediaCaptureSink;
     this.#documentCaptureSink = input.documentCaptureSink;
     this.#resolveInputImage = input.resolveInputImage;
+    this.#profileDynamicTools = input.profileDynamicTools;
+    this.#resolveProfileDynamicToolCall = input.resolveProfileDynamicToolCall;
+    this.#onCrewSessionPrepared = input.onCrewSessionPrepared;
     this.#recoveryBaseDelayMs =
       input.recoveryBaseDelayMs ?? DEFAULT_RECOVERY_BASE_DELAY_MS;
     this.#recoveryMaxDelayMs =
@@ -1391,11 +1413,17 @@ export class ServiceExternalRuntimeController {
     );
     let creation =
       await this.#bridge.prepareExternalAgentSessionCreation(request);
+    await this.#onCrewSessionPrepared?.(request.profileId);
     if (creation.phase === "ready") {
-      return this.#externalAgentSessionCreationResult(controlled, creation);
+      return this.#externalAgentSessionCreationResult(
+        controlled,
+        creation,
+        false,
+      );
     }
 
     let nativeThreadId: string | undefined;
+    let catalogAppliedToNativeThread = false;
     try {
       creation = await this.#bridge.markExternalAgentSessionNativeStarting({
         controller: this.#controllerContext(controlled),
@@ -1412,6 +1440,10 @@ export class ServiceExternalRuntimeController {
       );
       if (recovered !== undefined) {
         nativeThreadId = recovered.id;
+        // This source identifies the thread started for this exact creation
+        // attempt. A lost start/complete response must reuse it without
+        // manufacturing a second native thread.
+        catalogAppliedToNativeThread = true;
         const resumed = await controlled.driver.threadResume({
           threadId: recovered.id,
           cwd: creation.request.cwd,
@@ -1434,13 +1466,12 @@ export class ServiceExternalRuntimeController {
           sandbox: "danger-full-access",
           ephemeral: false,
           environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [
-            ...codexCoordinationDynamicToolsForProfile(creation.binding),
-          ],
+          dynamicTools: await this.#dynamicTools(creation.binding),
           threadSource: creation.nativeThreadSource,
           developerInstructions,
         });
         nativeThreadId = started.thread.id;
+        catalogAppliedToNativeThread = true;
         controlled.threadSettings.set(nativeThreadId, {
           model: started.model,
           modelProvider: started.modelProvider,
@@ -1455,7 +1486,11 @@ export class ServiceExternalRuntimeController {
         nativeThreadId,
         now: this.#now().toISOString(),
       });
-      return this.#externalAgentSessionCreationResult(controlled, creation);
+      return this.#externalAgentSessionCreationResult(
+        controlled,
+        creation,
+        catalogAppliedToNativeThread,
+      );
     } catch (error) {
       const failureReason = externalAgentSessionCreationFailureReason(
         error,
@@ -1465,7 +1500,12 @@ export class ServiceExternalRuntimeController {
         .prepareExternalAgentSessionCreation(request)
         .catch(() => undefined);
       if (reconciled?.phase === "ready") {
-        return this.#externalAgentSessionCreationResult(controlled, reconciled);
+        await this.#onCrewSessionPrepared?.(request.profileId);
+        return this.#externalAgentSessionCreationResult(
+          controlled,
+          reconciled,
+          false,
+        );
       }
       if (reconciled !== undefined) {
         await this.#bridge
@@ -1528,6 +1568,43 @@ export class ServiceExternalRuntimeController {
     );
   }
 
+  async refreshProfileDynamicTools(profileId: string): Promise<{
+    profileId: string;
+    refreshed: string[];
+    unchanged: string[];
+    pending: Array<{ bindingId: string; reason: string }>;
+  }> {
+    const refreshed: string[] = [];
+    const unchanged: string[] = [];
+    const pending: Array<{ bindingId: string; reason: string }> = [];
+    const bindings = (await this.#bridge.listExternalBindings()).filter(
+      (binding) =>
+        binding.status === "active" &&
+        binding.profileId === profileId &&
+        typeof binding.nativeThreadId === "string",
+    );
+    for (const binding of bindings) {
+      const fingerprint = await this.#dynamicToolCatalogFingerprint(binding);
+      if (binding.dynamicToolCatalogFingerprint === fingerprint) {
+        unchanged.push(binding.bindingId);
+        continue;
+      }
+      try {
+        const controlled = await this.#requireControlled(binding.runtimeId);
+        await this.#refreshBindingDynamicTools(
+          controlled,
+          binding as ExternalAgentBinding & { nativeThreadId: string },
+          await this.#developerInstructionsForBinding(binding),
+          fingerprint,
+        );
+        refreshed.push(binding.bindingId);
+      } catch (error) {
+        pending.push({ bindingId: binding.bindingId, reason: String(error) });
+      }
+    }
+    return { profileId, refreshed, unchanged, pending };
+  }
+
   async refreshBindingProfileInstructions(input: {
     bindingId: string;
     expectedBindingRevision: number;
@@ -1581,7 +1658,7 @@ export class ServiceExternalRuntimeController {
 
     if (binding.profilePromptHash === profile.promptHash) {
       const dynamicToolCatalogFingerprint =
-        codexCoordinationDynamicToolCatalogFingerprint(binding);
+        await this.#dynamicToolCatalogFingerprint(binding);
       if (
         binding.dynamicToolCatalogFingerprint !== dynamicToolCatalogFingerprint
       ) {
@@ -2307,7 +2384,7 @@ export class ServiceExternalRuntimeController {
           nativeThreadId: string;
         };
         const desiredDynamicToolCatalogFingerprint =
-          codexCoordinationDynamicToolCatalogFingerprint(currentBinding);
+          await this.#dynamicToolCatalogFingerprint(currentBinding);
         if (
           currentBinding.dynamicToolCatalogFingerprint !==
           desiredDynamicToolCatalogFingerprint
@@ -2419,19 +2496,100 @@ export class ServiceExternalRuntimeController {
     readonly settings: ControlledThreadSettings;
     readonly previousNativeThreadArchived: boolean;
   }> {
-    void developerInstructions;
-    const replacement = await this.#createDistinctThreadSuccessor(
+    await this.#assertThreadHasNoCrewWork(
+      binding.runtimeId,
+      binding.nativeThreadId,
+      [binding],
+    );
+    const cwd = await this.#sessionWorkspaceCwd(binding);
+    const previousSettings = await this.#effectiveThreadSettings(
       controlled,
       binding,
-      `dynamic-tools:${binding.bindingId}:${dynamicToolCatalogFingerprint}:${binding.nativeThreadId}`,
-      "dynamic_tool_catalog_refresh",
-      true,
-    );
+    ).catch(() => undefined);
+    const started = await controlled.driver.threadStart({
+      cwd,
+      approvalPolicy: "never",
+      sandbox: "danger-full-access",
+      ephemeral: false,
+      environments: [{ environmentId: "local", cwd }],
+      dynamicTools: await this.#dynamicTools(binding),
+      developerInstructions,
+      ...(previousSettings?.model === undefined
+        ? {}
+        : { model: previousSettings.model }),
+    });
+    const settings: ControlledThreadSettings = {
+      model: started.model,
+      modelProvider: started.modelProvider,
+      reasoning_effort:
+        previousSettings?.reasoning_effort ?? started.reasoningEffort,
+      developer_instructions: developerInstructions,
+    };
+    let updated: ExternalAgentBinding;
+    try {
+      updated = await this.#bridge.bindExternalAgent({
+        binding: {
+          ...binding,
+          nativeThreadId: started.thread.id,
+          dynamicToolCatalogFingerprint,
+          updatedAt: this.#now().toISOString(),
+        },
+        expectedRevision: binding.revision,
+      });
+    } catch (error) {
+      await controlled.driver
+        .threadArchive({
+          threadId: started.thread.id,
+        })
+        .catch(() => undefined);
+      throw error;
+    }
+    controlled.threadSettings.set(started.thread.id, settings);
+    if (binding.label != null) {
+      await controlled.driver.threadSetName({
+        threadId: started.thread.id,
+        name: binding.label,
+      });
+    }
+    let previousNativeThreadArchived = false;
+    try {
+      await controlled.driver.threadArchive({
+        threadId: binding.nativeThreadId,
+      });
+      controlled.archivedThreadIds.add(binding.nativeThreadId);
+      controlled.threadSettings.delete(binding.nativeThreadId);
+      previousNativeThreadArchived = true;
+    } catch {
+      // The exact Crew session and updated binding are already authoritative.
+      // A stale native predecessor is visible cleanup diagnostics, not grounds
+      // to roll back the callable successor.
+    }
+    await this.#bridge.recordExternalRuntimeEvent({
+      controller: this.#controllerContext(controlled),
+      event: {
+        eventId: `dynamic-tools:${binding.bindingId}:${updated.revision}`,
+        ...(binding.sessionId == null ? {} : { sessionId: binding.sessionId }),
+        createdAt: this.#now().toISOString(),
+        kind: "thread_lineage_replaced",
+        runtimeId: binding.runtimeId,
+        nativeThreadId: started.thread.id,
+        requestId: null,
+        payload: {
+          reasonCode: "dynamic_tool_catalog_refresh",
+          sameCrewSession: true,
+          predecessorNativeThreadId: binding.nativeThreadId,
+          successorNativeThreadId: started.thread.id,
+          bindingId: binding.bindingId,
+          sessionId: binding.sessionId ?? null,
+          previousNativeThreadArchived,
+        },
+      },
+    });
     return {
-      binding: replacement.binding,
-      nativeThreadId: replacement.nativeThreadId,
-      settings: replacement.settings,
-      previousNativeThreadArchived: replacement.previousNativeThreadArchived,
+      binding: updated,
+      nativeThreadId: started.thread.id,
+      settings,
+      previousNativeThreadArchived,
     };
   }
 
@@ -2823,6 +2981,7 @@ export class ServiceExternalRuntimeController {
   async #externalAgentSessionCreationResult(
     controlled: ControlledRuntime,
     creation: ExternalAgentSessionCreationRecord,
+    catalogAppliedToNativeThread: boolean,
   ): Promise<ExternalAgentSessionCreateResult> {
     if (
       creation.phase !== "ready" ||
@@ -2875,31 +3034,42 @@ export class ServiceExternalRuntimeController {
       };
     }
     const dynamicToolCatalogFingerprint =
-      codexCoordinationDynamicToolCatalogFingerprint(binding);
+      await this.#dynamicToolCatalogFingerprint(binding);
     if (
       binding.dynamicToolCatalogFingerprint !== dynamicToolCatalogFingerprint
     ) {
-      binding = await this.#bridge.bindExternalAgent({
-        binding: {
-          ...binding,
-          dynamicToolCatalogFingerprint,
-          updatedAt: this.#now().toISOString(),
-        },
-        expectedRevision: binding.revision,
-      });
+      if (catalogAppliedToNativeThread) {
+        binding = await this.#bridge.bindExternalAgent({
+          binding: {
+            ...binding,
+            dynamicToolCatalogFingerprint,
+            updatedAt: this.#now().toISOString(),
+          },
+          expectedRevision: binding.revision,
+        });
+      } else if (typeof binding.nativeThreadId === "string") {
+        binding = (
+          await this.#refreshBindingDynamicTools(
+            controlled,
+            binding as ExternalAgentBinding & { nativeThreadId: string },
+            await this.#developerInstructionsForBinding(binding),
+            dynamicToolCatalogFingerprint,
+          )
+        ).binding;
+      }
     }
     if (
       requestedLabel !== null &&
       bindingMetadataMatches(currentBinding, requestedLabel, requestedTaskRef)
     ) {
       await controlled.driver.threadSetName({
-        threadId: creation.nativeThreadId,
+        threadId: binding.nativeThreadId ?? creation.nativeThreadId,
         name: requestedLabel,
       });
     }
     const read = await controlled.driver
       .threadRead({
-        threadId: creation.nativeThreadId,
+        threadId: binding.nativeThreadId ?? creation.nativeThreadId,
         includeTurns: false,
       })
       .catch((error: unknown) => {
@@ -2910,7 +3080,11 @@ export class ServiceExternalRuntimeController {
         );
       });
     return {
-      creation: { ...creation, binding },
+      creation: {
+        ...creation,
+        nativeThreadId: binding.nativeThreadId ?? creation.nativeThreadId,
+        binding,
+      },
       runtime: controlled.registration,
       thread: await this.#projectExternalThread(
         controlled,
@@ -3948,7 +4122,7 @@ export class ServiceExternalRuntimeController {
           sandbox: "danger-full-access",
           ephemeral: false,
           environments: [{ environmentId: "local", cwd }],
-          dynamicTools: [...codexCoordinationDynamicToolsForProfile(binding)],
+          dynamicTools: await this.#dynamicTools(binding),
           baseInstructions: undefined,
           developerInstructions,
         });
@@ -3963,7 +4137,7 @@ export class ServiceExternalRuntimeController {
             ...binding,
             nativeThreadId: started.thread.id,
             dynamicToolCatalogFingerprint:
-              codexCoordinationDynamicToolCatalogFingerprint(binding),
+              await this.#dynamicToolCatalogFingerprint(binding),
             updatedAt: this.#now().toISOString(),
           },
           expectedRevision: binding.revision,
@@ -4424,15 +4598,44 @@ export class ServiceExternalRuntimeController {
         onReviewCompletion: this.#onReviewCompletion,
         now: this.#now,
       });
-      return result === undefined
+      const resolved =
+        result ??
+        (await this.#resolveProfileDynamicToolCall?.({ params, binding }));
+      return resolved === undefined
         ? {
             type: "error",
             code: -32601,
             message: "unsupported Rusty Crew dynamic tool",
           }
-        : { type: "success", result };
+        : { type: "success", result: resolved };
     }
     return this.#waitForInteraction(controlled, context);
+  }
+
+  async #dynamicTools(
+    binding: ExternalAgentBinding,
+  ): Promise<DynamicToolSpec[]> {
+    return [
+      ...codexCoordinationDynamicToolsForProfile(binding),
+      ...((await this.#profileDynamicTools?.(binding)) ?? []),
+    ];
+  }
+
+  async #dynamicToolCatalogFingerprint(
+    binding: ExternalAgentBinding,
+  ): Promise<string> {
+    const coordination =
+      codexCoordinationDynamicToolCatalogFingerprint(binding);
+    const profileTools = (await this.#profileDynamicTools?.(binding)) ?? [];
+    if (profileTools.length === 0) return coordination;
+    return createHash("sha256")
+      .update(
+        JSON.stringify({
+          coordination,
+          profileTools,
+        }),
+      )
+      .digest("hex");
   }
 
   async #waitForInteraction(

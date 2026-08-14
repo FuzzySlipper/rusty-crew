@@ -1513,6 +1513,84 @@ test("controller scopes Codex coordination tools by the bound reviewer profile",
   }
 });
 
+test("external creation reconciles the exact Crew session before composing profile MCP tools", async () => {
+  let reconciledProfileId: string | undefined;
+  let observedSessionId: string | null | undefined;
+  const fixture = await externalCreationFixture(
+    false,
+    undefined,
+    undefined,
+    false,
+    "creation-profile",
+    undefined,
+    undefined,
+    undefined,
+    {
+      onCrewSessionPrepared: async (profileId) => {
+        reconciledProfileId = profileId;
+      },
+      profileDynamicTools: async (binding) => {
+        assert.equal(reconciledProfileId, binding.profileId);
+        observedSessionId = binding.sessionId;
+        return [
+          {
+            type: "namespace" as const,
+            name: "mcp",
+            description: "Exact-session profile MCP tools",
+            tools: [
+              {
+                type: "function" as const,
+                name: "den__get_task",
+                description: "Read one Den task",
+                inputSchema: {
+                  type: "object",
+                  properties: { taskId: { type: "number" } },
+                  required: ["taskId"],
+                  additionalProperties: false,
+                },
+              },
+            ],
+          },
+        ];
+      },
+    },
+  );
+  try {
+    const created = await fixture.controller.createAgentSession({
+      idempotencyKey: "profile-mcp-creation-order",
+      runtimeId: fixture.runtimeId,
+      profileId: fixture.profileId,
+      cwd: fixture.dataDir,
+      requestedAt: new Date().toISOString(),
+    });
+    assert.equal(reconciledProfileId, fixture.profileId);
+    assert.equal(observedSessionId, created.creation.binding.sessionId);
+    const start = fixture.transport.sent.find(
+      (message) => message.method === "thread/start",
+    );
+    const namespaces = (start?.params as Record<string, unknown>)
+      .dynamicTools as Array<{
+      name?: string;
+      tools?: Array<{ name?: string }>;
+    }>;
+    assert.deepEqual(namespaces.find((entry) => entry.name === "mcp")?.tools, [
+      {
+        type: "function",
+        name: "den__get_task",
+        description: "Read one Den task",
+        inputSchema: {
+          type: "object",
+          properties: { taskId: { type: "number" } },
+          required: ["taskId"],
+          additionalProperties: false,
+        },
+      },
+    ]);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("reconnect replaces a native thread when its dynamic tool catalog is stale", async () => {
   const fixture = await externalCreationFixture(
     false,
@@ -1603,23 +1681,16 @@ test("reconnect replaces a native thread when its dynamic tool catalog is stale"
     });
     await recoveredController.connect(fixture.runtimeId);
 
-    const predecessor = await fixture.bridge.getExternalBinding(
-      stale.bindingId,
-    );
-    const after = (await fixture.bridge.listExternalBindings()).find(
-      (binding) => binding.lineage?.predecessorBindingId === stale.bindingId,
-    );
-    assert.ok(predecessor);
+    const after = await fixture.bridge.getExternalBinding(stale.bindingId);
     assert.ok(after);
-    assert.equal(predecessor.nativeThreadId, before.nativeThreadId);
-    assert.equal(predecessor.status, "archived");
+    assert.equal(after.bindingId, before.bindingId);
     assert.notEqual(after.nativeThreadId, before.nativeThreadId);
     assert.equal(
       after.dynamicToolCatalogFingerprint,
       before.dynamicToolCatalogFingerprint,
     );
-    assert.notEqual(after.sessionId, before.sessionId);
-    assert.notEqual(after.agentId, before.agentId);
+    assert.equal(after.sessionId, before.sessionId);
+    assert.equal(after.agentId, before.agentId);
     assert.equal(after.label, before.label);
     assert.ok(
       fixture.transport.archivedThreadIds.has(before.nativeThreadId as string),
@@ -4827,6 +4898,10 @@ async function externalCreationFixture(
     sessionId: string,
     storageUrl: string,
   ) => Promise<string>,
+  capabilities?: Pick<
+    ConstructorParameters<typeof ServiceExternalRuntimeController>[0],
+    "onCrewSessionPrepared" | "profileDynamicTools"
+  >,
 ) {
   const dataDir = mkdtempSync(
     join(tmpdir(), "rusty-crew-external-creation-controller-"),
@@ -4907,6 +4982,7 @@ async function externalCreationFixture(
     mediaCaptureSink,
     documentCaptureSink,
     resolveInputImage,
+    ...capabilities,
     instanceId: "creation-test-controller",
     driverFactory: (_registration, authority) =>
       new CodexAppServerDriver(transport, authority, {

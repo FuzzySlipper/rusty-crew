@@ -31,6 +31,7 @@ import type {
   RustyCrewRuntimeConfig,
   RustyCrewRuntimeConfigApplyResult,
 } from "./service-runtime-config.js";
+import type { ProfileMcpReconciliationDiagnostic } from "./profile-mcp-reconciliation.js";
 import { buildBuiltInToolCatalog } from "./tool-registry.js";
 
 export type ProfileRegistryWritePlan = NativeProfileRegistryMutationPlan;
@@ -57,6 +58,15 @@ export interface ProfileRegistryRuntimeConfigMutationContext {
     summaryPrefix: string;
   }): Promise<RustyCrewRuntimeConfigApplyResult>;
   rebuildBrainRuntime(profileId: string): Promise<void>;
+  reconcileProfileMcpBindings(profileId: string): Promise<{
+    desiredCount: number;
+    activeSessionCount: number;
+    materializedCount: number;
+    removedBindingIds: string[];
+    changed: boolean;
+    diagnostics: ProfileMcpReconciliationDiagnostic[];
+  }>;
+  refreshExternalProfileMcpTools(profileId: string): Promise<unknown>;
 }
 
 export interface ProfileRegistryRuntimeConfigPlan {
@@ -249,6 +259,12 @@ export async function applyProfileRegistryRuntimeConfigEffects(
   profilePath: string;
   runtimeConfigPath: string;
   mcpBindings: { removed: number; added: number };
+  reconciliation: Awaited<
+    ReturnType<
+      ProfileRegistryRuntimeConfigMutationContext["reconcileProfileMcpBindings"]
+    >
+  >;
+  externalMcpRefresh?: unknown;
   applyResult: RustyCrewRuntimeConfigApplyResult;
   brainRebuilt: boolean;
   externalBindingRebuildRecommended: boolean;
@@ -276,12 +292,6 @@ export async function applyProfileRegistryRuntimeConfigEffects(
     (entry) =>
       runtimeEntryString(entry, "profileId", "profile_id") === record.profileId,
   );
-  const runtimeMcpBindings = runtimeMcpBindingsForProfile(
-    context,
-    record,
-    plan.runtimeConfig,
-  );
-  mcpBindings.push(...runtimeMcpBindings);
   await writeJsonFileAtomic(context.serviceConfigFile, runtimeConfigFile.value);
 
   const applyResult = await context.applyRuntimeConfigFromDisk({
@@ -289,15 +299,25 @@ export async function applyProfileRegistryRuntimeConfigEffects(
     eventType: "profile_runtime_config_updated",
     summaryPrefix: `Profile ${record.profileId} runtime config updated`,
   });
-  if (plan.implications.runtimeRebuildRecommended) {
+  const reconciliation = await context.reconcileProfileMcpBindings(
+    record.profileId,
+  );
+  const externalMcpRefresh = plan.implications.mcpRefreshRecommended
+    ? await context.refreshExternalProfileMcpTools(record.profileId)
+    : undefined;
+  const brainRebuilt =
+    plan.implications.runtimeRebuildRecommended || reconciliation.changed;
+  if (brainRebuilt) {
     await context.rebuildBrainRuntime(record.profileId);
   }
   return {
     profilePath,
     runtimeConfigPath: context.serviceConfigFile,
-    mcpBindings: { removed, added: runtimeMcpBindings.length },
+    mcpBindings: { removed, added: reconciliation.materializedCount },
+    reconciliation,
+    externalMcpRefresh,
     applyResult,
-    brainRebuilt: plan.implications.runtimeRebuildRecommended,
+    brainRebuilt,
     externalBindingRebuildRecommended:
       plan.implications.externalBindingRebuildRecommended,
   };
@@ -662,32 +682,6 @@ async function readProfileConfigJsonForMutation(
   }
   parsed.profileId = profileId;
   return parsed;
-}
-
-function runtimeMcpBindingsForProfile(
-  context: ProfileRegistryRuntimeConfigMutationContext,
-  record: NativeProfileRegistryRecord,
-  runtimeConfig: EditableProfileRuntimeConfig,
-): Record<string, unknown>[] {
-  const session = context.runtimeConfig.sessions.find(
-    (candidate) => String(candidate.profileId) === record.profileId,
-  );
-  const agentId = String(
-    record.agentId ?? session?.agentId ?? record.profileId,
-  );
-  return runtimeConfig.mcpBindings.map((binding, index) => ({
-    bindingId: binding.bindingId ?? `${agentId}-mcp-${index + 1}`,
-    adapterId: binding.adapterId ?? "mcp-ts-main",
-    agentId,
-    sessionId: String(session?.sessionId ?? `${record.profileId}-session`),
-    profileId: record.profileId,
-    serverNames: binding.serverNames ?? [binding.serverId],
-    endpointRef: `config://mcp/${binding.serverId}`,
-    transport: binding.transport ?? "streamable_http",
-    toolProfileKey: binding.toolProfileKey ?? record.profileId,
-    status: "active",
-    diagnostics: {},
-  }));
 }
 
 function editableMcpBindingFromRuntime(

@@ -66,6 +66,28 @@ export interface AdminProfileRegistryRecord {
     transport?: string;
     toolProfileKey?: string;
   }>;
+  /** Desired profile capability templates. `mcpBindings` remains an alias. */
+  desiredMcpBindings?: AdminProfileRegistryRecord["mcpBindings"];
+  /** Exact-session records currently materialized in the live Crew runtime. */
+  materializedMcpBindings: Array<{
+    serverId: string;
+    bindingId: string;
+    sessionId?: string;
+    agentId: string;
+    status: string;
+    connectionState?: string;
+    toolProfileKey: string;
+    sessionKind: "ordinary" | "managed_external";
+    appliedProfileRevision?: number;
+    externalBindingId?: string;
+  }>;
+  mcpReconciliation: {
+    state: "converged" | "pending_no_session" | "reconciliation_required";
+    desiredCount: number;
+    materializedCount: number;
+    sessionCount: number;
+    action: "none" | "reload_mcp";
+  };
   promptSoulMarkdown?: string;
   promptMemoryMarkdown?: string;
   revision?: number;
@@ -107,7 +129,11 @@ export interface BuildAdminProfileRegistryDiagnosticsInput {
     Partial<
       Pick<
         NativeBridgeModule,
-        "getModelConfiguration" | "getModelEndpoint" | "getServiceCredential"
+        | "getModelConfiguration"
+        | "getModelEndpoint"
+        | "getServiceCredential"
+        | "listSessions"
+        | "listExternalBindings"
       >
     >;
   runtimeConfig: RustyCrewRuntimeConfig;
@@ -145,6 +171,7 @@ export async function buildAdminProfileRegistryDiagnostics(
     )
   ).sort((left, right) => left.profileId.localeCompare(right.profileId));
   const diagnostics = [
+    ...(input.runtimeConfig.recoveryDiagnostics ?? []),
     ...missingRegistryDiagnostics,
     ...records.flatMap((record) => record.diagnostics),
   ];
@@ -188,7 +215,80 @@ async function registryAdminRecord(
     record.sourceAssetRefs,
     runtimeConfig.profilesDir,
   );
+  const [sessions, externalBindings] = await Promise.all([
+    typeof bridge.listSessions === "function" ? bridge.listSessions() : [],
+    typeof bridge.listExternalBindings === "function"
+      ? bridge.listExternalBindings()
+      : [],
+  ]);
+  const externalBySessionId = new Map(
+    externalBindings.flatMap((binding) =>
+      binding.status === "active" && typeof binding.sessionId === "string"
+        ? [[binding.sessionId, binding] as const]
+        : [],
+    ),
+  );
+  const sessionsById = new Map(
+    sessions.map((session) => [String(session.sessionId), session]),
+  );
   const runtime = runtimeConfigReadbackFromRegistry(record, runtimeConfig);
+  const desiredMcpBindings = mcpBindingsFromSettings(
+    recordValue(record.activeRuntimeSettingsJson).mcpBindings ??
+      recordValue(record.activeRuntimeSettingsJson).mcp_bindings,
+  );
+  const materializedMcpBindings = runtimeConfig.mcpBindings
+    .filter((binding) => String(binding.profileId) === record.profileId)
+    .map((binding) => ({
+      serverId: serverIdFromMcpBinding(binding),
+      bindingId: binding.bindingId,
+      sessionId: binding.sessionId,
+      agentId: String(binding.agentId),
+      status: binding.status,
+      connectionState:
+        typeof binding.diagnostics.connectionState === "string"
+          ? binding.diagnostics.connectionState
+          : undefined,
+      toolProfileKey: binding.toolProfileKey,
+      sessionKind:
+        binding.sessionId !== undefined &&
+        externalBySessionId.has(String(binding.sessionId))
+          ? ("managed_external" as const)
+          : ("ordinary" as const),
+      appliedProfileRevision:
+        binding.sessionId === undefined
+          ? undefined
+          : (externalBySessionId.get(String(binding.sessionId))
+              ?.profileRevision ??
+            (sessionsById.has(String(binding.sessionId))
+              ? record.revision
+              : undefined)),
+      externalBindingId:
+        binding.sessionId === undefined
+          ? undefined
+          : externalBySessionId.get(String(binding.sessionId))?.bindingId,
+    }));
+  const activeProfileSessionCount = sessions.filter(
+    (session) =>
+      String(session.profileId) === record.profileId &&
+      session.status !== "archived",
+  ).length;
+  const desiredCount = desiredMcpBindings?.length ?? 0;
+  const expectedMaterializedCount = desiredCount * activeProfileSessionCount;
+  const mcpReconciliation = {
+    state:
+      desiredCount > 0 && activeProfileSessionCount === 0
+        ? ("pending_no_session" as const)
+        : materializedMcpBindings.length === expectedMaterializedCount
+          ? ("converged" as const)
+          : ("reconciliation_required" as const),
+    desiredCount,
+    materializedCount: materializedMcpBindings.length,
+    sessionCount: activeProfileSessionCount,
+    action:
+      materializedMcpBindings.length === expectedMaterializedCount
+        ? ("none" as const)
+        : ("reload_mcp" as const),
+  };
   const modelDependencyResolution = await resolveAdminModelDependencies(
     record.profileId,
     runtime.modelConfigId,
@@ -220,6 +320,9 @@ async function registryAdminRecord(
     toolPolicy: runtime.toolPolicy,
     contextPolicy: runtime.contextPolicy,
     mcpBindings: runtime.mcpBindings,
+    desiredMcpBindings,
+    materializedMcpBindings,
+    mcpReconciliation,
     promptSoulMarkdown: record.promptSoulMarkdown,
     promptMemoryMarkdown: record.promptMemoryMarkdown,
     revision: record.revision,
@@ -455,9 +558,9 @@ function runtimeConfigReadbackFromRegistry(
 } {
   const settings = recordValue(record.activeRuntimeSettingsJson);
   const settingsProfile = profileConfigFromRegistrySettings(settings);
-  const mcpBindings = runtimeConfig.mcpBindings
-    .filter((binding) => String(binding.profileId) === record.profileId)
-    .map(adminMcpBindingFromRuntime);
+  const desiredMcpBindings = mcpBindingsFromSettings(
+    settings.mcpBindings ?? settings.mcp_bindings,
+  );
   return {
     externalMessageDeliveryPolicy: parseExternalMessageDeliveryPolicy(
       settings.externalMessageDeliveryPolicy ??
@@ -480,12 +583,7 @@ function runtimeConfigReadbackFromRegistry(
       contextStrategyPolicyFromUnknown(
         settings.contextPolicy ?? settings.context_policy,
       ) ?? settingsProfile.contextPolicy,
-    mcpBindings:
-      mcpBindings.length > 0
-        ? mcpBindings
-        : mcpBindingsFromSettings(
-            settings.mcpBindings ?? settings.mcp_bindings,
-          ),
+    mcpBindings: desiredMcpBindings,
   };
 }
 
@@ -510,19 +608,6 @@ function profileConfigFromRegistrySettings(settings: Record<string, unknown>): {
     localToolProfileId: stringValue(profile.localToolProfileId),
     toolPolicy: toolPolicyFromUnknown(profile.toolPolicy),
     contextPolicy: contextStrategyPolicyFromUnknown(profile.contextPolicy),
-  };
-}
-
-function adminMcpBindingFromRuntime(
-  binding: McpBindingRecord,
-): NonNullable<AdminProfileRegistryRecord["mcpBindings"]>[number] {
-  return {
-    serverId: serverIdFromMcpBinding(binding),
-    bindingId: binding.bindingId,
-    adapterId: String(binding.adapterId),
-    serverNames: binding.serverNames,
-    transport: binding.transport,
-    toolProfileKey: binding.toolProfileKey,
   };
 }
 

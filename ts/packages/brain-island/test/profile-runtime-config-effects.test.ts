@@ -45,6 +45,19 @@ test("runtime config effects rebuild the active brain when the plan requires it"
       async rebuildBrainRuntime(profileId: string) {
         calls.push(`rebuild:${profileId}`);
       },
+      async reconcileProfileMcpBindings() {
+        return {
+          desiredCount: 0,
+          activeSessionCount: 0,
+          materializedCount: 0,
+          removedBindingIds: [],
+          changed: false,
+          diagnostics: [],
+        };
+      },
+      async refreshExternalProfileMcpTools() {
+        return { refreshed: [] };
+      },
     } as unknown as ProfileRegistryRuntimeConfigMutationContext;
     const record = profileRecord();
     const plan = {

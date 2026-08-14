@@ -11,6 +11,7 @@ import type {
   CoreEvent,
   EngineHandle,
   EngineStorageConfig,
+  ExternalAgentBinding,
   McpBindingRecord,
   ProfileId,
   ResourceLimits,
@@ -72,7 +73,12 @@ import {
 import { createNewSessionLifecycleExecutor } from "./new-session-lifecycle.js";
 import { createReloadMcpControlExecutor } from "./reload-mcp-control.js";
 import { createBridgeToolMetadataPolicyValidator } from "./mcp-tool-registry-integration.js";
-import { createDefaultMcpDiscoveryClient } from "./service-mcp-tools.js";
+import {
+  buildServiceMcpEndpointConfig,
+  buildServiceMcpToolCatalog,
+  callConfiguredMcpTool,
+  createDefaultMcpDiscoveryClient,
+} from "./service-mcp-tools.js";
 import { createLocalToolProfileStore } from "./local-tool-profiles.js";
 import {
   handleAdminDiagnosticsRequest,
@@ -149,6 +155,10 @@ import {
   planProfileRegistryWrite as planProfileRegistryWriteFromModule,
   type ProfileRegistryRuntimeConfigPlan as ExtractedProfileRegistryRuntimeConfigPlan,
 } from "./service-profile-runtime-mutations.js";
+import {
+  reconcileRuntimeProfileMcpBindings,
+  type RuntimeProfileMcpReconciliationResult,
+} from "./profile-mcp-reconciliation.js";
 import {
   applyServiceProfileUpdate as applyServiceProfileUpdateFromModule,
   applyServiceRuntimeConfigDraft as applyServiceRuntimeConfigDraftFromModule,
@@ -628,6 +638,10 @@ function profileRuntimeMutationContext(state: ServiceState) {
     rebuildBrainRuntime: async (profileId: string) => {
       await rebuildServiceBrainRuntime(state, profileId as ProfileId);
     },
+    reconcileProfileMcpBindings: async (profileId: string) =>
+      reconcileServiceProfileMcpBindings(state, profileId),
+    refreshExternalProfileMcpTools: (profileId: string) =>
+      state.externalRuntimeController.refreshProfileDynamicTools(profileId),
   };
 }
 
@@ -1028,7 +1042,7 @@ export async function createRustyCrewServiceApp(
   let engine: EngineHandle | undefined;
 
   try {
-    const runtimeConfig = await loadRustyCrewRuntimeConfig(config);
+    let runtimeConfig = await loadRustyCrewRuntimeConfig(config);
     const storage = runtimeConfig.storage ?? config.storage;
     engine = await bridge.initializeEngine({
       engineDataDir: config.paths.engineDataDir,
@@ -1037,6 +1051,9 @@ export async function createRustyCrewServiceApp(
       defaultIdleTimeoutMs: 30_000,
       storage: engineStorageConfig(storage, serviceEnv),
     });
+    runtimeConfig = (
+      await reconcileRuntimeProfileMcpBindings({ bridge, runtimeConfig })
+    ).runtimeConfig;
     const profileChannelWakePolicies =
       await loadProfileChannelWakePolicies(runtimeConfig);
     const mcpManager = await createServiceMcpManager(
@@ -1090,6 +1107,25 @@ export async function createRustyCrewServiceApp(
       documentCaptureSink: toolMediaAttachments,
       resolveInputImage: (sessionId, storageUrl) =>
         toolMediaAttachments.resolveExternalInputImage(sessionId, storageUrl),
+      profileDynamicTools: async (binding) => {
+        const state = liveState;
+        return state === undefined
+          ? []
+          : externalProfileMcpDynamicTools(state, binding);
+      },
+      resolveProfileDynamicToolCall: async ({ params, binding }) => {
+        const state = liveState;
+        return state === undefined
+          ? undefined
+          : resolveExternalProfileMcpToolCall(state, params, binding);
+      },
+      onCrewSessionPrepared: async (profileId) => {
+        const state = liveState;
+        if (state === undefined) return;
+        await withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+          reconcileServiceProfileMcpBindings(state, profileId),
+        );
+      },
       now: () => new Date((options.now ?? (() => new Date().toISOString()))()),
       onCoordinationDelivery: async (receipt) => {
         const state = liveState;
@@ -1886,6 +1922,10 @@ async function handleHttpRequest(
         requestId,
         readJsonBody,
         corsHeaders: chatCorsHeaders,
+        reconcileProfileMcpBindings: (profileId) =>
+          withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+            reconcileServiceProfileMcpBindings(state, profileId),
+          ),
       }),
       request,
     );
@@ -3783,6 +3823,107 @@ async function createServiceMcpManager(
   return manager;
 }
 
+async function externalProfileMcpCandidates(
+  state: ServiceState,
+  binding: ExternalAgentBinding,
+) {
+  if (binding.sessionId == null) return [];
+  const session = (await state.bridge.listSessions()).find(
+    (candidate) => candidate.sessionId === binding.sessionId,
+  );
+  if (session === undefined || session.status === "archived") return [];
+  const catalog = await buildServiceMcpToolCatalog({
+    bridge: state.bridge,
+    runtimeConfig: state.runtimeConfig,
+    mcpConfig: state.config.mcp,
+    surfaceDiagnostics: state.mcpManager.diagnostics(),
+  });
+  return catalog.candidatesForSession(session);
+}
+
+async function externalProfileMcpDynamicTools(
+  state: ServiceState,
+  binding: ExternalAgentBinding,
+) {
+  const candidates = await externalProfileMcpCandidates(state, binding);
+  if (candidates.length === 0) return [];
+  return [
+    {
+      type: "namespace" as const,
+      name: "mcp",
+      description:
+        "MCP capabilities selected by this Rusty Crew profile and materialized for this exact session.",
+      tools: candidates.map(({ candidate }) => ({
+        type: "function" as const,
+        name: candidate.name,
+        description: candidate.description,
+        inputSchema: candidate.parameters as never,
+      })),
+    },
+  ];
+}
+
+async function resolveExternalProfileMcpToolCall(
+  state: ServiceState,
+  params: {
+    namespace: string | null;
+    tool: string;
+    arguments: unknown;
+  },
+  externalBinding: ExternalAgentBinding,
+) {
+  if (params.namespace !== "mcp") return undefined;
+  const candidates = await externalProfileMcpCandidates(state, externalBinding);
+  const selected = candidates.find(
+    ({ candidate }) => candidate.name === params.tool,
+  );
+  if (selected === undefined) {
+    return {
+      success: false,
+      contentItems: [
+        {
+          type: "inputText" as const,
+          text: `MCP tool ${params.tool} is not callable for session ${externalBinding.sessionId ?? "unknown"}; reconcile or reload the profile MCP binding.`,
+        },
+      ],
+    };
+  }
+  try {
+    const result = await callConfiguredMcpTool({
+      binding: selected.binding,
+      config: buildServiceMcpEndpointConfig({
+        mcpConfig: state.config.mcp,
+        mcpServers: state.runtimeConfig.mcpServers,
+      }),
+      toolName: selected.candidate.source.sourceToolName,
+      arguments: isRecord(params.arguments) ? params.arguments : {},
+      clientName: `rusty-crew-external:${externalBinding.bindingId}`,
+    });
+    return {
+      success: !result.isError,
+      contentItems: [
+        {
+          type: "inputText" as const,
+          text: JSON.stringify({
+            content: result.content,
+            details: result.details,
+          }),
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      success: false,
+      contentItems: [
+        {
+          type: "inputText" as const,
+          text: error instanceof Error ? error.message : String(error),
+        },
+      ],
+    };
+  }
+}
+
 async function loadProfileChannelWakePolicies(
   runtimeConfig: RustyCrewRuntimeConfig,
 ): Promise<Map<string, ChannelWakePolicy>> {
@@ -4118,7 +4259,12 @@ async function applyServiceRuntimeConfigFromDisk(
     summaryPrefix: string;
   },
 ): Promise<RustyCrewRuntimeConfigApplyResult> {
-  const nextRuntimeConfig = await loadRustyCrewRuntimeConfig(state.config);
+  const loadedRuntimeConfig = await loadRustyCrewRuntimeConfig(state.config);
+  const reconciliation = await reconcileRuntimeProfileMcpBindings({
+    bridge: state.bridge,
+    runtimeConfig: loadedRuntimeConfig,
+  });
+  const nextRuntimeConfig = reconciliation.runtimeConfig;
   assertServiceStorageBootAllowed(
     nextRuntimeConfig.storage ?? state.config.storage,
     "runtime config reload",
@@ -4179,6 +4325,55 @@ async function applyServiceRuntimeConfigFromDisk(
     summary: runtimeConfigApplySummary(options.summaryPrefix, nextApplyResult),
   });
   return nextApplyResult;
+}
+
+async function reconcileServiceProfileMcpBindings(
+  state: ServiceState,
+  profileId: string,
+): Promise<RuntimeProfileMcpReconciliationResult["profiles"][number]> {
+  const reconciliation = await reconcileRuntimeProfileMcpBindings({
+    bridge: state.bridge,
+    runtimeConfig: state.runtimeConfig,
+    profileIds: [profileId],
+  });
+  const profile = reconciliation.profiles[0] ?? {
+    profileId,
+    desiredCount: 0,
+    activeSessionCount: 0,
+    materializedCount: 0,
+    removedBindingIds: [],
+    changed: false,
+    diagnostics: [],
+  };
+  if (!profile.changed) return profile;
+
+  const nextManager = await createServiceMcpManager(
+    reconciliation.runtimeConfig,
+    state.adapterFactories,
+  );
+  const previousManager = state.mcpManager;
+  state.runtimeConfig = reconciliation.runtimeConfig;
+  state.curator.runtimeConfig = reconciliation.runtimeConfig;
+  state.mcpManager = nextManager;
+  await previousManager.shutdown();
+  for (const diagnostic of profile.diagnostics) {
+    recordServiceEvent(state, {
+      source: "service-host",
+      eventType: diagnostic.code,
+      severity: diagnostic.severity,
+      summary: diagnostic.message,
+      workRef: {
+        profileId,
+        ...(diagnostic.sessionId === undefined
+          ? {}
+          : { sessionId: diagnostic.sessionId }),
+        ...(diagnostic.bindingId === undefined
+          ? {}
+          : { bindingId: diagnostic.bindingId }),
+      },
+    });
+  }
+  return profile;
 }
 
 async function rebuildServiceBrainRuntime(
@@ -5279,7 +5474,15 @@ function createServiceReloadMcpExecutor(
   state: ServiceState,
 ): NonNullable<AdminControlExecutor["reloadMcp"]> {
   return createReloadMcpControlExecutor({
-    resolveBinding: (sessionId) => mcpBindingForSession(state, sessionId),
+    resolveBinding: async (sessionId) => {
+      const existing = mcpBindingForSession(state, sessionId);
+      if (existing !== undefined) return existing;
+      const session = await serviceSessionById(state, sessionId);
+      await withAsyncMutationQueue(state.runtimeConfigMutationQueue, () =>
+        reconcileServiceProfileMcpBindings(state, String(session.profileId)),
+      );
+      return mcpBindingForSession(state, sessionId);
+    },
     planReloadMcpControl: (input) => state.bridge.planReloadMcpControl(input),
     manager: state.mcpManager,
     discoveryClient: {
@@ -7049,8 +7252,10 @@ async function archiveServiceSession(
   state: ServiceState,
   sessionId: SessionId,
 ): Promise<void> {
+  const session = await serviceSessionById(state, sessionId);
   await state.bridge.archiveSession(sessionId);
   await closeBrowserSessionForServiceLifecycle(state, sessionId);
+  await reconcileServiceProfileMcpBindings(state, String(session.profileId));
 }
 
 async function closeBrowserSessionForServiceLifecycle(

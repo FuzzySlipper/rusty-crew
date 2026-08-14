@@ -198,6 +198,7 @@ export interface ServiceRuntimeEnvelope {
   mcpServers?: RustyCrewMcpServerConfig[];
   reviewDenAuthority?: ReturnType<typeof reviewConfig>;
   imageGeneration?: ImageGenerationConfig;
+  recoveryDiagnostics?: NativeRuntimeConfigDiagnostic[];
 }
 
 export interface RustyCrewRuntimeGraphDraft {
@@ -336,7 +337,10 @@ export async function preflightRustyCrewRuntimeConfig(input: {
     runtimeConfig: source.runtimeConfig,
     profiles: loadedProfiles.profiles,
   });
-  return preflightReport(configPath, source, plan);
+  return preflightReport(configPath, source, {
+    ...plan,
+    diagnostics: [...source.recoveryDiagnostics, ...plan.diagnostics],
+  });
 }
 
 async function planEffectiveRuntimeConfig(
@@ -437,6 +441,7 @@ interface RuntimeGraphAuthoredSource {
   mcpServers: RustyCrewMcpServerConfig[];
   reviewDenAuthority?: ReturnType<typeof reviewConfig>;
   imageGeneration: ImageGenerationConfig;
+  recoveryDiagnostics: NativeRuntimeConfigDiagnostic[];
 }
 
 function runtimeGraphAuthoredSource(
@@ -461,8 +466,32 @@ function runtimeGraphAuthoredSource(
     sessions: arrayValue(parsed.sessions),
     scheduledJobs: arrayValue(parsed.scheduledJobs),
     channelBindings: arrayValue(parsed.channelBindings),
-    mcpBindings: arrayValue(parsed.mcpBindings),
+    mcpBindings: [],
   };
+  const configuredSessionIds = new Set(
+    arrayValue(parsed.sessions).flatMap((session) => {
+      if (!isRecord(session)) return [];
+      const sessionId = optionalString(session.sessionId);
+      return sessionId === undefined ? [] : [sessionId];
+    }),
+  );
+  const recoveryDiagnostics: NativeRuntimeConfigDiagnostic[] = [];
+  runtimeConfig.mcpBindings = arrayValue(parsed.mcpBindings).filter(
+    (binding, index) => {
+      if (!isRecord(binding)) return true;
+      const sessionId = optionalString(binding.sessionId ?? binding.session_id);
+      if (sessionId === undefined || configuredSessionIds.has(sessionId)) {
+        return true;
+      }
+      recoveryDiagnostics.push({
+        severity: "warning",
+        code: "stale_mcp_binding_omitted",
+        path: `mcpBindings[${index}].sessionId`,
+        message: `MCP binding references absent configured session ${sessionId}; the stale materialization was omitted so startup and unrelated profile operations can continue. Reconcile the owning profile or remove the legacy entry.`,
+      });
+      return false;
+    },
+  );
   return {
     profilesDir,
     runtimeConfig,
@@ -473,6 +502,7 @@ function runtimeGraphAuthoredSource(
     ).map((item, index) => configuredMcpServer(item, index)),
     reviewDenAuthority: reviewConfig(parsed, serviceConfig.reviewDenAuthority),
     imageGeneration: imageGenerationConfigFromUnknown(parsed.imageGeneration),
+    recoveryDiagnostics,
   };
 }
 
@@ -724,6 +754,7 @@ function runtimeConfigFromGraphPlan(
     mcpServers: source.mcpServers,
     reviewDenAuthority: source.reviewDenAuthority,
     imageGeneration: source.imageGeneration,
+    recoveryDiagnostics: source.recoveryDiagnostics,
     brains: effective.brains.map((brain) => ({
       implementationId: brain.implementationId as BrainImplementationId,
       profileId: brain.profileId as ProfileId,
@@ -849,10 +880,28 @@ export async function applyRustyCrewRuntimeConfig(input: {
   onServiceCredentialUpdated?: (credentialId: string) => Promise<void>;
   onBrainWakeResult: (observation: ServiceBrainWakeResultObservation) => void;
 }): Promise<RustyCrewRuntimeConfigApplyResult> {
-  const runtimeConfig = await planEffectiveRuntimeConfig(
-    runtimeGraphSourceFromEffective(input.runtimeConfig),
+  const reconciledProfileBindings = input.runtimeConfig.mcpBindings.filter(
+    (binding) =>
+      binding.diagnostics.reconciliationSource === "profile_registry",
+  );
+  const authoredRuntimeConfig = {
+    ...input.runtimeConfig,
+    mcpBindings: input.runtimeConfig.mcpBindings.filter(
+      (binding) =>
+        binding.diagnostics.reconciliationSource !== "profile_registry",
+    ),
+  };
+  const plannedRuntimeConfig = await planEffectiveRuntimeConfig(
+    runtimeGraphSourceFromEffective(authoredRuntimeConfig),
     input.serviceConfig,
   );
+  const runtimeConfig = {
+    ...plannedRuntimeConfig,
+    mcpBindings: [
+      ...plannedRuntimeConfig.mcpBindings,
+      ...reconciledProfileBindings,
+    ],
+  };
   const browserResources =
     input.browserResources ??
     createServiceBrowserResources({

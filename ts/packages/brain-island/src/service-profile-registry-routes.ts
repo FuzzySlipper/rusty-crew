@@ -90,17 +90,42 @@ export async function handleProfileRegistryWriteRequest(
     write: plan.nextWrite,
     expectedRevision: plan.expectedRevision,
   });
-  const effects =
-    route.kind === "lifecycle"
-      ? await context.applyLifecycleEffects(updated)
-      : route.kind === "prompt"
-        ? await context.applyPromptEffects(updated)
-        : route.kind === "runtime-config"
-          ? await context.applyRuntimeConfigEffects(updated, plan)
-          : undefined;
+  let effects: unknown;
+  try {
+    effects =
+      route.kind === "lifecycle"
+        ? await context.applyLifecycleEffects(updated)
+        : route.kind === "prompt"
+          ? await context.applyPromptEffects(updated)
+          : route.kind === "runtime-config"
+            ? await context.applyRuntimeConfigEffects(updated, plan)
+            : undefined;
+  } catch (error) {
+    return successRoute(request.requestId, {
+      ...plan,
+      applied: true,
+      durableApplied: true,
+      effectsApplied: false,
+      record: updated,
+      reconciliation: {
+        state: "persisted_not_applied",
+        persistedRevision: updated.revision,
+        action:
+          route.kind === "runtime-config"
+            ? "retry_profile_runtime_config_apply"
+            : route.kind === "prompt"
+              ? "refresh_external_profile_instructions"
+              : "retry_profile_effects",
+        reasonCode: "profile_registry_effects_failed_after_persist",
+        message: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
   return successRoute(request.requestId, {
     ...plan,
     applied: true,
+    durableApplied: true,
+    effectsApplied: true,
     record: updated,
     effects,
   });

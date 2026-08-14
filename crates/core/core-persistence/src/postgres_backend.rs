@@ -11988,7 +11988,15 @@ mod tests {
                 owner_id: Some("patch".to_string()),
                 prompt_soul_markdown: Some("PostgreSQL registry soul.".to_string()),
                 prompt_memory_markdown: Some("PostgreSQL registry memory.".to_string()),
-                active_runtime_settings_json: json!({"model": "gpt"}),
+                active_runtime_settings_json: json!({
+                    "model": "gpt",
+                    "mcpBindings": [{
+                        "serverId": "den",
+                        "bindingId": "runner-den",
+                        "serverNames": ["den"],
+                        "transport": "streamable_http"
+                    }]
+                }),
                 source_asset_refs: Vec::new(),
                 derived_runtime_refs: Vec::new(),
                 import_export: ProfileRegistryImportExportMetadata {
@@ -12002,6 +12010,15 @@ mod tests {
             })
             .unwrap();
         assert_eq!(created.revision, 1);
+        assert_eq!(store.table_rows("mcp_bindings").unwrap(), 0);
+        assert_eq!(
+            store
+                .get_profile_registry_record(&ProfileId::new("runner_profile"))
+                .unwrap()
+                .unwrap()
+                .active_runtime_settings_json["mcpBindings"][0]["serverId"],
+            "den"
+        );
         assert_eq!(
             store
                 .list_profile_registry_records(&ProfileRegistryQuery {

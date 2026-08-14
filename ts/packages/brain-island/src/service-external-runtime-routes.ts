@@ -46,6 +46,7 @@ export interface ExternalRuntimeRouteContext {
   requestId(request: IncomingMessage): string;
   readJsonBody(request: IncomingMessage): Promise<unknown>;
   corsHeaders(request: IncomingMessage): Record<string, string>;
+  reconcileProfileMcpBindings?(profileId: string): Promise<unknown>;
 }
 
 export function isExternalRuntimeRoute(pathname: string): boolean {
@@ -218,6 +219,7 @@ export async function handleExternalRuntimeRequest(
     try {
       const created =
         await context.controller.createAgentSession(creationRequest);
+      await context.reconcileProfileMcpBindings?.(creationRequest.profileId);
       return successRoute(requestId, {
         ...created,
         creation: {
@@ -309,6 +311,12 @@ export async function handleExternalRuntimeRequest(
           ),
           expectedProfilePromptHash,
         });
+      if (
+        receipt.binding !== undefined &&
+        typeof receipt.binding.profileId === "string"
+      ) {
+        await context.reconcileProfileMcpBindings?.(receipt.binding.profileId);
+      }
       return successRoute(requestId, {
         ...receipt,
         binding: publicExternalBinding(receipt.binding),
@@ -334,6 +342,12 @@ export async function handleExternalRuntimeRequest(
         expectedProfileId: requiredString(body.expectedProfileId),
         expectedNativeThreadId: requiredString(body.expectedNativeThreadId),
       });
+      if (
+        receipt.binding !== undefined &&
+        typeof receipt.binding.profileId === "string"
+      ) {
+        await context.reconcileProfileMcpBindings?.(receipt.binding.profileId);
+      }
       return successRoute(requestId, {
         ...receipt,
         binding: publicExternalBinding(receipt.binding),
@@ -651,32 +665,58 @@ export async function handleExternalRuntimeRequest(
         }
         if (parts.length === 6 && method === "POST") {
           try {
+            const affectedProfileIds = async () => [
+              ...new Set(
+                (typeof context.bridge.listExternalBindings === "function"
+                  ? await context.bridge.listExternalBindings()
+                  : []
+                ).flatMap((binding) =>
+                  binding.runtimeId === runtimeId &&
+                  binding.nativeThreadId === (parts[4] ?? "") &&
+                  typeof binding.profileId === "string"
+                    ? [binding.profileId]
+                    : [],
+                ),
+              ),
+            ];
             if (parts[5] === "archive") {
-              return successRoute(
-                requestId,
-                await context.controller.archiveThread(
-                  runtimeId,
-                  parts[4] ?? "",
+              const profileIds = await affectedProfileIds();
+              const receipt = await context.controller.archiveThread(
+                runtimeId,
+                parts[4] ?? "",
+              );
+              await Promise.all(
+                profileIds.map((profileId) =>
+                  context.reconcileProfileMcpBindings?.(profileId),
                 ),
               );
+              return successRoute(requestId, receipt);
             }
             if (parts[5] === "delete") {
-              return successRoute(
-                requestId,
-                await context.controller.deleteThread(
-                  runtimeId,
-                  parts[4] ?? "",
+              const profileIds = await affectedProfileIds();
+              const receipt = await context.controller.deleteThread(
+                runtimeId,
+                parts[4] ?? "",
+              );
+              await Promise.all(
+                profileIds.map((profileId) =>
+                  context.reconcileProfileMcpBindings?.(profileId),
                 ),
               );
+              return successRoute(requestId, receipt);
             }
             if (parts[5] === "unarchive") {
-              return successRoute(
-                requestId,
-                await context.controller.unarchiveThread(
-                  runtimeId,
-                  parts[4] ?? "",
+              const profileIds = await affectedProfileIds();
+              const receipt = await context.controller.unarchiveThread(
+                runtimeId,
+                parts[4] ?? "",
+              );
+              await Promise.all(
+                profileIds.map((profileId) =>
+                  context.reconcileProfileMcpBindings?.(profileId),
                 ),
               );
+              return successRoute(requestId, receipt);
             }
           } catch (error) {
             return externalThreadLifecycleFailure(requestId, error);
