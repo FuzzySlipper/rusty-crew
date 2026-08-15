@@ -1346,6 +1346,18 @@ impl CoordinationStore {
         )
     }
 
+    pub fn list_external_agent_session_creations(
+        &self,
+    ) -> CoreResult<Vec<ExternalAgentSessionCreationRecord>> {
+        let conn = self.conn()?;
+        load_json_list(
+            &conn,
+            "SELECT record_json FROM external_agent_session_creations ORDER BY creation_id",
+            [],
+            "list external agent session creations",
+        )
+    }
+
     pub fn update_external_agent_session_creation(
         &self,
         next: &ExternalAgentSessionCreationRecord,

@@ -132,3 +132,39 @@ fn projects_same_service_direct_and_external_routability() {
         Some("external_binding_not_active")
     );
 }
+
+#[test]
+fn active_external_placeholder_without_native_thread_is_not_routable() {
+    let engine = test_engine();
+    engine
+        .create_profile_registry_record(&profile_registry_write(
+            "codex-profile",
+            "gpt",
+            "codex-session",
+        ))
+        .unwrap();
+    engine
+        .create_session(session_config(
+            "codex-session",
+            "codex-agent",
+            "codex-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine.register_external_runtime(&runtime(), None).unwrap();
+    let mut placeholder = binding();
+    placeholder.native_thread_id = None;
+    engine.bind_external_agent(&placeholder, None).unwrap();
+
+    let entry = engine
+        .list_agent_directory()
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.session_id == SessionId::new("codex-session"))
+        .unwrap();
+    assert!(!entry.routable);
+    assert_eq!(
+        entry.routability_reason_code.as_deref(),
+        Some("external_binding_native_thread_missing")
+    );
+}

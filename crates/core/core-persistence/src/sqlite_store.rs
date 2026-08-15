@@ -999,6 +999,16 @@ impl CoreCoordinationStore {
         }
     }
 
+    pub fn list_external_agent_session_creations(
+        &self,
+    ) -> CoreResult<Vec<ExternalAgentSessionCreationRecord>> {
+        match self {
+            Self::Sqlite(store) => store.list_external_agent_session_creations(),
+            #[cfg(feature = "postgres")]
+            Self::Postgres(store) => store.list_external_agent_session_creations(),
+        }
+    }
+
     pub fn update_external_agent_session_creation(
         &self,
         next: &ExternalAgentSessionCreationRecord,

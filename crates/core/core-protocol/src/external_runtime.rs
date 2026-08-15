@@ -705,6 +705,7 @@ impl ExternalAgentBinding {
             && self.status == ExternalBindingStatus::Active
             && self.session_id.is_some()
             && self.agent_id.is_some()
+            && self.native_thread_id.is_some()
     }
 }
 
@@ -1842,5 +1843,35 @@ mod tests {
         };
         assert!(binding.validate().is_err());
         assert!(!binding.is_routable());
+    }
+
+    #[test]
+    fn crew_binding_requires_a_native_thread_to_be_routable() {
+        let mut placeholder = ExternalAgentBinding {
+            binding_id: ExternalBindingId::new("placeholder"),
+            runtime_id: ExternalRuntimeId::new("codex-local"),
+            session_id: Some(SessionId::new("session")),
+            agent_id: Some(AgentId::new("agent")),
+            profile_id: Some(ProfileId::new("profile")),
+            profile_revision: Some(1),
+            profile_prompt_hash: Some("hash".into()),
+            profile_prompt_snapshot: Some("prompt".into()),
+            dynamic_tool_catalog_fingerprint: None,
+            message_delivery_policy: ExternalMessageDeliveryPolicy::ImmediateSteer,
+            purpose: ExternalBindingPurpose::CrewAgent,
+            native_thread_id: Some("thread".into()),
+            cwd: Some("/home/dev".into()),
+            label: None,
+            task_ref: None,
+            lineage: None,
+            effective_config_fingerprint: "config".into(),
+            status: ExternalBindingStatus::Active,
+            revision: 1,
+            created_at: "2026-07-10T00:00:00Z".into(),
+            updated_at: "2026-07-10T00:00:00Z".into(),
+        };
+        assert!(placeholder.is_routable());
+        placeholder.native_thread_id = None;
+        assert!(!placeholder.is_routable());
     }
 }

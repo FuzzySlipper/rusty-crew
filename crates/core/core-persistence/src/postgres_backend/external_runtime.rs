@@ -730,6 +730,21 @@ impl PostgresBackendStore {
         )
     }
 
+    pub fn list_external_agent_session_creations(
+        &self,
+    ) -> CoreResult<Vec<ExternalAgentSessionCreationRecord>> {
+        let schema = self.quoted_schema();
+        load_list(
+            &mut *self.client()?,
+            &format!(
+                "SELECT record_json FROM {schema}.external_agent_session_creations
+                 ORDER BY creation_id"
+            ),
+            &[],
+            "list PostgreSQL external agent session creations",
+        )
+    }
+
     pub fn update_external_agent_session_creation(
         &self,
         next: &ExternalAgentSessionCreationRecord,

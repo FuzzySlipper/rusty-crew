@@ -64,6 +64,49 @@ pub struct ExternalControllerTurnTransition {
 }
 
 impl CoreEngine {
+    pub(crate) fn reconcile_incomplete_external_bindings(&self) -> CoreResult<()> {
+        let incomplete_creation_bindings = self
+            .store
+            .list_external_agent_session_creations()?
+            .into_iter()
+            .filter(|creation| {
+                creation.phase != ExternalAgentSessionCreationPhase::Ready
+                    && creation.native_thread_id.is_none()
+            })
+            .map(|creation| creation.binding.binding_id)
+            .collect::<HashSet<_>>();
+        for binding in self
+            .store
+            .list_external_agent_bindings()?
+            .into_iter()
+            .filter(|binding| {
+                binding.purpose == ExternalBindingPurpose::CrewAgent
+                    && binding.status == ExternalBindingStatus::Active
+                    && binding.native_thread_id.is_none()
+                    && incomplete_creation_bindings.contains(&binding.binding_id)
+            })
+        {
+            let mut paused = binding.clone();
+            paused.status = ExternalBindingStatus::Paused;
+            paused.updated_at = self.now();
+            self.store
+                .put_external_agent_binding(&paused, Some(binding.revision))?;
+
+            let Some(session_id) = paused.session_id.as_ref() else {
+                continue;
+            };
+            match self.sessions.get_session(session_id) {
+                Ok(session) if session.status != SessionStatus::Archived => {
+                    self.archive_session(session_id)?;
+                }
+                Ok(_) => {}
+                Err(error) if error.kind == CoreErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn active_external_session_ids(&self) -> CoreResult<HashSet<SessionId>> {
         Ok(self
             .store
@@ -346,7 +389,11 @@ impl CoreEngine {
             effective_config_fingerprint: external_agent_effective_config_fingerprint(
                 &runtime, &profile, &request,
             )?,
-            status: ExternalBindingStatus::Active,
+            // A generated binding is only a recovery handle until Codex has
+            // returned a native thread. Promoting it before then makes the
+            // placeholder routable and lets restart hydration mistake a
+            // failed creation for a live agent.
+            status: ExternalBindingStatus::Paused,
             revision: 0,
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -440,9 +487,10 @@ impl CoreEngine {
             }
         } else {
             binding.native_thread_id = Some(native_thread_id.clone());
-            binding.updated_at = now.clone();
-            binding = self.bind_external_agent(&binding, Some(binding.revision))?;
         }
+        binding.status = ExternalBindingStatus::Active;
+        binding.updated_at = now.clone();
+        binding = self.bind_external_agent(&binding, Some(binding.revision))?;
         let mut next = current.clone();
         next.binding = binding;
         next.native_thread_id = Some(native_thread_id);
@@ -474,7 +522,25 @@ impl CoreEngine {
                 "external_agent_creation_revision_conflict: creation changed before failure could be recorded",
             ));
         }
+        let mut binding = current.binding.clone();
+        if binding.native_thread_id.is_none() && binding.status != ExternalBindingStatus::Paused {
+            binding.status = ExternalBindingStatus::Paused;
+            binding.updated_at = now.clone();
+            binding = self.bind_external_agent(&binding, Some(binding.revision))?;
+        }
+        let archived_session = if current.session.status == SessionStatus::Archived {
+            self.get_session(&current.session.session_id)?
+        } else {
+            self.archive_session(&current.session.session_id)?
+        };
         let mut next = current.clone();
+        next.binding = binding;
+        next.session = ExternalAgentSessionIdentity {
+            session_id: archived_session.session_id,
+            agent_id: archived_session.agent_id,
+            profile_id: archived_session.profile_id,
+            status: archived_session.status,
+        };
         next.phase = ExternalAgentSessionCreationPhase::RecoveryRequired;
         next.reason_code = Some(reason_code);
         next.reason_message = Some(reason_message);

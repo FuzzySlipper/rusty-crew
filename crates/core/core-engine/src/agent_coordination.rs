@@ -192,7 +192,9 @@ impl CoreEngine {
                         AgentDirectoryRuntimeKind::CodexAppServer
                     }
                 };
-                let reason_code = if binding.status != ExternalBindingStatus::Active {
+                let reason_code = if binding.native_thread_id.is_none() {
+                    Some("external_binding_native_thread_missing".to_string())
+                } else if binding.status != ExternalBindingStatus::Active {
                     Some("external_binding_not_active".to_string())
                 } else if runtime.desired_state != ExternalRuntimeDesiredState::Enabled {
                     Some("external_runtime_disabled".to_string())
