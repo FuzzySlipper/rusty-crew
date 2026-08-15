@@ -61,6 +61,7 @@ mod external_runtime_controls;
 mod external_runtime_lineage;
 mod external_runtime_session_identity;
 mod external_serial_inbox;
+mod external_session_creation;
 mod manual_compaction;
 mod profile_admin;
 mod restart_hydration;

@@ -21,6 +21,7 @@ mod external_follow_up;
 mod external_runtime;
 mod external_runtime_certification;
 mod external_runtime_compatibility;
+mod external_session_creation;
 mod github_gate;
 mod github_gate_wait;
 mod install_diplomat;
