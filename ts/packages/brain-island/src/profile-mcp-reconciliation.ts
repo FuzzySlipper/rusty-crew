@@ -53,6 +53,9 @@ export async function reconcileRuntimeProfileMcpBindings(input: {
   profileIds?: readonly string[];
 }): Promise<RuntimeProfileMcpReconciliationResult> {
   const sessions = await input.bridge.listSessions();
+  const activeSessions = sessions.filter(
+    (session) => session.status !== "archived",
+  );
   const profileIds = new Set(
     input.profileIds ?? [
       ...sessions.map((session) => String(session.profileId)),
@@ -80,7 +83,7 @@ export async function reconcileRuntimeProfileMcpBindings(input: {
     runtimeConfig: {
       profilesDir: input.runtimeConfig.profilesDir,
       brains: [],
-      sessions: sessions.map((session) => ({
+      sessions: activeSessions.map((session) => ({
         sessionId: String(session.sessionId),
         agentId: String(session.agentId),
         profileId: String(session.profileId),
@@ -112,7 +115,7 @@ export async function reconcileRuntimeProfileMcpBindings(input: {
     },
     profiles: [
       ...new Set([
-        ...sessions.map((session) => String(session.profileId)),
+        ...activeSessions.map((session) => String(session.profileId)),
         ...bindings.map((binding) => String(binding.profileId)),
       ]),
     ].map((profileId) => ({ profileId })),

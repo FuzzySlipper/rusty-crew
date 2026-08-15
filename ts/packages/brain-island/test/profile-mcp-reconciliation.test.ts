@@ -227,6 +227,46 @@ test("submits exact managed-external session identities to the Rust planner", as
   ]);
 });
 
+test("omits archived recovery sessions from the active Rust runtime plan", async () => {
+  const archived = {
+    ...session("external-session-recovery"),
+    profileId: "reviewer" as never,
+    status: "archived" as const,
+  };
+  let plannedSessionIds: string[] = [];
+  await reconcileRuntimeProfileMcpBindings({
+    bridge: {
+      async listSessions() {
+        return [archived];
+      },
+      async getProfileRegistryRecord() {
+        return undefined;
+      },
+      async planRuntimeConfig(input) {
+        plannedSessionIds = input.runtimeConfig.sessions.map(
+          (item) => item.sessionId,
+        );
+        return {
+          runtimeConfig: input.runtimeConfig,
+          diagnostics: [],
+          derivedScheduledJobs: [],
+          derivedMcpBindings: [],
+        };
+      },
+    },
+    runtimeConfig: {
+      profilesDir: "/profiles",
+      brains: [],
+      sessions: [],
+      scheduledJobs: [],
+      channelBindings: [],
+      mcpBindings: [],
+    },
+  });
+
+  assert.deepEqual(plannedSessionIds, []);
+});
+
 function session(sessionId: string): SessionState {
   return {
     handle: 1 as never,
