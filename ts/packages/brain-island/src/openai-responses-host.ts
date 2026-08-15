@@ -332,6 +332,11 @@ export async function createOpenAiResponsesBrainHost(
           responsesDialect,
           strategyId,
           instructions: responsesInstructions(wake),
+          ...(omitInstructionsOnPreviousResponse(
+            context.profile.profile.modelConfig.baseUrl,
+          )
+            ? { omitInstructionsOnPreviousResponse: true }
+            : {}),
           reasoningEffort:
             wake.state.session.inferenceOverrides?.reasoningEffort ??
             context.profile.profile.modelConfig.reasoningEffort,
@@ -418,6 +423,18 @@ export async function createOpenAiResponsesBrainHost(
       return withOpenAiResponsesProviderStateScope(result, context);
     },
   };
+}
+
+function omitInstructionsOnPreviousResponse(
+  baseUrl: string | undefined,
+): boolean {
+  if (baseUrl === undefined) return false;
+  try {
+    const hostname = new URL(baseUrl).hostname.toLowerCase();
+    return hostname === "x.ai" || hostname.endsWith(".x.ai");
+  } catch {
+    return false;
+  }
 }
 
 function responsesInstructions(wake: BrainWakeInput): string {

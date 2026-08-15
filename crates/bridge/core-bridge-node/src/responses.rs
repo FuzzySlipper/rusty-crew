@@ -62,6 +62,8 @@ struct JsOpenAiResponsesBrainConfig {
     #[serde(default)]
     instructions: Option<String>,
     #[serde(default)]
+    omit_instructions_on_previous_response: bool,
+    #[serde(default)]
     reasoning_effort: Option<String>,
     #[serde(default)]
     max_output_tokens: Option<u32>,
@@ -799,6 +801,8 @@ where
         }
     };
     config.instructions = input.config.instructions;
+    config.omit_instructions_on_previous_response =
+        input.config.omit_instructions_on_previous_response;
     config.dialect = input.config.responses_dialect;
     config.validate().map_err(|message| {
         napi::Error::new(

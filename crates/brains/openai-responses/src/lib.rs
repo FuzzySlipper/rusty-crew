@@ -66,6 +66,9 @@ pub struct ResponsesBrainConfig {
     pub dialect: ResponsesProviderDialect,
     pub model: String,
     pub instructions: Option<String>,
+    /// Some Responses-compatible providers retain predecessor instructions but
+    /// reject sending `instructions` together with `previous_response_id`.
+    pub omit_instructions_on_previous_response: bool,
     pub tool_choice: ResponsesToolChoice,
     pub parallel_tool_calls: bool,
     pub reasoning: Option<ResponsesReasoningConfig>,
@@ -87,6 +90,7 @@ impl ResponsesBrainConfig {
             dialect: ResponsesProviderDialect::OpenaiStateless,
             model: model.into(),
             instructions: None,
+            omit_instructions_on_previous_response: false,
             tool_choice: ResponsesToolChoice::Auto,
             parallel_tool_calls: true,
             reasoning: None,
@@ -545,6 +549,9 @@ impl ResponsesRequestBuilder {
                                 let mut chained_request = replay_request.clone();
                                 chained_request.previous_response_id =
                                     Some(chain_state.previous_response_id.clone());
+                                if self.config.omit_instructions_on_previous_response {
+                                    chained_request.instructions = None;
+                                }
                                 chained_request.input =
                                     prepare_stateless_replay_items(suffix, self.config.dialect);
                                 return ResponsesPlannedRequest {
@@ -7118,6 +7125,34 @@ mod tests {
     }
 
     #[test]
+    fn previous_response_chain_can_inherit_instructions_for_compatible_providers() {
+        let history = append_only_history();
+        let mut config = ResponsesBrainConfig::previous_response_chain("grok-4.6");
+        config.instructions = Some("stay within the profile".to_string());
+        config.omit_instructions_on_previous_response = true;
+        let state = valid_chain_provider_state_for_config(config.clone());
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
+                response_id: "resp-2".to_string(),
+                usage: None,
+            }])]),
+            MapToolExecutor::default(),
+            config,
+        );
+
+        brain
+            .wake_with_history(wake_request(Some(state), None), history)
+            .unwrap();
+
+        assert_eq!(brain.client.requests().len(), 1);
+        assert_eq!(
+            brain.client.requests()[0].previous_response_id.as_deref(),
+            Some("resp-1")
+        );
+        assert_eq!(brain.client.requests()[0].instructions, None);
+    }
+
+    #[test]
     fn previous_response_chain_uses_new_suffix_from_bounded_durable_history() {
         let state = valid_chain_provider_state();
         let history = ResponsesReplayProjection {
@@ -9180,7 +9215,14 @@ mod tests {
     }
 
     fn valid_chain_provider_state() -> BrainWakeProviderStateInput {
-        let config = ResponsesBrainConfig::previous_response_chain("gpt-5");
+        valid_chain_provider_state_for_config(ResponsesBrainConfig::previous_response_chain(
+            "gpt-5",
+        ))
+    }
+
+    fn valid_chain_provider_state_for_config(
+        config: ResponsesBrainConfig,
+    ) -> BrainWakeProviderStateInput {
         let builder = ResponsesRequestBuilder::new(config).tools(vec![NeutralBrainTool {
             name: "lookup".to_string(),
             description: "Look up data".to_string(),

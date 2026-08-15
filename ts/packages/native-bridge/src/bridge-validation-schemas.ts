@@ -1260,6 +1260,7 @@ export const openAiResponsesBrainRunInputSchema = Type.Object(
           ]),
         ),
         instructions: Type.Optional(Type.String()),
+        omitInstructionsOnPreviousResponse: Type.Optional(Type.Boolean()),
         providerRequestTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
         workQuantumContinuationRounds: Type.Optional(
           Type.Number({ minimum: 1 }),

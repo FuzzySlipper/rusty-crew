@@ -318,6 +318,7 @@ export interface OpenAiResponsesBrainRunInput extends BrainRunCompactionDomainCo
     responsesDialect: NativeResponsesProviderDialect;
     strategyId?: "replay" | "previous-response-chain";
     instructions?: string;
+    omitInstructionsOnPreviousResponse?: boolean;
     reasoningEffort?: string;
     maxOutputTokens?: number;
     providerRequestTimeoutMs?: number;
