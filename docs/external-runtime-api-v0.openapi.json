@@ -7139,6 +7139,7 @@
                 "minimum": 0,
                 "type": "integer"
               },
+              "taskStatus": { "type": "string" },
               "terminalReason": { "type": "string" },
               "type": { "const": "den_already_finalized", "type": "string" },
               "verdict": { "type": "string" }
@@ -7148,6 +7149,7 @@
               "reviewRoundId",
               "exactHeadCommit",
               "verdict",
+              "taskStatus",
               "terminalReason"
             ],
             "type": "object"
