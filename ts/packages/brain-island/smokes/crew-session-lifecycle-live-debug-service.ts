@@ -13,6 +13,7 @@ const profileId = `crew-session-cert-${suffix}`;
 const firstMarker = `CREW_ARCHIVE_BEFORE_${suffix.toUpperCase()}`;
 const secondMarker = `CREW_ARCHIVE_AFTER_${suffix.toUpperCase()}`;
 const siblingMarker = `CREW_SIBLING_${suffix.toUpperCase()}`;
+const mcpInventoryMarker = `CREW_MCP_FIRST_TURN_${suffix.toUpperCase()}`;
 let profileCreated = false;
 
 if (new URL(baseUrl).port !== "9348") {
@@ -95,6 +96,7 @@ try {
     "sessionId",
   ]);
   assert.notEqual(freshSessionId, originalSessionId);
+  await assertFirstTurnMcpInventory(freshSessionId, mcpInventoryMarker);
 
   const replay = await request("POST", "/v1/chat/sessions", creationBody, {
     "Idempotency-Key": creationKey,
@@ -237,6 +239,7 @@ try {
           "reason_code",
         ]),
         providerMarkers: [firstMarker, secondMarker, siblingMarker],
+        mcpInventoryMarker,
       },
       null,
       2,
@@ -302,6 +305,67 @@ async function runProviderTurn(
   );
   assert.ok(terminal, "provider turn must emit assistant_turn_finished");
   assert.notEqual(terminal.payload?.status, "failed", JSON.stringify(terminal));
+  const text = events
+    .filter((event) => event.kind === "assistant_text_delta")
+    .map((event) => String(event.payload?.text ?? ""))
+    .join("");
+  assert.match(text, new RegExp(marker));
+}
+
+async function assertFirstTurnMcpInventory(
+  sessionId: string,
+  marker: string,
+): Promise<void> {
+  const before = await request(
+    "GET",
+    `/v1/chat/sessions/${encodeURIComponent(sessionId)}`,
+  );
+  assert.equal(before.status, 200, before.text);
+  assert.equal(nested(before.json, ["data", "session", "message_count"]), 0);
+  const cursor = nested(before.json, ["data", "latest_cursor"]);
+  const messageKey = `task-7022:${marker}`;
+  const sent = await request(
+    "POST",
+    `/v1/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+    {
+      actor: { id: "task-7022-cert-operator", kind: "human" },
+      body: [
+        "Do not run /reload-mcp or any other command.",
+        "Call list_available_tools exactly once with query get_task_context, source mcp, and limit 10.",
+        `Then reply with exactly ${marker}.`,
+      ].join("\n"),
+      client_message_id: messageKey,
+      reason: "task-7022 first-turn profile MCP materialization proof",
+    },
+    { "Idempotency-Key": messageKey },
+  );
+  assert.equal(sent.status, 202, sent.text);
+  const events = await waitForTurn(
+    sessionId,
+    typeof cursor === "string" ? cursor : undefined,
+  );
+  const completed = events.find(
+    (event) =>
+      event.kind === "tool_call_completed" &&
+      event.payload?.tool_name === "list_available_tools" &&
+      event.payload?.is_error !== true,
+  );
+  assert.ok(
+    completed,
+    "fresh session must complete list_available_tools on its first turn",
+  );
+  const debugDetailId = completed.payload?.debug_detail_id;
+  assert.equal(typeof debugDetailId, "string");
+  const detail = await request(
+    "GET",
+    `/v1/chat/sessions/${encodeURIComponent(sessionId)}/tool-calls/${encodeURIComponent(debugDetailId as string)}`,
+  );
+  assert.equal(detail.status, 200, detail.text);
+  assert.match(
+    detail.text,
+    /get_task_context/,
+    "first-turn tool inventory must contain the configured Den task tool",
+  );
   const text = events
     .filter((event) => event.kind === "assistant_text_delta")
     .map((event) => String(event.payload?.text ?? ""))

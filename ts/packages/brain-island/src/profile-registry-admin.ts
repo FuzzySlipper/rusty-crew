@@ -620,18 +620,24 @@ function mcpBindingsFromSettings(
     (item): NonNullable<AdminProfileRegistryRecord["mcpBindings"]> => {
       const binding = recordValue(item);
       const serverId =
-        stringValue(binding.serverId) ??
-        serverIdFromEndpointRef(stringValue(binding.endpointRef)) ??
-        stringList(binding.serverNames)?.[0];
+        stringValue(binding.serverId ?? binding.server_id) ??
+        serverIdFromEndpointRef(
+          stringValue(binding.endpointRef ?? binding.endpoint_ref),
+        ) ??
+        stringList(binding.serverNames ?? binding.server_names)?.[0];
       if (serverId === undefined) return [];
       return [
         {
           serverId,
-          bindingId: normalizedDesiredBindingId(stringValue(binding.bindingId)),
-          adapterId: stringValue(binding.adapterId),
-          serverNames: stringList(binding.serverNames),
+          bindingId: normalizedDesiredBindingId(
+            stringValue(binding.bindingId ?? binding.binding_id),
+          ),
+          adapterId: stringValue(binding.adapterId ?? binding.adapter_id),
+          serverNames: stringList(binding.serverNames ?? binding.server_names),
           transport: stringValue(binding.transport),
-          toolProfileKey: stringValue(binding.toolProfileKey),
+          toolProfileKey: stringValue(
+            binding.toolProfileKey ?? binding.tool_profile_key,
+          ),
         },
       ];
     },

@@ -81,6 +81,10 @@ export interface CrewSessionLifecycleContext {
     eventType: string;
     summaryPrefix: string;
   }): Promise<RustyCrewRuntimeConfigApplyResult>;
+  refreshMcpToolsForSession(input: {
+    session: SessionState;
+    bindingIds: readonly string[];
+  }): Promise<void>;
   sessionById(sessionId: string): Promise<SessionState>;
   appendChatEvent?(
     sessionId: SessionId,
@@ -256,7 +260,7 @@ export async function createFreshCrewSession(
     sessions.push(runtimeSessionEntry(creation.session));
   }
   try {
-    await restoreProfileMcpBindingsForSession(
+    const profileMcpBindingIds = await restoreProfileMcpBindingsForSession(
       context,
       runtimeConfigFile.array("mcpBindings"),
       creation.session,
@@ -268,6 +272,12 @@ export async function createFreshCrewSession(
       eventType: "crew_session_created",
       summaryPrefix: `Crew session ${creation.session.sessionId} created`,
     });
+    if (profileMcpBindingIds.length > 0) {
+      await context.refreshMcpToolsForSession({
+        session: creation.session,
+        bindingIds: profileMcpBindingIds,
+      });
+    }
     return { creation, applyResult };
   } catch (error) {
     await context
@@ -506,12 +516,13 @@ async function restoreProfileMcpBindingsForSession(
   context: CrewSessionLifecycleContext,
   runtimeBindings: unknown[],
   session: SessionState,
-): Promise<void> {
+): Promise<string[]> {
   const profile = await context.bridge.getProfileRegistryRecord(
     session.profileId,
   );
-  if (profile === undefined) return;
+  if (profile === undefined) return [];
   const configured = profileMcpBindingsFromRegistryRecord(profile);
+  const materializedBindingIds: string[] = [];
   const existingTargets = new Map(
     runtimeBindings.flatMap((entry) => {
       if (!isRecord(entry)) return [];
@@ -532,6 +543,7 @@ async function restoreProfileMcpBindingsForSession(
       binding.bindingId ?? `${session.agentId}-mcp-${index + 1}`,
       String(session.sessionId),
     );
+    materializedBindingIds.push(bindingId);
     if (existingTargets.get(bindingId) === session.sessionId) return;
     runtimeBindings.push({
       bindingId,
@@ -552,6 +564,7 @@ async function restoreProfileMcpBindingsForSession(
     });
     existingTargets.set(bindingId, session.sessionId);
   });
+  return materializedBindingIds;
 }
 
 function runtimeSessionEntry(session: SessionState): Record<string, unknown> {

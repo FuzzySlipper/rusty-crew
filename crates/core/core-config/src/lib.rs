@@ -1682,12 +1682,12 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
         .enumerate()
         .map(|(index, binding)| {
             let server_id = binding.server_id.trim();
-            let binding_id = binding
+            let desired_binding_id = binding
                 .binding_id
                 .as_deref()
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
-                .map(str::to_string)
+                .map(desired_mcp_binding_id)
                 .unwrap_or_else(|| format!("{agent_id}-mcp-{}", index + 1));
             let tool_profile_key = binding
                 .tool_profile_key
@@ -1697,7 +1697,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
                 .map(str::to_string)
                 .unwrap_or_else(|| profile_id.to_string());
             McpBindingConfigDraft {
-                binding_id,
+                binding_id: materialized_mcp_binding_id(&desired_binding_id, &session_id),
                 adapter_id: AdapterId::new(
                     binding
                         .adapter_id
@@ -1748,7 +1748,7 @@ pub fn plan_create_profile(input: &CreateProfilePlanInput) -> CreateProfilePlan 
             &brain,
             external_message_delivery_policy,
             profile_mcp_config.as_ref(),
-            &runtime_mcp_bindings,
+            &input.request.mcp_bindings,
             input.request.source.as_ref(),
         ),
         source_asset_refs: vec![ProfileRegistrySourceAssetRef {
@@ -2809,7 +2809,7 @@ fn create_profile_runtime_settings_json(
     brain: &ProfileBrainMetadata,
     external_message_delivery_policy: ExternalMessageDeliveryPolicy,
     mcp_config: Option<&ProfileMcpConfig>,
-    mcp_bindings: &[McpBindingConfigDraft],
+    mcp_bindings: &[CreateProfileMcpBindingRequest],
     source: Option<&CreateProfileSourceRequest>,
 ) -> Value {
     json!({
@@ -2821,6 +2821,23 @@ fn create_profile_runtime_settings_json(
         "mcp_bindings": mcp_bindings,
         "source": source,
     })
+}
+
+fn desired_mcp_binding_id(binding_id: &str) -> String {
+    binding_id
+        .split_once("--session--")
+        .map(|(desired, _)| desired)
+        .filter(|desired| !desired.is_empty())
+        .unwrap_or(binding_id)
+        .to_string()
+}
+
+fn materialized_mcp_binding_id(binding_id: &str, session_id: &SessionId) -> String {
+    format!(
+        "{}--session--{}",
+        desired_mcp_binding_id(binding_id),
+        session_id
+    )
 }
 
 fn create_profile_import_source(source: Option<&CreateProfileSourceRequest>) -> Option<String> {
@@ -4806,7 +4823,8 @@ mod tests {
         assert_eq!(
             plan.runtime_mcp_bindings[0],
             McpBindingConfigDraft {
-                binding_id: "field-created-profile-mcp-1".to_string(),
+                binding_id: "field-created-profile-mcp-1--session--field-created-profile-session"
+                    .to_string(),
                 adapter_id: AdapterId::new("mcp-ts-main"),
                 agent_id: AgentId::new("field-created-profile"),
                 instance_id: None,
@@ -4819,11 +4837,22 @@ mod tests {
                 status: ExternalBindingStatusDraft::Active,
             }
         );
-        assert_eq!(plan.runtime_mcp_bindings[1].binding_id, "field-files-mcp");
+        assert_eq!(
+            plan.runtime_mcp_bindings[1].binding_id,
+            "field-files-mcp--session--field-created-profile-session"
+        );
         assert_eq!(
             plan.runtime_mcp_bindings[1].endpoint_ref,
             "config://mcp/filesystem"
         );
+        let desired_bindings = registry_write.active_runtime_settings_json["mcp_bindings"]
+            .as_array()
+            .expect("profile MCP intent should be stored as a desired binding list");
+        assert_eq!(desired_bindings[0]["binding_id"], Value::Null);
+        assert_eq!(desired_bindings[0]["server_id"], "den");
+        assert!(desired_bindings[0].get("session_id").is_none());
+        assert_eq!(desired_bindings[1]["binding_id"], "field-files-mcp");
+        assert!(desired_bindings[1].get("session_id").is_none());
         assert_eq!(
             plan.registry_write
                 .expect("registry write should be planned")

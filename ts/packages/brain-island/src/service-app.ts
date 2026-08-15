@@ -692,6 +692,19 @@ function crewSessionLifecycleContext(
       ),
     applyRuntimeConfigFromDisk: (options) =>
       applyServiceRuntimeConfigFromDisk(state, options),
+    refreshMcpToolsForSession: async ({ session, bindingIds }) => {
+      await rebuildServiceBrainRuntime(state, session.profileId);
+      recordServiceEvent(state, {
+        source: "service-host",
+        eventType: "crew_session_mcp_tools_refreshed",
+        summary: `Loaded ${bindingIds.length} MCP binding${bindingIds.length === 1 ? "" : "s"} into the brain runtime before the first turn for ${session.sessionId}.`,
+        workRef: {
+          profileId: session.profileId,
+          sessionId: session.sessionId,
+          bindingIds: [...bindingIds],
+        },
+      });
+    },
     sessionById: (sessionId) => serviceSessionById(state, sessionId),
     appendChatEvent: (sessionId, event) =>
       appendChatEventFromModule(chatEventLogContext(state), sessionId, event),

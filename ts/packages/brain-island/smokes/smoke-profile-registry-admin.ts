@@ -35,7 +35,19 @@ modelConfig:
       profileId: "registered",
       lifecycleStatus: "active",
       displayName: "Registered",
-      activeRuntimeSettingsJson: { modelConfig: { provider: "den-router" } },
+      activeRuntimeSettingsJson: {
+        modelConfig: { provider: "den-router" },
+        mcp_bindings: [
+          {
+            server_id: "den",
+            binding_id: "registered-mcp-1",
+            adapter_id: "mcp-ts-main",
+            server_names: ["den"],
+            transport: "streamable_http",
+            tool_profile_key: "planner",
+          },
+        ],
+      },
       sourceAssetRefs: [
         {
           assetKind: "profile_yaml",
@@ -118,6 +130,20 @@ modelConfig:
     diagnostics.records.find((record) => record.profileId === "registered")
       ?.providerAlias,
     undefined,
+  );
+  assert.deepEqual(
+    diagnostics.records.find((record) => record.profileId === "registered")
+      ?.desiredMcpBindings,
+    [
+      {
+        serverId: "den",
+        bindingId: "registered-mcp-1",
+        adapterId: "mcp-ts-main",
+        serverNames: ["den"],
+        transport: "streamable_http",
+        toolProfileKey: "planner",
+      },
+    ],
   );
   assert.equal(
     filterAdminProfileRegistryRecords(

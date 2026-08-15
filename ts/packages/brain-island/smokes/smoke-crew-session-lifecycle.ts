@@ -22,6 +22,10 @@ const session = sessionState("session-alpha", "active");
 const nativeBridge = await loadNativeBridge();
 const order: string[] = [];
 const workspaceUpdates: string[] = [];
+const mcpRefreshes: Array<{
+  sessionId: string;
+  bindingIds: readonly string[];
+}> = [];
 let runtimeValue: Record<string, unknown> = {
   profilesDir: "/tmp/profiles",
   brains: [],
@@ -198,6 +202,12 @@ assert.deepEqual(runtimeValue.mcpBindings, [
     },
   },
 ]);
+assert.deepEqual(mcpRefreshes, [
+  {
+    sessionId: "crew-session-created",
+    bindingIds: ["prime-mcp-den--session--crew-session-created"],
+  },
+]);
 
 creationContext.bridge.createCrewAgentSession = async () => ({
   ...creationRecord(),
@@ -228,6 +238,10 @@ assert.deepEqual(
   ],
   "a sibling must receive its own MCP binding without retargeting the first session",
 );
+assert.deepEqual(mcpRefreshes.at(-1), {
+  sessionId: "crew-session-sibling",
+  bindingIds: ["prime-mcp-den--session--crew-session-sibling"],
+});
 
 runtimeValue = runtimeConfigWithSession();
 const switched = await switchCrewSessionWorkspace(lifecycleContext(), {
@@ -414,6 +428,13 @@ function lifecycleContext(
         throw new Error("runtime apply failed");
       }
       return {} as never;
+    },
+    refreshMcpToolsForSession: async ({ session, bindingIds }) => {
+      order.push("refresh_mcp_tools");
+      mcpRefreshes.push({
+        sessionId: session.sessionId,
+        bindingIds: [...bindingIds],
+      });
     },
     sessionById: async () => ({ ...session, workspace: canonicalWorkspace }),
     appendChatEvent: async (_sessionId, event) => {
