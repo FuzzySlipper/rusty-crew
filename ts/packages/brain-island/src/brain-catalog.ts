@@ -91,6 +91,9 @@ export async function resolveBrainCatalogSelection(
       ? {}
       : { configuredStrategyId: profile.brain.strategy }),
     providerProtocol: providerProtocol(profile.modelConfig.api),
+    ...(profile.modelConfig.responsesDialect === undefined
+      ? {}
+      : { responsesProviderDialect: profile.modelConfig.responsesDialect }),
     providerKind: profile.modelConfig.provider,
     roleplayNarratorEnabled:
       profile.brain?.strategy === "roleplay_narrator" ||

@@ -374,19 +374,17 @@ impl ResponsesRequestBuilder {
         history: ResponsesReplayProjection,
         continuation_items: Vec<ResponsesInputItem>,
     ) -> ResponsesRequest {
-        let include_provider_item_ids = matches!(
+        let chaining = matches!(
             self.config.strategy,
             ResponsesBrainStrategy::PreviousResponseChain
         );
-        let provider_items = provider_replay_items(
-            provider_state,
-            include_provider_item_ids,
-            self.config.dialect,
-        );
-        let mut input = if include_provider_item_ids {
-            let mut items = history.input_items;
-            items.extend(provider_items);
-            items.extend(history.replay_hints);
+        let provider_items = provider_replay_items(provider_state, false, self.config.dialect);
+        let mut input = if chaining {
+            let mut history_items = history.input_items;
+            history_items.extend(history.replay_hints);
+            let overlap = replay_boundary_overlap(&provider_items, &history_items);
+            let mut items = provider_items;
+            items.extend(history_items.into_iter().skip(overlap));
             items
         } else {
             let mut items = provider_items;
@@ -507,14 +505,20 @@ impl ResponsesRequestBuilder {
         history: ResponsesReplayProjection,
         continuation_items: Vec<ResponsesInputItem>,
     ) -> ResponsesPlannedRequest {
-        let replay_request =
-            self.build_replay(wake, provider_state, history, continuation_items.clone());
+        let mut replay_request = self.build_replay(
+            wake,
+            provider_state,
+            history.clone(),
+            continuation_items.clone(),
+        );
         if self.config.strategy != ResponsesBrainStrategy::PreviousResponseChain {
             return ResponsesPlannedRequest {
                 request: replay_request,
                 fallback_reason: None,
             };
         }
+        replay_request.input =
+            prepare_stateless_replay_items(replay_request.input, self.config.dialect);
         if !continuation_items.is_empty() {
             return ResponsesPlannedRequest {
                 request: replay_request,
@@ -529,15 +533,20 @@ impl ResponsesRequestBuilder {
                     if chain_state.request_fingerprint != request_fingerprint {
                         Some(PreviousResponseChainFallbackReason::RequestFingerprintMismatch)
                     } else {
-                        match append_only_input_suffix(
-                            &replay_request.input,
-                            &chain_state.committed_context_items(),
-                        ) {
+                        match append_only_history_suffix(&history, &chain_state).or_else(|| {
+                            append_only_input_suffix(
+                                &replay_request.input,
+                                &chain_state.committed_input_items,
+                                &chain_state.committed_output_items,
+                                self.config.dialect,
+                            )
+                        }) {
                             Some(suffix) => {
                                 let mut chained_request = replay_request.clone();
                                 chained_request.previous_response_id =
                                     Some(chain_state.previous_response_id.clone());
-                                chained_request.input = suffix;
+                                chained_request.input =
+                                    prepare_stateless_replay_items(suffix, self.config.dialect);
                                 return ResponsesPlannedRequest {
                                     request: chained_request,
                                     fallback_reason: None,
@@ -556,6 +565,16 @@ impl ResponsesRequestBuilder {
             fallback_reason,
         }
     }
+}
+
+fn replay_boundary_overlap(
+    predecessor: &[ResponsesInputItem],
+    current: &[ResponsesInputItem],
+) -> usize {
+    (1..=predecessor.len().min(current.len()))
+        .rev()
+        .find(|overlap| predecessor[predecessor.len() - overlap..] == current[..*overlap])
+        .unwrap_or(0)
 }
 
 fn responses_reasoning_value(
@@ -859,20 +878,6 @@ pub struct PreviousResponseChainStateV1 {
     pub provider_response_metadata: Option<Value>,
 }
 
-impl PreviousResponseChainStateV1 {
-    fn committed_context_items(&self) -> Vec<Value> {
-        let mut items = self.committed_input_items.clone();
-        items.extend(
-            self.committed_output_items
-                .iter()
-                .cloned()
-                .filter_map(|record| replay_item_from_record(record, true))
-                .filter_map(|item| serde_json::to_value(item).ok()),
-        );
-        items
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiResponsesCompletedResponseRecord {
@@ -969,22 +974,82 @@ fn absence_fallback_reason(
     }
 }
 
+fn append_only_history_suffix(
+    current_history: &ResponsesReplayProjection,
+    predecessor: &PreviousResponseChainStateV1,
+) -> Option<Vec<ResponsesInputItem>> {
+    let mut current = current_history.input_items.clone();
+    current.extend(current_history.replay_hints.clone());
+    let current_values = current
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()
+        .ok()?;
+
+    let committed_input = predecessor.committed_input_items.clone();
+    let mut predecessor_projection = committed_input.clone();
+    predecessor_projection.extend(
+        predecessor
+            .committed_output_items
+            .iter()
+            .cloned()
+            .filter_map(|record| replay_item_from_record(record, false))
+            // Durable conversation history projects provider messages, but not
+            // provider-private reasoning items or function-call envelopes.
+            .filter(|item| matches!(item, ResponsesInputItem::AssistantMessage { .. }))
+            .filter_map(|item| serde_json::to_value(item).ok()),
+    );
+
+    if current_values.len() >= predecessor_projection.len()
+        && current_values[..predecessor_projection.len()] == predecessor_projection
+    {
+        return Some(current[predecessor_projection.len()..].to_vec());
+    }
+    if current_values.len() >= committed_input.len()
+        && current_values[..committed_input.len()] == committed_input
+    {
+        return Some(current[committed_input.len()..].to_vec());
+    }
+
+    let overlap = (1..=current_values.len().min(predecessor_projection.len()))
+        .rev()
+        .find(|overlap| {
+            predecessor_projection[predecessor_projection.len() - overlap..]
+                == current_values[..*overlap]
+        })?;
+    Some(current[overlap..].to_vec())
+}
+
 fn append_only_input_suffix(
     current_input: &[ResponsesInputItem],
-    predecessor_context: &[Value],
+    committed_input: &[Value],
+    committed_output: &[OpenAiResponseOutputItemRecord],
+    dialect: ResponsesProviderDialect,
 ) -> Option<Vec<ResponsesInputItem>> {
     let current_values = current_input
         .iter()
         .map(serde_json::to_value)
         .collect::<Result<Vec<_>, _>>()
         .ok()?;
-    if current_values.len() < predecessor_context.len() {
+    let mut predecessor = committed_input.to_vec();
+    predecessor.extend(
+        committed_output
+            .iter()
+            .cloned()
+            .filter_map(|record| replay_item_from_record(record, false))
+            .filter_map(|item| {
+                prepare_stateless_replay_items(vec![item], dialect)
+                    .into_iter()
+                    .next()
+            })
+            .filter_map(|item| serde_json::to_value(item).ok()),
+    );
+    if current_values.len() < predecessor.len()
+        || current_values[..predecessor.len()] != predecessor
+    {
         return None;
     }
-    if &current_values[..predecessor_context.len()] != predecessor_context {
-        return None;
-    }
-    Some(current_input[predecessor_context.len()..].to_vec())
+    Some(current_input[predecessor.len()..].to_vec())
 }
 
 fn request_fingerprint(request: &ResponsesRequest) -> String {
@@ -4022,6 +4087,11 @@ where
                         );
                         push_stream_item(
                             &mut items,
+                            previous_response_chain_rejection_event(&request, &error),
+                            &mut sink,
+                        );
+                        push_stream_item(
+                            &mut items,
                             previous_response_chain_fallback_event(
                                 &request,
                                 PreviousResponseChainFallbackReason::PredecessorRejectedByProvider,
@@ -5559,6 +5629,26 @@ fn previous_response_chain_fallback_event(
     )
 }
 
+fn previous_response_chain_rejection_event(
+    request: &BrainWakeRequest,
+    error: &ResponsesStreamError,
+) -> BrainWakeStreamItem {
+    event(
+        request,
+        BrainEvent::ProviderStatus {
+            level: BrainProviderStatusLevel::Info,
+            message: format!("previous_response_id predecessor was rejected: {error}"),
+            metadata_json: Some(
+                json!({
+                    "reasonCode": error.reason_code(),
+                    "source": error.source(),
+                })
+                .to_string(),
+            ),
+        },
+    )
+}
+
 fn failed_result(
     request: &BrainWakeRequest,
     mut items: Vec<BrainWakeStreamItem>,
@@ -7028,6 +7118,46 @@ mod tests {
     }
 
     #[test]
+    fn previous_response_chain_uses_new_suffix_from_bounded_durable_history() {
+        let state = valid_chain_provider_state();
+        let history = ResponsesReplayProjection {
+            input_items: vec![
+                ResponsesInputItem::AssistantMessage {
+                    content: "reply one".to_string(),
+                },
+                ResponsesInputItem::UserMessage {
+                    content: "human: second".to_string(),
+                },
+            ],
+            replay_hints: Vec::new(),
+        };
+        let mut brain = brain_with_config(
+            FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
+                response_id: "resp-2".to_string(),
+                usage: None,
+            }])]),
+            MapToolExecutor::default(),
+            ResponsesBrainConfig::previous_response_chain("gpt-5"),
+        );
+
+        brain
+            .wake_with_history(wake_request(Some(state), None), history)
+            .unwrap();
+
+        assert_eq!(brain.client.requests().len(), 1);
+        assert_eq!(
+            brain.client.requests()[0].previous_response_id.as_deref(),
+            Some("resp-1")
+        );
+        assert_eq!(
+            brain.client.requests()[0].input,
+            vec![ResponsesInputItem::UserMessage {
+                content: "human: second".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn previous_response_chain_falls_back_on_request_fingerprint_mismatch() {
         let mut state = valid_chain_provider_state();
         let mut payload: OpenAiResponsesProviderStateV1 =
@@ -7061,7 +7191,7 @@ mod tests {
     }
 
     #[test]
-    fn previous_response_chain_falls_back_on_non_append_only_input() {
+    fn previous_response_chain_appends_rewritten_durable_projection_as_new_context() {
         let mut brain = brain_with_config(
             FakeResponsesClient::new(vec![Ok(vec![ResponsesEvent::Completed {
                 response_id: "resp-replay".to_string(),
@@ -7085,11 +7215,25 @@ mod tests {
             .unwrap();
         let items = result.stream.drain_until_terminal().unwrap();
 
-        assert!(fallback_reason_seen(
+        assert!(!fallback_reason_seen(
             &items,
             PreviousResponseChainFallbackReason::InputNotAppendOnly
         ));
-        assert_eq!(brain.client.requests()[0].previous_response_id, None);
+        assert_eq!(
+            brain.client.requests()[0].previous_response_id.as_deref(),
+            Some("resp-1")
+        );
+        assert_eq!(
+            brain.client.requests()[0].input,
+            vec![
+                ResponsesInputItem::UserMessage {
+                    content: "human: rewritten first".to_string(),
+                },
+                ResponsesInputItem::UserMessage {
+                    content: "human: second".to_string(),
+                },
+            ]
+        );
     }
 
     #[test]

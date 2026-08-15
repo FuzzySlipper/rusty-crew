@@ -2361,16 +2361,16 @@
             "maximum": 10000
           },
           "reasoningEffort": {
-            "type": "string"
+            "type": ["string", "null"]
           },
           "reasoningFormat": {
-            "type": "string"
+            "type": ["string", "null"]
           },
           "reasoningHistory": {
             "$ref": "#/components/schemas/ModelReasoningHistory"
           },
           "reasoningBudgetTokens": {
-            "type": "integer",
+            "type": ["integer", "null"],
             "minimum": 1
           },
           "thinkingMode": {

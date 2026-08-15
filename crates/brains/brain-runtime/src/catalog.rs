@@ -1,9 +1,10 @@
+use rusty_crew_core_protocol::ResponsesProviderDialect;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fmt;
 
-pub const BRAIN_CATALOG_REVISION: u32 = 3;
+pub const BRAIN_CATALOG_REVISION: u32 = 4;
 pub const CHAT_COMPLETIONS_BRAIN_ID: &str = "chat-completions";
 pub const OPENAI_RESPONSES_BRAIN_ID: &str = "openai-responses";
 
@@ -109,6 +110,11 @@ pub struct BrainSelectionRequest {
     #[serde(default)]
     pub configured_strategy_id: Option<String>,
     pub provider_protocol: BrainProviderProtocol,
+    /// Resolved Responses wire dialect. Stateful-capable endpoints default to
+    /// provider-side response chaining unless the profile explicitly selects
+    /// another strategy.
+    #[serde(default)]
+    pub responses_provider_dialect: Option<ResponsesProviderDialect>,
     /// Compatibility-only vendor label; selection is protocol-driven.
     #[serde(default)]
     pub provider_kind: String,
@@ -227,13 +233,20 @@ pub fn plan_brain_selection(
             }
         }
     }
+    let default_strategy_id = if module.module_id == OPENAI_RESPONSES_BRAIN_ID
+        && request.responses_provider_dialect == Some(ResponsesProviderDialect::OpenaiStateful)
+    {
+        "previous-response-chain"
+    } else {
+        module.default_strategy_id.as_str()
+    };
     let strategy_id = if request.roleplay_narrator_enabled {
         "roleplay_narrator"
     } else {
         request
             .configured_strategy_id
             .as_deref()
-            .unwrap_or(&module.default_strategy_id)
+            .unwrap_or(default_strategy_id)
     };
     let strategy = module
         .strategies
@@ -394,6 +407,7 @@ mod tests {
             configured_module_id: None,
             configured_strategy_id: None,
             provider_protocol: protocol,
+            responses_provider_dialect: None,
             provider_kind: "test".to_string(),
             roleplay_narrator_enabled: false,
         }
@@ -480,6 +494,44 @@ mod tests {
         let narrator = plan_brain_selection(&narrator).expect("narrator plan");
         assert_eq!(narrator.module_id, CHAT_COMPLETIONS_BRAIN_ID);
         assert_eq!(narrator.selected_strategy_id, "roleplay_narrator");
+    }
+
+    #[test]
+    fn stateful_responses_dialect_defaults_to_chaining_but_explicit_strategy_wins() {
+        let mut stateful = request(BrainProviderProtocol::Responses);
+        stateful.responses_provider_dialect = Some(ResponsesProviderDialect::OpenaiStateful);
+        let stateful_plan = plan_brain_selection(&stateful).expect("stateful plan");
+        assert_eq!(
+            stateful_plan.selected_strategy_id,
+            "previous-response-chain"
+        );
+        assert_eq!(
+            stateful_plan.provider_fingerprint_options,
+            Some(json!({"strategy": "previous-response-chain"}))
+        );
+
+        stateful.configured_strategy_id = Some("replay".to_string());
+        assert_eq!(
+            plan_brain_selection(&stateful)
+                .expect("explicit replay plan")
+                .selected_strategy_id,
+            "replay"
+        );
+
+        for dialect in [
+            ResponsesProviderDialect::OpenaiStateless,
+            ResponsesProviderDialect::GenericStateless,
+            ResponsesProviderDialect::Deepseek,
+        ] {
+            let mut stateless = request(BrainProviderProtocol::Responses);
+            stateless.responses_provider_dialect = Some(dialect);
+            assert_eq!(
+                plan_brain_selection(&stateless)
+                    .expect("stateless plan")
+                    .selected_strategy_id,
+                "replay"
+            );
+        }
     }
 
     #[test]

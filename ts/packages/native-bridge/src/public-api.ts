@@ -1552,6 +1552,7 @@ export interface NativeBrainSelectionRequest {
   configuredModuleId?: string;
   configuredStrategyId?: string;
   providerProtocol: NativeBrainProviderProtocol;
+  responsesProviderDialect?: NativeResponsesProviderDialect;
   /** Compatibility-only vendor label; brain selection is protocol-driven. */
   providerKind?: string;
   roleplayNarratorEnabled?: boolean;

@@ -200,7 +200,7 @@ function normalizedRecordsToBrainModelConfig(
     reasoningFormat: configuration.reasoningFormat,
     responsesDialect:
       endpoint.protocol === "responses"
-        ? responsesDialect(endpoint)
+        ? responsesDialectForEndpoint(endpoint)
         : undefined,
     chatCompletionsDialect:
       endpoint.protocol === "chat_completions"
@@ -267,7 +267,7 @@ function credentialApiKeySecret(
   );
 }
 
-function responsesDialect(
+export function responsesDialectForEndpoint(
   endpoint: NativeModelEndpointRecord,
 ): BrainModelConfig["responsesDialect"] {
   switch (endpoint.wireDialect) {

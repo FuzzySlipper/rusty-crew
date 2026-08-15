@@ -21,6 +21,7 @@ import {
   createLocalToolProfileStore,
   LocalToolProfileError,
 } from "./local-tool-profiles.js";
+import { responsesDialectForEndpoint } from "./model-runtime-resolution.js";
 import type { ProfileConfig } from "./profile-loading.js";
 import {
   loadProfileConfig,
@@ -525,6 +526,12 @@ async function editableRuntimeConfigFromBody(
           ? {}
           : { configuredStrategyId: brain.strategy }),
         providerProtocol: modelEndpoint.protocol,
+        ...(modelEndpoint.protocol === "responses"
+          ? {
+              responsesProviderDialect:
+                responsesDialectForEndpoint(modelEndpoint),
+            }
+          : {}),
       });
       brain = {
         module: selection.module_id,

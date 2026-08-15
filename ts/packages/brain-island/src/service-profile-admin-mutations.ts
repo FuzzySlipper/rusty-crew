@@ -16,6 +16,7 @@ import type {
 } from "@rusty-crew/native-bridge";
 import type { AdminControlCommand } from "./admin-control-api.js";
 import { createLocalToolProfileStore } from "./local-tool-profiles.js";
+import { responsesDialectForEndpoint } from "./model-runtime-resolution.js";
 import {
   loadProfileConfig,
   parseExternalMessageDeliveryPolicy,
@@ -559,6 +560,9 @@ export async function createServiceProfile(
       ? {}
       : { configuredStrategyId: requestedBrain.strategy }),
     providerProtocol: modelEndpoint.protocol,
+    ...(modelEndpoint.protocol === "responses"
+      ? { responsesProviderDialect: responsesDialectForEndpoint(modelEndpoint) }
+      : {}),
   });
   const plan = await planCreateProfileWithRust({
     bridge: context.bridge,

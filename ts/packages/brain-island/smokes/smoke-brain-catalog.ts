@@ -67,6 +67,34 @@ try {
       /unregistered host capabilities/,
     );
     assert.equal(
+      (
+        await native.planBrainSelection({
+          providerProtocol: "responses",
+          responsesProviderDialect: "openai_stateful",
+        })
+      ).selected_strategy_id,
+      "previous-response-chain",
+    );
+    assert.equal(
+      (
+        await native.planBrainSelection({
+          configuredStrategyId: "replay",
+          providerProtocol: "responses",
+          responsesProviderDialect: "openai_stateful",
+        })
+      ).selected_strategy_id,
+      "replay",
+    );
+    assert.equal(
+      (
+        await native.planBrainSelection({
+          providerProtocol: "responses",
+          responsesProviderDialect: "openai_stateless",
+        })
+      ).selected_strategy_id,
+      "replay",
+    );
+    assert.equal(
       catalog.modules.some((module) => module.module_id === "local"),
       false,
     );
@@ -313,24 +341,28 @@ function writeRuntimeConfig(dataDir: string): void {
             agentId: "narrator-agent",
             profileId: "narrator-profile",
             kind: "full",
+            workspaceCwd: dataDir,
           },
           {
             sessionId: "chat-session",
             agentId: "chat-completions",
             profileId: "chat-profile",
             kind: "full",
+            workspaceCwd: dataDir,
           },
           {
             sessionId: "responses-session",
             agentId: "responses-agent",
             profileId: "responses-profile",
             kind: "full",
+            workspaceCwd: dataDir,
           },
           {
             sessionId: "responses-chain-session",
             agentId: "responses-chain-agent",
             profileId: "responses-chain-profile",
             kind: "full",
+            workspaceCwd: dataDir,
           },
         ],
       },
@@ -398,7 +430,6 @@ function writeRuntimeConfig(dataDir: string): void {
         },
         brain: {
           module: "openai-responses",
-          strategy: "previous-response-chain",
         },
       },
       null,

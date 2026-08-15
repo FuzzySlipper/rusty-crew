@@ -22,6 +22,11 @@ export function createNativeBridgeBrainCatalogMethods(
               ? {}
               : { configured_strategy_id: input.configuredStrategyId }),
             provider_protocol: input.providerProtocol,
+            ...(input.responsesProviderDialect === undefined
+              ? {}
+              : {
+                  responses_provider_dialect: input.responsesProviderDialect,
+                }),
             provider_kind: input.providerKind,
             roleplay_narrator_enabled: input.roleplayNarratorEnabled ?? false,
           }),

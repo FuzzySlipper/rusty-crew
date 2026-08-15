@@ -538,6 +538,8 @@ test("normalized model endpoint and configuration CRUD keeps the public shape cl
       endpointId: "openai-main",
       status: "active",
       modelId: "gpt-4.1",
+      reasoningEffort: "high",
+      reasoningFormat: "openai",
       capabilities: { version: 1, imageInput: true },
       metadataJson: { purpose: "chat" },
     }),
@@ -564,6 +566,22 @@ test("normalized model endpoint and configuration CRUD keeps the public shape cl
     ).configuration.displayName,
     "GPT main",
   );
+
+  const clearedReasoning = await handleModelRegistryAdminRequest(
+    request("PATCH", "/v1/admin/model-configurations/gpt-main", {
+      reasoningEffort: null,
+      reasoningFormat: null,
+      reasoningBudgetTokens: null,
+      expectedRevision: 2,
+    }),
+    context,
+  );
+  const clearedConfiguration = responseData<{
+    configuration: NativeModelConfigurationRecord;
+  }>(clearedReasoning).configuration;
+  assert.equal(clearedConfiguration.reasoningEffort, undefined);
+  assert.equal(clearedConfiguration.reasoningFormat, undefined);
+  assert.equal(clearedConfiguration.reasoningBudgetTokens, undefined);
 
   const configurationList = await handleModelRegistryAdminRequest(
     request("GET", "/v1/admin/model-configurations?endpointId=openai-main"),
@@ -606,7 +624,7 @@ test("normalized model endpoint and configuration CRUD keeps the public shape cl
 
   const configurationDelete = await handleModelRegistryAdminRequest(
     request("DELETE", "/v1/admin/model-configurations/gpt-main", {
-      expectedRevision: 2,
+      expectedRevision: 3,
     }),
     context,
   );
@@ -630,6 +648,49 @@ test("normalized model endpoint and configuration CRUD keeps the public shape cl
   );
   assert.equal(context.configurations.size, 0);
   assert.equal(context.endpoints.size, 0);
+});
+
+test("normalized model configuration PATCH clears a persisted reasoning budget", async () => {
+  const context = new MemoryModelRegistry();
+  responseData(
+    await handleModelRegistryAdminRequest(
+      request("POST", "/v1/admin/model-endpoints", {
+        endpointId: "qwen-main",
+        baseUrl: "https://models.test/v1",
+        protocol: "chat_completions",
+        wireDialect: "qwen",
+      }),
+      context,
+    ),
+  );
+  const created = responseData<{
+    configuration: NativeModelConfigurationRecord;
+  }>(
+    await handleModelRegistryAdminRequest(
+      request("POST", "/v1/admin/model-configurations", {
+        modelConfigId: "qwen-budget",
+        endpointId: "qwen-main",
+        modelId: "qwen-test",
+        thinkingMode: "enabled",
+        reasoningBudgetTokens: 8_192,
+      }),
+      context,
+    ),
+  ).configuration;
+  assert.equal(created.reasoningBudgetTokens, 8_192);
+
+  const cleared = responseData<{
+    configuration: NativeModelConfigurationRecord;
+  }>(
+    await handleModelRegistryAdminRequest(
+      request("PATCH", "/v1/admin/model-configurations/qwen-budget", {
+        reasoningBudgetTokens: null,
+        expectedRevision: 1,
+      }),
+      context,
+    ),
+  ).configuration;
+  assert.equal(cleared.reasoningBudgetTokens, undefined);
 });
 
 test("normalized model registry rejects closed-enum and legacy secret fields", async () => {
