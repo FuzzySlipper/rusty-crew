@@ -378,7 +378,11 @@ impl ResponsesRequestBuilder {
             self.config.strategy,
             ResponsesBrainStrategy::PreviousResponseChain
         );
-        let provider_items = provider_replay_items(provider_state, include_provider_item_ids);
+        let provider_items = provider_replay_items(
+            provider_state,
+            include_provider_item_ids,
+            self.config.dialect,
+        );
         let mut input = if include_provider_item_ids {
             let mut items = history.input_items;
             items.extend(provider_items);
@@ -467,7 +471,7 @@ impl ResponsesRequestBuilder {
             stream: true,
             include: openai_extensions.then(|| {
                 let mut include = self.config.include.clone();
-                if meta
+                if supports_encrypted_reasoning_replay(self.config.dialect)
                     && self.config.strategy == ResponsesBrainStrategy::Replay
                     && !include
                         .iter()
@@ -1005,6 +1009,7 @@ fn request_fingerprint(request: &ResponsesRequest) -> String {
 fn provider_replay_items(
     provider_state: Option<&BrainWakeProviderStateInput>,
     include_provider_item_ids: bool,
+    dialect: ResponsesProviderDialect,
 ) -> Vec<ResponsesInputItem> {
     let Some(state) = provider_state else {
         return Vec::new();
@@ -1031,9 +1036,6 @@ fn provider_replay_items(
             .map(ResponsesInputItem::from)
             .collect::<Vec<_>>()
     };
-    if !include_provider_item_ids {
-        strip_provider_item_ids(&mut items);
-    }
     if let Some(hints) = payload.replay_hints {
         for record in hints.reasoning_items {
             if let Some(item) = replay_item_from_record(record, include_provider_item_ids) {
@@ -1049,17 +1051,45 @@ fn provider_replay_items(
             });
         }
     }
-    items
+    if include_provider_item_ids {
+        items
+    } else {
+        prepare_stateless_replay_items(items, dialect)
+    }
 }
 
-fn strip_provider_item_ids(items: &mut [ResponsesInputItem]) {
-    for item in items {
-        match item {
-            ResponsesInputItem::Reasoning { id, .. }
-            | ResponsesInputItem::FunctionCall { id, .. } => *id = None,
-            _ => {}
-        }
-    }
+fn supports_encrypted_reasoning_replay(dialect: ResponsesProviderDialect) -> bool {
+    matches!(
+        dialect,
+        ResponsesProviderDialect::OpenaiStateful
+            | ResponsesProviderDialect::OpenaiStateless
+            | ResponsesProviderDialect::Meta
+    )
+}
+
+fn prepare_stateless_replay_items(
+    items: Vec<ResponsesInputItem>,
+    dialect: ResponsesProviderDialect,
+) -> Vec<ResponsesInputItem> {
+    let encrypted_reasoning_replay = supports_encrypted_reasoning_replay(dialect);
+    items
+        .into_iter()
+        .filter_map(|mut item| {
+            match &mut item {
+                ResponsesInputItem::Reasoning {
+                    encrypted_content, ..
+                } if encrypted_reasoning_replay && encrypted_content.is_none() => return None,
+                ResponsesInputItem::Reasoning { id, .. }
+                | ResponsesInputItem::FunctionCall { id, .. }
+                    if !encrypted_reasoning_replay =>
+                {
+                    *id = None;
+                }
+                _ => {}
+            }
+            Some(item)
+        })
+        .collect()
 }
 
 fn replay_item_from_record(
@@ -5350,8 +5380,11 @@ fn provider_state_output(input: ProviderStateOutputInput<'_>) -> BrainWakeProvid
     } = input;
     let output_records =
         deduplicate_output_records(output_items.iter().map(output_record_from_item).collect());
-    let stateless_replay_context =
-        accumulated_stateless_replay_context(committed_input_items.clone(), &output_records);
+    let stateless_replay_context = accumulated_stateless_replay_context(
+        committed_input_items.clone(),
+        &output_records,
+        config.dialect,
+    );
     let previous_response_chain = (config.strategy
         == ResponsesBrainStrategy::PreviousResponseChain)
         .then(|| PreviousResponseChainStateV1 {
@@ -5430,16 +5463,24 @@ fn output_record_identity(record: &OpenAiResponseOutputItemRecord) -> String {
 }
 
 fn accumulated_stateless_replay_context(
-    mut committed_input_items: Vec<ResponsesInputItem>,
+    committed_input_items: Vec<ResponsesInputItem>,
     output_records: &[OpenAiResponseOutputItemRecord],
+    dialect: ResponsesProviderDialect,
 ) -> Vec<StoredResponsesInputItem> {
-    strip_provider_item_ids(&mut committed_input_items);
+    let mut committed_input_items = prepare_stateless_replay_items(committed_input_items, dialect);
     let mut matched_input = vec![false; committed_input_items.len()];
     for record in output_records.iter().cloned() {
-        let Some(mut output_item) = replay_item_from_record(record, false) else {
+        let Some(output_item) =
+            replay_item_from_record(record, supports_encrypted_reasoning_replay(dialect))
+        else {
             continue;
         };
-        strip_provider_item_ids(std::slice::from_mut(&mut output_item));
+        let Some(output_item) = prepare_stateless_replay_items(vec![output_item], dialect)
+            .into_iter()
+            .next()
+        else {
+            continue;
+        };
         if let Some((index, _)) = committed_input_items
             .iter()
             .enumerate()
@@ -5946,6 +5987,131 @@ mod tests {
         assert_eq!(wire["include"], json!(["reasoning.encrypted_content"]));
         assert_eq!(wire["input"][0]["summary"], json!([]));
         assert_eq!(wire["input"][0]["encrypted_content"], "opaque-reasoning");
+    }
+
+    #[test]
+    fn openai_compatible_replay_round_trips_only_encrypted_provider_reasoning() {
+        let mut config = ResponsesBrainConfig::replay("grok-4.6");
+        config.dialect = ResponsesProviderDialect::OpenaiStateful;
+        let output_records = vec![
+            output_record_from_item(&ResponsesOutputItem::Reasoning {
+                id: Some("rs-1".to_string()),
+                content: None,
+                summary: Some("provider summary".to_string()),
+                encrypted_content: Some("opaque-reasoning".to_string()),
+            }),
+            output_record_from_item(&ResponsesOutputItem::Message {
+                id: Some("msg-1".to_string()),
+                text: "first answer".to_string(),
+            }),
+            output_record_from_item(&ResponsesOutputItem::Reasoning {
+                id: None,
+                content: Some("streamed plaintext reasoning".to_string()),
+                summary: None,
+                encrypted_content: None,
+            }),
+        ];
+        let replay_context = accumulated_stateless_replay_context(
+            vec![ResponsesInputItem::UserMessage {
+                content: "first question".to_string(),
+            }],
+            &output_records,
+            config.dialect,
+        );
+        let state = provider_state(
+            serde_json::to_value(OpenAiResponsesProviderStateV1 {
+                kind: MODULE_ID.to_string(),
+                strategy_id: REPLAY_STRATEGY_ID.to_string(),
+                payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+                last_completed_response: Some(OpenAiResponsesCompletedResponseRecord {
+                    response_id: "resp-1".to_string(),
+                    output_items: output_records,
+                    token_usage: None,
+                }),
+                stateless_replay_context: replay_context,
+                previous_response_chain: None,
+                replay_hints: None,
+                context_compaction: ResponsesContextCompactionState::default(),
+            })
+            .unwrap(),
+        );
+        let request = ResponsesRequestBuilder::new(config).build_replay(
+            &wake_request(Some(state.clone()), None),
+            Some(&state),
+            ResponsesReplayProjection {
+                input_items: vec![ResponsesInputItem::UserMessage {
+                    content: "second question".to_string(),
+                }],
+                replay_hints: Vec::new(),
+            },
+            Vec::new(),
+        );
+        let wire = serde_json::to_value(request).expect("xAI replay request JSON");
+
+        assert_eq!(wire["store"], false);
+        assert_eq!(wire["include"], json!(["reasoning.encrypted_content"]));
+        assert_eq!(wire["input"].as_array().unwrap().len(), 4);
+        assert_eq!(wire["input"][0]["content"], "first question");
+        assert_eq!(wire["input"][1]["type"], "reasoning");
+        assert_eq!(wire["input"][1]["id"], "rs-1");
+        assert_eq!(wire["input"][1]["encrypted_content"], "opaque-reasoning");
+        assert_eq!(
+            wire["input"][1]["summary"],
+            json!([{"type": "summary_text", "text": "provider summary"}])
+        );
+        assert_eq!(wire["input"][2]["role"], "assistant");
+        assert_eq!(wire["input"][2]["content"], "first answer");
+        assert_eq!(wire["input"][3]["content"], "second question");
+        assert!(wire["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| { item.get("content") != Some(&json!("streamed plaintext reasoning")) }));
+    }
+
+    #[test]
+    fn openai_compatible_replay_recovers_from_legacy_unencrypted_reasoning_state() {
+        let mut config = ResponsesBrainConfig::replay("grok-4.6");
+        config.dialect = ResponsesProviderDialect::OpenaiStateful;
+        let state = provider_state(
+            serde_json::to_value(OpenAiResponsesProviderStateV1 {
+                kind: MODULE_ID.to_string(),
+                strategy_id: REPLAY_STRATEGY_ID.to_string(),
+                payload_version: PROVIDER_STATE_PAYLOAD_VERSION.to_string(),
+                last_completed_response: None,
+                stateless_replay_context: vec![
+                    StoredResponsesInputItem::Reasoning {
+                        id: None,
+                        content: None,
+                        summary: Some("legacy summary".to_string()),
+                        encrypted_content: None,
+                    },
+                    StoredResponsesInputItem::AssistantMessage {
+                        content: "first answer".to_string(),
+                    },
+                ],
+                previous_response_chain: None,
+                replay_hints: None,
+                context_compaction: ResponsesContextCompactionState::default(),
+            })
+            .unwrap(),
+        );
+        let request = ResponsesRequestBuilder::new(config).build_replay(
+            &wake_request(Some(state.clone()), None),
+            Some(&state),
+            ResponsesReplayProjection {
+                input_items: vec![ResponsesInputItem::UserMessage {
+                    content: "retry second question".to_string(),
+                }],
+                replay_hints: Vec::new(),
+            },
+            Vec::new(),
+        );
+        let wire = serde_json::to_value(request).expect("legacy recovery request JSON");
+
+        assert_eq!(wire["input"].as_array().unwrap().len(), 2);
+        assert_eq!(wire["input"][0]["role"], "assistant");
+        assert_eq!(wire["input"][1]["content"], "retry second question");
     }
 
     #[test]
