@@ -324,7 +324,9 @@ export function projectDynamicToolResultDisplayText(value: string): string {
     return value;
   }
   if (!isPlainRecord(parsed) || !Array.isArray(parsed.content)) return value;
-  const detailRef = callToolResultDetailRef(parsed.structuredContent);
+  const detailRef =
+    callToolResultDetailRef(parsed.structuredContent) ??
+    callToolResultDetailsDetailRef(parsed.details);
   const text = parsed.content
     .filter(isPlainRecord)
     .filter((item) => stringValue(item.type) === "text")
@@ -342,6 +344,11 @@ export function projectDynamicToolResultDisplayText(value: string): string {
 function callToolResultDetailRef(value: unknown): string | undefined {
   if (!isPlainRecord(value)) return undefined;
   return stringValue(value.detail_ref) ?? stringValue(value.detailRef);
+}
+
+function callToolResultDetailsDetailRef(value: unknown): string | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  return callToolResultDetailRef(value.structuredContent);
 }
 
 function isDetailReferenceText(

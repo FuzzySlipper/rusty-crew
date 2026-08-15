@@ -204,7 +204,6 @@ test("dynamic tool completion unwraps CallToolResult text without mirrored detai
       structuredContent: { detail_ref: detailRef, items: [] },
     },
     isError: false,
-    structuredContent: { detail_ref: detailRef, items: [] },
   });
   const event = mapNotification(
     {
