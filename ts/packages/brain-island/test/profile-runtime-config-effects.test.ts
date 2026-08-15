@@ -51,7 +51,7 @@ test("runtime config effects refresh repaired MCP bindings and rebuild the activ
           activeSessionCount: 1,
           materializedCount: 1,
           removedBindingIds: [],
-          changed: true,
+          changed: false,
           diagnostics: [],
         };
       },
