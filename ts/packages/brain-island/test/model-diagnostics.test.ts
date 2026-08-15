@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import type { ProfileId, SessionState } from "@rusty-crew/contracts";
@@ -9,6 +12,7 @@ import type {
   NativeServiceCredentialRecord,
 } from "@rusty-crew/native-bridge";
 import { buildAdminProfileRegistryDiagnostics } from "../src/profile-registry-admin.js";
+import { buildReadOnlySlashCommandResponse } from "../src/slash-command-responses.js";
 import {
   rustyViewSessionContextUsage,
   type RustyViewChatOperationsContext,
@@ -36,6 +40,7 @@ test("context diagnostics preserve an endpoint credential reference when the cre
     ),
     false,
   );
+  assert.equal(result.degraded, true);
 });
 
 test("context diagnostics distinguish an unavailable credential reader from a missing credential", async () => {
@@ -59,6 +64,7 @@ test("context diagnostics distinguish an unavailable credential reader from a mi
     ),
     false,
   );
+  assert.equal(result.degraded, true);
 });
 
 test("context diagnostics expose a present credential with a missing secret", async () => {
@@ -73,6 +79,7 @@ test("context diagnostics expose a present credential with a missing secret", as
       (diagnostic) => diagnostic.code === "service_credential_secret_missing",
     ),
   );
+  assert.equal(result.degraded, true);
 });
 
 test("context diagnostics label a legacy-only provider selection as compatibility identity", async () => {
@@ -96,6 +103,71 @@ test("context diagnostics label a legacy-only provider selection as compatibilit
   assert.equal(result.provider.model_config_id, undefined);
   assert.equal(result.provider.provider_alias, "legacy-diagnostics");
   assert.equal(result.provider.alias, "legacy-diagnostics");
+});
+
+test("normalized model diagnostics ignore stale provider aliases and remain healthy with informational reasoning metadata", async (t) => {
+  const profilesDir = await mkdtemp(
+    join(tmpdir(), "rusty-crew-model-diagnostics-"),
+  );
+  t.after(() => rm(profilesDir, { recursive: true, force: true }));
+  await writeFile(
+    join(profilesDir, "profile-diagnostics.json"),
+    JSON.stringify({
+      profileId: "profile-diagnostics",
+      modelConfigId: "model-diagnostics",
+      prompt: { system: "Model diagnostics regression profile." },
+    }),
+  );
+  const context = contextForCredentialLookup(
+    async () => credential({}),
+    profilesDir,
+  );
+  context.bridge.getProfileRegistryRecord = async () => ({
+    ...registryRecord(),
+    activeRuntimeSettingsJson: {
+      modelConfigId: "model-diagnostics",
+      providerAlias: "stale-legacy-provider",
+    },
+  });
+  context.bridge.getModelConfiguration = async () => ({
+    ...modelConfiguration(),
+    reasoningFormat: "openai",
+  });
+
+  const result = await rustyViewSessionContextUsage(context, {
+    session: session(),
+    requestId: "normalized-provider-identity",
+  });
+
+  assert.equal(result.provider.model_config_id, "model-diagnostics");
+  assert.equal(result.provider.provider_alias, undefined);
+  assert.equal(result.provider.endpoint_id, "endpoint-diagnostics");
+  assert.deepEqual(
+    result.diagnostics.find(
+      (diagnostic) =>
+        diagnostic.code === "provider_reasoning_format_not_applied",
+    ),
+    {
+      severity: "info",
+      code: "provider_reasoning_format_not_applied",
+      message:
+        "reasoningFormat is stored for provider diagnostics but is not mapped by the selected native brain protocol",
+    },
+  );
+  assert.equal(result.degraded, false, JSON.stringify(result.diagnostics));
+
+  const modelResponse = buildReadOnlySlashCommandResponse("model", {
+    diagnostics: {} as never,
+    session: {
+      sessionId: result.session_id,
+      profileId: result.profile_id,
+    } as never,
+    modelContext: result,
+  });
+  assert.equal(
+    modelResponse.summary,
+    "profile-diagnostics uses diagnostic-model via model-diagnostics.",
+  );
 });
 
 test("profile registry diagnostics retain the endpoint credential reference when lookup returns no record", async () => {
@@ -166,6 +238,7 @@ function contextForCredentialLookup(
   getServiceCredential: () => Promise<
     NativeServiceCredentialRecord | undefined
   >,
+  profilesDir?: string,
 ): RustyViewChatOperationsContext {
   return {
     bridge: {
@@ -175,9 +248,11 @@ function contextForCredentialLookup(
       getModelConfiguration: async () => modelConfiguration(),
       getModelEndpoint: async () => modelEndpoint(),
       getServiceCredential,
+      getServiceCredentialSecret: async () =>
+        JSON.stringify({ kind: "api_key", value: "diagnostics-secret" }),
       listContextCompactionArtifacts: async () => [],
     },
-    runtimeConfig: runtimeConfig(),
+    runtimeConfig: runtimeConfig(profilesDir),
     toolCallDebugStore: { get: () => undefined },
     providerRequestDebugStore: { get: () => undefined },
     toolMediaAttachments: {} as never,
@@ -195,9 +270,9 @@ function contextForCredentialLookup(
   } as unknown as RustyViewChatOperationsContext;
 }
 
-function runtimeConfig(): RustyCrewRuntimeConfig {
+function runtimeConfig(profilesDir?: string): RustyCrewRuntimeConfig {
   return {
-    profilesDir: "/tmp/rusty-crew-missing-diagnostics-profile",
+    profilesDir: profilesDir ?? "/tmp/rusty-crew-missing-diagnostics-profile",
     brains: [],
     sessions: [],
     scheduledJobs: [],

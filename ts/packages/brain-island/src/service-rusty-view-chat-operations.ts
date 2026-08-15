@@ -749,7 +749,7 @@ export async function rustyViewSessionContextUsage(
   }
   if (provider?.reasoningFormat !== undefined) {
     diagnostics.push({
-      severity: "warning",
+      severity: "info",
       code: "provider_reasoning_format_not_applied",
       message:
         "reasoningFormat is stored for provider diagnostics but is not mapped by the selected native brain protocol",
@@ -795,8 +795,7 @@ export async function rustyViewSessionContextUsage(
     provider: {
       alias: modelConfigId ?? providerAlias,
       model_config_id: modelConfigId,
-      provider_alias:
-        modelConfigId === undefined ? providerAlias : explicitProviderAlias,
+      provider_alias: modelConfigId === undefined ? providerAlias : undefined,
       model_config_revision:
         modelConfigId === undefined ? undefined : provider?.revision,
       endpoint_id:
