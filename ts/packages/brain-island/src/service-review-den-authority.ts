@@ -20,6 +20,14 @@ export const REVIEW_DEN_REQUIRED_TOOLS = [
   "watch_github_checks",
 ] as const;
 
+const REVIEW_DEN_DISCOVERABLE_TOOLS = [
+  "finalize_review",
+  "get_task",
+  "request_review",
+  "update_task",
+  "watch_github_checks",
+] as const satisfies readonly ReviewDenToolName[];
+
 export type ReviewDenToolName = (typeof REVIEW_DEN_REQUIRED_TOOLS)[number];
 
 export type ReviewDenAuthority =
@@ -106,7 +114,11 @@ export async function validateServiceReviewDenAuthority(input: {
         return typeof name === "string" ? [name] : [];
       }),
     );
-    const missingTools = REVIEW_DEN_REQUIRED_TOOLS.filter(
+    // Den deliberately keeps long-tail operator and primitive operations out of
+    // tools/list. The dedicated service authority calls those registered
+    // operations by exact name through the same trusted MCP endpoint, so
+    // discovery is only a readiness check for the public green-path surface.
+    const missingTools = REVIEW_DEN_DISCOVERABLE_TOOLS.filter(
       (name) => !names.has(name),
     );
     return {
@@ -119,7 +131,7 @@ export async function validateServiceReviewDenAuthority(input: {
       checkedAt,
       message:
         missingTools.length === 0
-          ? "Dedicated service review Den authority is ready."
+          ? "Dedicated service review Den authority is ready; registered long-tail operations are called by exact name."
           : `Dedicated service review Den authority is missing required tools: ${missingTools.join(", ")}.`,
     };
   } catch (error) {

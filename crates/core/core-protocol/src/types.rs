@@ -718,6 +718,7 @@ pub enum ReviewSubmissionTransition {
         review_round_id: u64,
         exact_head_commit: String,
         verdict: String,
+        task_status: String,
         terminal_reason: String,
     },
     DenTaskTerminal {

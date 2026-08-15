@@ -401,6 +401,7 @@ impl CoreEngine {
                 review_round_id,
                 exact_head_commit,
                 verdict,
+                task_status,
                 terminal_reason,
             } => {
                 if review_submission_terminal(record.phase) {
@@ -408,7 +409,10 @@ impl CoreEngine {
                 }
                 if review_round_id == 0
                     || !exact_head_commit.eq_ignore_ascii_case(&record.commit_sha)
-                    || !matches!(verdict.as_str(), "looks_good" | "changes_requested")
+                    || !matches!(
+                        (verdict.as_str(), task_status.as_str()),
+                        ("looks_good", "done") | ("changes_requested", "in_progress")
+                    )
                     || terminal_reason.trim().is_empty()
                 {
                     return Err(CoreError::new(
@@ -419,6 +423,7 @@ impl CoreEngine {
                 record.review_round_id = Some(review_round_id);
                 record.review_exact_head_commit = Some(exact_head_commit);
                 record.review_verdict = Some(verdict);
+                record.review_task_status = Some(task_status);
                 record.terminal_reason = Some(terminal_reason);
                 record.phase = ReviewSubmissionPhase::ReviewTerminal;
                 record.last_adapter_error = None;

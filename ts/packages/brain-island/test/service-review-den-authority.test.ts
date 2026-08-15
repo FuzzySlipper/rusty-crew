@@ -35,7 +35,7 @@ test("service review Den authority is unchanged by archive, replacement, rebuild
   }
 });
 
-test("service review Den authority validates the exact required tool surface", async () => {
+test("service review Den authority validates its discoverable green-path surface", async () => {
   const result = await validateServiceReviewDenAuthority({
     authority,
     now: () => "2026-08-09T08:00:00.000Z",
@@ -47,7 +47,28 @@ test("service review Den authority validates the exact required tool surface", a
   assert.equal(result.auditIdentity, "rusty-crew-review-service");
 });
 
-test("service review Den authority reports missing tools and recovers on retry", async () => {
+test("service review Den authority does not require registered long-tail operations in discovery", async () => {
+  const hiddenLongTail = new Set([
+    "get_github_check_gate",
+    "list_projects",
+    "list_review_pipeline",
+    "list_review_rounds",
+  ]);
+  const result = await validateServiceReviewDenAuthority({
+    authority,
+    now: () => "2026-08-09T08:00:00.000Z",
+    listTools: async () =>
+      REVIEW_DEN_REQUIRED_TOOLS.filter((name) => !hiddenLongTail.has(name)).map(
+        (name) => ({ name }),
+      ),
+  });
+
+  assert.equal(result.status, "ready");
+  assert.deepEqual(result.missingTools, []);
+  assert.match(result.message, /exact name/);
+});
+
+test("service review Den authority reports missing public tools and recovers on retry", async () => {
   let restored = false;
   const validate = () =>
     validateServiceReviewDenAuthority({

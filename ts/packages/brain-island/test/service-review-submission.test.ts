@@ -745,7 +745,7 @@ test("managed reviews remain available with zero sessions and bindings", () => {
   );
 });
 
-test("reconciliation settles an exact-head Den round finalized outside Crew", async () => {
+test("reconciliation settles the exact current Den round finalized outside Crew", async () => {
   const pending = {
     ...scopedSubmissionRecord("rusty-crew", {
       type: "external_cli",
@@ -784,14 +784,20 @@ test("reconciliation settles an exact-head Den round finalized outside Crew", as
     serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-08T09:30:00.000Z",
     callDenTool: async (_binding: unknown, toolName: string) => {
+      if (toolName === "get_task") {
+        return {
+          id: Number(pending.taskId),
+          project_id: pending.projectId,
+          status: "done",
+        };
+      }
       assert.equal(toolName, "list_review_rounds");
       return {
-        project_id: "rusty-crew",
         items: [
           {
             id: 4089,
             project_id: "rusty-crew",
-            head_commit: pending.commitSha,
+            task_id: Number(pending.taskId),
             verdict: "looks_good",
           },
         ],
@@ -809,6 +815,7 @@ test("reconciliation settles an exact-head Den round finalized outside Crew", as
         reviewRoundId: 4089,
         exactHeadCommit: pending.commitSha,
         verdict: "looks_good",
+        taskStatus: "done",
         terminalReason: "den_round_already_finalized",
       },
       now: "2026-08-08T09:30:00.000Z",
@@ -855,14 +862,20 @@ test("restart reconciliation records an independently finalized round exactly on
     now: () => "2026-08-08T09:30:00.000Z",
     callDenTool: async (_authority: unknown, toolName: string) => {
       denReads += 1;
+      if (toolName === "get_task") {
+        return {
+          id: Number(durable.taskId),
+          project_id: durable.projectId,
+          status: "done",
+        };
+      }
       assert.equal(toolName, "list_review_rounds");
       return {
-        project_id: "rusty-crew",
         items: [
           {
             id: 4089,
             project_id: "rusty-crew",
-            head_commit: durable.commitSha,
+            task_id: Number(durable.taskId),
             verdict: "looks_good",
           },
         ],
@@ -873,9 +886,125 @@ test("restart reconciliation records an independently finalized round exactly on
 
   await reconcileReviewSubmissions(context);
   await reconcileReviewSubmissions(context);
-  assert.equal(denReads, 1);
+  assert.equal(denReads, 2);
   assert.equal(transitions, 1);
   assert.equal(durable.phase, "review_terminal");
+});
+
+test("pointer-first finalization receipt is verified against current Den round and task", async () => {
+  let durable = {
+    ...scopedSubmissionRecord("rusty-crew", {
+      type: "external_cli" as const,
+      clientId: "test",
+      idempotencyKey: "pointer-first-finalization",
+    }),
+    phase: "den_finalization_pending" as const,
+    reviewRoundId: 4743,
+    reviewResultJson: JSON.stringify({ verdict: "looks_good" }),
+    reviewerSessionId: "reviewer-session",
+  } as ReviewSubmissionRecord;
+  let finalized = false;
+  const calls: string[] = [];
+  const transitions: Array<Record<string, unknown>> = [];
+  const runtime = createServiceReviewSubmissionRuntime(() => ({
+    bridge: {
+      listReviewSubmissions: async () => [durable],
+      transitionReviewSubmission: async (request: {
+        transition: Record<string, unknown>;
+      }) => {
+        transitions.push(request.transition);
+        if (request.transition.type === "den_finalized") {
+          durable = {
+            ...durable,
+            phase: "den_finalized",
+            reviewFinalizationId: request.transition.finalizationId,
+            reviewPacketId: request.transition.packetId,
+            reviewPacketMessageId: request.transition.packetMessageId,
+            reviewExactHeadCommit: request.transition.exactHeadCommit,
+            reviewVerdict: request.transition.verdict,
+            reviewTaskStatus: request.transition.taskStatus,
+            revision: durable.revision + 1,
+          } as ReviewSubmissionRecord;
+        } else if (request.transition.type === "review_terminal") {
+          durable = {
+            ...durable,
+            phase: "review_terminal",
+            revision: durable.revision + 1,
+          } as ReviewSubmissionRecord;
+        } else {
+          assert.fail(`unexpected transition ${request.transition.type}`);
+        }
+        return durable;
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-15T01:42:59.669Z",
+    callDenTool: async (_authority: unknown, toolName: string) => {
+      calls.push(toolName);
+      if (toolName === "list_review_rounds") {
+        return {
+          items: [
+            {
+              id: 4743,
+              project_id: durable.projectId,
+              task_id: Number(durable.taskId),
+              verdict: finalized ? "looks_good" : null,
+            },
+          ],
+        };
+      }
+      if (toolName === "finalize_review") {
+        finalized = true;
+        return {
+          schema: "den_review.review_completion_receipt.v1",
+          schema_version: 1,
+          id: 901,
+          project_id: durable.projectId,
+          task_id: Number(durable.taskId),
+          review_round_id: 4743,
+          verdict: "looks_good",
+          state: "complete",
+          packet_id: 902,
+          packet_message_id: 903,
+          resulting_task_status: "done",
+        };
+      }
+      if (toolName === "get_task") {
+        return {
+          id: Number(durable.taskId),
+          project_id: durable.projectId,
+          status: "done",
+        };
+      }
+      assert.fail(`unexpected Den tool ${toolName}`);
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  }));
+
+  const result = await runtime.complete({
+    verdict: "looks_good",
+    taskId: Number(durable.taskId),
+    commitSha: durable.commitSha,
+    caller: { type: "review_submission", submissionId: durable.submissionId },
+    reviewerSessionId: "reviewer-session",
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.exactHeadCommit, durable.commitSha);
+  assert.equal(result.taskStatus, "done");
+  assert.deepEqual(calls, [
+    "list_review_rounds",
+    "finalize_review",
+    "list_review_rounds",
+    "get_task",
+  ]);
+  assert.deepEqual(
+    transitions.map((transition) => transition.type),
+    ["den_finalized", "review_terminal"],
+  );
+  assert.equal("exact_head_commit" in transitions[0]!, false);
+  assert.equal(transitions[0]!.exactHeadCommit, durable.commitSha);
 });
 
 test("a durable result survives authority loss after dispatch and reconciles after restoration", async () => {
@@ -916,15 +1045,21 @@ test("a durable result survives authority loss after dispatch and reconciles aft
     runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
     serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-08T09:30:00.000Z",
-    callDenTool: async () => {
+    callDenTool: async (_authority: unknown, toolName: string) => {
       if (!authorityAvailable) throw new Error("service authority unavailable");
+      if (toolName === "get_task") {
+        return {
+          id: Number(durable.taskId),
+          project_id: durable.projectId,
+          status: "done",
+        };
+      }
       return {
-        project_id: "rusty-crew",
         items: [
           {
             id: 4089,
             project_id: "rusty-crew",
-            head_commit: durable.commitSha,
+            task_id: Number(durable.taskId),
             verdict: "looks_good",
           },
         ],
@@ -1690,12 +1825,20 @@ test("persisted duplicate result reconciles a finalized Den round without finali
     now: () => "2026-08-09T17:07:00.000Z",
     callDenTool: async (_binding: unknown, toolName: string) => {
       denCalls.push(toolName);
+      if (toolName === "get_task") {
+        return {
+          id: Number(persisted.taskId),
+          project_id: persisted.projectId,
+          status: "done",
+        };
+      }
       assert.equal(toolName, "list_review_rounds");
       return {
         items: [
           {
             id: 4278,
-            head_commit: sha,
+            project_id: persisted.projectId,
+            task_id: Number(persisted.taskId),
             verdict: "looks_good",
           },
         ],
@@ -1715,7 +1858,7 @@ test("persisted duplicate result reconciles a finalized Den round without finali
   assert.equal(result.submissionId, persisted.submissionId);
   assert.equal(result.reviewRoundId, 4278);
   assert.equal(result.verdict, "looks_good");
-  assert.deepEqual(denCalls, ["list_review_rounds"]);
+  assert.deepEqual(denCalls, ["list_review_rounds", "get_task"]);
   assert.deepEqual(transitions, ["den_already_finalized"]);
 });
 

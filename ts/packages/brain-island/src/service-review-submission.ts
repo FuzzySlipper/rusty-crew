@@ -657,10 +657,11 @@ async function reconcileSubmissionAgainstDen(
   if (binding === undefined) return record;
   try {
     const rounds = await reviewRounds(context, binding, Number(record.taskId));
-    const finalized = exactHeadFinalizedRound(
+    const finalized = await finalizedSubmissionReadback(
+      context,
+      binding,
+      record,
       rounds,
-      record.commitSha,
-      record.reviewRoundId ?? undefined,
     );
     if (finalized !== undefined) {
       return settleAlreadyFinalizedReview(context, record, finalized);
@@ -1179,10 +1180,11 @@ async function resumeRoutedReview(
         binding,
         Number(record.taskId),
       );
-      const alreadyFinalized = exactHeadFinalizedRound(
+      const alreadyFinalized = await finalizedSubmissionReadback(
+        context,
+        binding,
+        record,
         rounds,
-        record.commitSha,
-        record.reviewRoundId ?? undefined,
       );
       if (alreadyFinalized !== undefined) {
         record = await settleAlreadyFinalizedReview(
@@ -1200,6 +1202,27 @@ async function resumeRoutedReview(
         denFinalizationPayload(context, record, result),
       );
       const receipt = parseFinalizationReceipt(payload, record);
+      const readback = await finalizedSubmissionReadback(
+        context,
+        binding,
+        record,
+        await reviewRounds(context, binding, Number(record.taskId)),
+      );
+      if (readback === undefined) {
+        throw new ReviewSubmissionAdapterError(
+          "den_finalization_readback_missing",
+          `Den did not return finalized current round ${record.reviewRoundId ?? "?"} for task #${record.taskId}.`,
+        );
+      }
+      if (
+        readback.verdict !== receipt.verdict ||
+        readback.taskStatus !== receipt.taskStatus
+      ) {
+        throw new ReviewSubmissionAdapterError(
+          "den_finalization_readback_mismatch",
+          `Den finalization receipt did not match authoritative task/round readback for task #${record.taskId}.`,
+        );
+      }
       record = await context.bridge.transitionReviewSubmission({
         submissionId: record.submissionId,
         expectedRevision: record.revision,
@@ -1208,10 +1231,10 @@ async function resumeRoutedReview(
           finalizationId: receipt.finalizationId,
           packetId: receipt.packetId,
           packetMessageId: receipt.packetMessageId,
-          exactHeadCommit: receipt.exactHeadCommit,
-          verdict: receipt.verdict,
+          exactHeadCommit: readback.exactHeadCommit,
+          verdict: readback.verdict,
           findingStatuses: receipt.findingStatuses,
-          taskStatus: receipt.taskStatus,
+          taskStatus: readback.taskStatus,
           materialDigest: receipt.materialDigest,
         },
         now: context.now(),
@@ -1280,7 +1303,6 @@ function parseFinalizationReceipt(
   finalizationId: number;
   packetId: number;
   packetMessageId: number;
-  exactHeadCommit: string;
   verdict: string;
   findingStatuses: ReviewFindingStatus[];
   taskStatus: string;
@@ -1310,24 +1332,32 @@ function parseFinalizationReceipt(
       "Den finalization receipt omitted its packet message id.",
     );
   }
-  const exactHeadCommit = stringValue(response, [
-    "exact_head_commit",
-    "exactHeadCommit",
-  ]);
   const verdict = stringValue(response, ["verdict"]);
   const taskStatus = stringValue(response, [
     "resulting_task_status",
     "target_task_status",
     "task_status",
   ]);
-  if (
-    exactHeadCommit === undefined ||
-    verdict === undefined ||
-    taskStatus === undefined
-  ) {
+  if (verdict === undefined || taskStatus === undefined) {
     throw new ReviewSubmissionAdapterError(
       "den_finalization_receipt_invalid",
-      "Den finalization receipt omitted exact head, verdict, or task status.",
+      "Den finalization receipt omitted verdict or task status.",
+    );
+  }
+  const projectId = stringValue(response, ["project_id", "projectId"]);
+  const taskId = numericValue(response, ["task_id", "taskId"]);
+  const reviewRoundId = numericValue(response, [
+    "review_round_id",
+    "reviewRoundId",
+  ]);
+  if (
+    projectId !== String(record.projectId) ||
+    taskId !== Number(record.taskId) ||
+    reviewRoundId !== record.reviewRoundId
+  ) {
+    throw new ReviewSubmissionAdapterError(
+      "den_finalization_receipt_scope_mismatch",
+      `Den finalization receipt did not match project ${record.projectId}, task #${record.taskId}, round ${record.reviewRoundId ?? "?"}.`,
     );
   }
   const findingStatuses = Array.isArray(response.finding_statuses)
@@ -1345,7 +1375,6 @@ function parseFinalizationReceipt(
     finalizationId: requiredNumericId(response, ["id", "finalization_id"]),
     packetId: requiredNumericId(response, ["packet_id", "packetId"]),
     packetMessageId,
-    exactHeadCommit,
     verdict,
     findingStatuses,
     taskStatus,
@@ -1527,7 +1556,10 @@ async function advanceDenHandoff(
         binding,
         Number(record.taskId),
       );
-      const alreadyFinalized = exactHeadFinalizedRound(
+      // Compatibility recovery for rounds created before Den moved source
+      // control identity out of review records. Current submissions persist the
+      // returned round pointer before progressing and reconcile by that pointer.
+      const alreadyFinalized = legacyExactHeadFinalizedRound(
         rounds,
         record.commitSha,
       );
@@ -2100,12 +2132,12 @@ interface FinalizedDenReviewRound {
   readonly reviewRoundId: number;
   readonly exactHeadCommit: string;
   readonly verdict: "looks_good" | "changes_requested";
+  readonly taskStatus: "done" | "in_progress";
 }
 
-function exactHeadFinalizedRound(
+function legacyExactHeadFinalizedRound(
   rounds: Record<string, unknown>[],
   commitSha: string,
-  expectedRoundId?: number,
 ): FinalizedDenReviewRound | undefined {
   for (const value of [...rounds].reverse()) {
     const head = stringValue(value, ["head_commit", "headCommit"]);
@@ -2115,19 +2147,78 @@ function exactHeadFinalizedRound(
       "reviewRoundId",
       "id",
     ]);
-    if (
-      reviewRoundId === undefined ||
-      (expectedRoundId !== undefined && reviewRoundId !== expectedRoundId)
-    ) {
-      continue;
-    }
+    if (reviewRoundId === undefined) continue;
     const verdict = stringValue(value, ["verdict"]);
     if (verdict !== "looks_good" && verdict !== "changes_requested") {
       return undefined;
     }
-    return { reviewRoundId, exactHeadCommit: head, verdict };
+    return {
+      reviewRoundId,
+      exactHeadCommit: head,
+      verdict,
+      taskStatus: verdict === "looks_good" ? "done" : "in_progress",
+    };
   }
   return undefined;
+}
+
+async function finalizedSubmissionReadback(
+  context: ServiceReviewSubmissionContext,
+  binding: ReviewDenAuthority,
+  record: ReviewSubmissionRecord,
+  rounds: Record<string, unknown>[],
+): Promise<FinalizedDenReviewRound | undefined> {
+  const expectedRoundId = record.reviewRoundId ?? undefined;
+  if (expectedRoundId === undefined) return undefined;
+  const scopedRounds = rounds.filter((round) => {
+    const projectId = stringValue(round, ["project_id", "projectId"]);
+    const taskId = numericValue(round, ["task_id", "taskId"]);
+    const roundId = numericValue(round, [
+      "review_round_id",
+      "reviewRoundId",
+      "id",
+    ]);
+    return (
+      projectId === String(record.projectId) &&
+      taskId === Number(record.taskId) &&
+      roundId !== undefined
+    );
+  });
+  const currentRound = scopedRounds.at(-1);
+  if (currentRound === undefined) return undefined;
+  const currentRoundId = requiredNumericId(currentRound, [
+    "review_round_id",
+    "reviewRoundId",
+    "id",
+  ]);
+  if (currentRoundId !== expectedRoundId) {
+    throw new ReviewSubmissionAdapterError(
+      "den_review_round_not_current",
+      `Crew submission points to round ${expectedRoundId}, but Den reports current round ${currentRoundId} for task #${record.taskId}.`,
+    );
+  }
+  const verdict = stringValue(currentRound, ["verdict"]);
+  if (verdict !== "looks_good" && verdict !== "changes_requested") {
+    return undefined;
+  }
+  const taskPayload = await denCall(context, binding, "get_task", {
+    task_id: Number(record.taskId),
+  });
+  const task = exactDenTask(taskPayload, record);
+  const taskStatus = stringValue(task, ["status"]);
+  const expectedTaskStatus = verdict === "looks_good" ? "done" : "in_progress";
+  if (taskStatus !== expectedTaskStatus) {
+    throw new ReviewSubmissionAdapterError(
+      "den_finalization_task_status_mismatch",
+      `Den round ${expectedRoundId} verdict ${verdict} requires task status ${expectedTaskStatus}, found ${taskStatus ?? "missing"}.`,
+    );
+  }
+  return {
+    reviewRoundId: expectedRoundId,
+    exactHeadCommit: record.commitSha,
+    verdict,
+    taskStatus: expectedTaskStatus,
+  };
 }
 
 async function settleAlreadyFinalizedReview(
@@ -2143,6 +2234,7 @@ async function settleAlreadyFinalizedReview(
       reviewRoundId: round.reviewRoundId,
       exactHeadCommit: round.exactHeadCommit,
       verdict: round.verdict,
+      taskStatus: round.taskStatus,
       terminalReason: "den_round_already_finalized",
     },
     now: context.now(),

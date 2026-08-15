@@ -9053,6 +9053,9 @@
               "minimum": 0,
               "type": "integer"
             },
+            "taskStatus": {
+              "type": "string"
+            },
             "terminalReason": {
               "type": "string"
             },
@@ -9069,6 +9072,7 @@
             "reviewRoundId",
             "exactHeadCommit",
             "verdict",
+            "taskStatus",
             "terminalReason"
           ],
           "type": "object"

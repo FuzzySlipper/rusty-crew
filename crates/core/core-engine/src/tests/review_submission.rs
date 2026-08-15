@@ -227,6 +227,7 @@ fn already_finalized_den_round_settles_pending_submission_with_verdict() {
                 review_round_id: 4149,
                 exact_head_commit: exact_sha('b'),
                 verdict: "looks_good".to_string(),
+                task_status: "done".to_string(),
                 terminal_reason: "den_round_already_finalized".to_string(),
             },
             now: "2026-08-08T09:30:00Z".to_string(),
@@ -237,6 +238,7 @@ fn already_finalized_den_round_settles_pending_submission_with_verdict() {
     assert_eq!(settled.review_round_id, Some(4149));
     assert_eq!(settled.review_exact_head_commit, Some(exact_sha('b')));
     assert_eq!(settled.review_verdict.as_deref(), Some("looks_good"));
+    assert_eq!(settled.review_task_status.as_deref(), Some("done"));
     assert_eq!(
         settled.terminal_reason.as_deref(),
         Some("den_round_already_finalized")

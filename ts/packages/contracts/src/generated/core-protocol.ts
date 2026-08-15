@@ -2104,6 +2104,7 @@ export type ReviewSubmissionTransition = {
 } | {
   exactHeadCommit: string;
   reviewRoundId: number;
+  taskStatus: string;
   terminalReason: string;
   type: "den_already_finalized";
   verdict: string;
