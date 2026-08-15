@@ -318,9 +318,10 @@ export async function applyProfileRegistryRuntimeConfigEffects(
   const reconciliation = await context.reconcileProfileMcpBindings(
     record.profileId,
   );
-  const externalMcpRefresh = plan.implications.mcpRefreshRecommended
-    ? await context.refreshExternalProfileMcpTools(record.profileId)
-    : undefined;
+  const externalMcpRefresh =
+    plan.implications.mcpRefreshRecommended || reconciliation.changed
+      ? await context.refreshExternalProfileMcpTools(record.profileId)
+      : undefined;
   const brainRebuilt =
     plan.implications.runtimeRebuildRecommended || reconciliation.changed;
   if (brainRebuilt) {

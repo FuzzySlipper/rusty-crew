@@ -15,7 +15,7 @@ import type {
   RustyCrewRuntimeConfigApplyResult,
 } from "../src/service-runtime-config.js";
 
-test("runtime config effects rebuild the active brain when the plan requires it", async () => {
+test("runtime config effects refresh repaired MCP bindings and rebuild the active brain", async () => {
   const root = await mkdtemp(join(tmpdir(), "rusty-crew-profile-runtime-"));
   const profilesDir = join(root, "profiles");
   const profilePath = join(profilesDir, "profile-alpha.json");
@@ -47,15 +47,16 @@ test("runtime config effects rebuild the active brain when the plan requires it"
       },
       async reconcileProfileMcpBindings() {
         return {
-          desiredCount: 0,
-          activeSessionCount: 0,
-          materializedCount: 0,
+          desiredCount: 1,
+          activeSessionCount: 1,
+          materializedCount: 1,
           removedBindingIds: [],
-          changed: false,
+          changed: true,
           diagnostics: [],
         };
       },
       async refreshExternalProfileMcpTools() {
+        calls.push("refresh:profile-alpha");
         return { refreshed: [] };
       },
     } as unknown as ProfileRegistryRuntimeConfigMutationContext;
@@ -103,7 +104,11 @@ test("runtime config effects rebuild the active brain when the plan requires it"
       plan,
     );
 
-    assert.deepEqual(calls, ["apply", "rebuild:profile-alpha"]);
+    assert.deepEqual(calls, [
+      "apply",
+      "refresh:profile-alpha",
+      "rebuild:profile-alpha",
+    ]);
     assert.equal(result.brainRebuilt, true);
     const saved = JSON.parse(await readFile(profilePath, "utf8")) as {
       modelConfigId?: string;
