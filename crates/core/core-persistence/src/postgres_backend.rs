@@ -16475,7 +16475,7 @@ mod tests {
             task_ref: None,
             lineage: None,
             effective_config_fingerprint: "config".into(),
-            status: rusty_crew_core_protocol::ExternalBindingStatus::Active,
+            status: rusty_crew_core_protocol::ExternalBindingStatus::Paused,
             revision: 0,
             created_at: "2026-07-10T00:00:00Z".into(),
             updated_at: "2026-07-10T00:00:00Z".into(),
@@ -16503,7 +16503,7 @@ mod tests {
         assert!(store
             .get_external_binding_for_agent(&session.agent_id)
             .unwrap()
-            .is_some());
+            .is_none());
         let creation = rusty_crew_core_protocol::ExternalAgentSessionCreationRecord {
             creation_id: rusty_crew_core_protocol::ExternalAgentSessionCreationId::new(
                 "external-creation-a",
@@ -16555,6 +16555,7 @@ mod tests {
             .unwrap();
         let mut binding = binding;
         binding.native_thread_id = Some("native-thread".into());
+        binding.status = rusty_crew_core_protocol::ExternalBindingStatus::Active;
         binding.updated_at = "2026-07-10T00:00:03Z".into();
         let binding = store
             .put_external_agent_binding(&binding, Some(binding.revision))
