@@ -9,6 +9,12 @@ import {
   type EditableProfileMcpBinding,
 } from "./service-profile-runtime-mutations.js";
 import type { RustyCrewRuntimeConfig } from "./service-runtime-config.js";
+import {
+  desiredMcpBindingTemplateId,
+  materializedMcpBindingId,
+} from "./mcp-binding-identity.js";
+
+export { materializedMcpBindingId as materializedBindingId } from "./mcp-binding-identity.js";
 
 export interface ProfileMcpReconciliationDiagnostic {
   severity: "info" | "warning";
@@ -184,9 +190,10 @@ export function reconcileProfileMcpBindings(input: {
 
   for (const session of sessions) {
     input.desired.forEach((template, index) => {
-      const templateId =
-        template.bindingId ?? `${input.profileId}-mcp-${index + 1}`;
-      const bindingId = materializedBindingId(templateId, session.sessionId);
+      const templateId = desiredMcpBindingTemplateId(
+        template.bindingId ?? `${input.profileId}-mcp-${index + 1}`,
+      );
+      const bindingId = materializedMcpBindingId(templateId, session.sessionId);
       const binding = {
         bindingId,
         adapterId: (template.adapterId ?? "mcp-ts-main") as never,
@@ -261,13 +268,6 @@ export function reconcileProfileMcpBindings(input: {
     diagnostics,
     changed: !sameBindingCollection(input.existing, bindings),
   };
-}
-
-export function materializedBindingId(
-  desiredBindingId: string,
-  sessionId: string,
-): string {
-  return `${desiredBindingId}--session--${sessionId}`;
 }
 
 function sameBindingCollection(

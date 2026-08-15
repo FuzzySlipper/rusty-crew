@@ -13,6 +13,7 @@ import type {
 import type { ChatEvent } from "./rusty-view-chat-api.js";
 import type { RuntimeConfigFileForMutation } from "./service-profile-admin-mutations.js";
 import { profileMcpBindingsFromRegistryRecord } from "./service-profile-runtime-mutations.js";
+import { materializedMcpBindingId } from "./mcp-binding-identity.js";
 import type {
   RustyCrewRuntimeConfig,
   RustyCrewRuntimeConfigApplyResult,
@@ -527,14 +528,10 @@ async function restoreProfileMcpBindingsForSession(
     }),
   );
   configured.forEach((binding, index) => {
-    const preferredBindingId =
-      binding.bindingId ?? `${session.agentId}-mcp-${index + 1}`;
-    const preferredTarget = existingTargets.get(preferredBindingId);
-    if (preferredTarget === session.sessionId) return;
-    const bindingId =
-      preferredTarget === undefined && !existingTargets.has(preferredBindingId)
-        ? preferredBindingId
-        : `${preferredBindingId}-${session.sessionId}`;
+    const bindingId = materializedMcpBindingId(
+      binding.bindingId ?? `${session.agentId}-mcp-${index + 1}`,
+      String(session.sessionId),
+    );
     if (existingTargets.get(bindingId) === session.sessionId) return;
     runtimeBindings.push({
       bindingId,
@@ -547,7 +544,11 @@ async function restoreProfileMcpBindingsForSession(
       transport: binding.transport ?? "streamable_http",
       toolProfileKey: binding.toolProfileKey ?? session.profileId,
       status: "active",
-      diagnostics: {},
+      diagnostics: {
+        desiredProfileBindingId:
+          binding.bindingId ?? `${session.agentId}-mcp-${index + 1}`,
+        reconciliationSource: "profile_registry",
+      },
     });
     existingTargets.set(bindingId, session.sessionId);
   });

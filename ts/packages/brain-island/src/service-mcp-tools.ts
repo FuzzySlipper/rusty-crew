@@ -30,6 +30,7 @@ import {
 } from "./mcp-tool-registry-integration.js";
 import type { BrainToolResolver } from "./tool-session-selection.js";
 import type { ToolRegistry } from "./tool-registry.js";
+import { desiredMcpBindingTemplateId } from "./mcp-binding-identity.js";
 
 export type ServiceMcpToolDiscoveryClientFactory = (
   binding: McpBindingRecord,
@@ -393,7 +394,7 @@ function profileIntegrationCandidates(
 ): McpRegistryCandidate[] {
   const unique = new Map<string, McpRegistryCandidate>();
   for (const { binding, candidate } of candidates) {
-    const templateBindingId = materializedBindingTemplateId(binding.bindingId);
+    const templateBindingId = desiredMcpBindingTemplateId(binding.bindingId);
     const signature = JSON.stringify({
       templateBindingId,
       candidate: {
@@ -407,12 +408,6 @@ function profileIntegrationCandidates(
     if (!unique.has(signature)) unique.set(signature, candidate);
   }
   return [...unique.values()];
-}
-
-function materializedBindingTemplateId(bindingId: string): string {
-  const delimiter = "--session--";
-  const index = bindingId.lastIndexOf(delimiter);
-  return index < 1 ? bindingId : bindingId.slice(0, index);
 }
 
 function profileAccumulator(

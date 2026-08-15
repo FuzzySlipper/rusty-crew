@@ -88,8 +88,10 @@ assume a command exists only because another harness supports it.
 
 Local tools come from a service tool registry and are grouped into local tool
 profiles. MCP servers are explicit per-profile connections; Den is one possible
-MCP server and is not implicitly coupled to Crew. Inspect the active tool
-inventory before promising a capability.
+MCP server and is not implicitly coupled to Crew. Call \`list_available_tools\`
+to inspect the current wake's executable local and MCP tools before promising
+or denying a capability. Do not infer availability from familiar tool names,
+profile configuration, binding status, or this help text alone.
 
 Skills are guidance, not executable authority. This immutable built-in skill is
 always available to native Crew brains through rusty_crew_help. Filesystem

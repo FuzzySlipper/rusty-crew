@@ -178,7 +178,14 @@ Use Codex for bounded coding delegation when context isolation helps.
   );
   assert.deepEqual(
     context.toolSelection.toolProfile.tools.map((tool) => tool.name),
-    ["read_file", "search_files", "git_status", "git_diff", "rusty_crew_help"],
+    [
+      "read_file",
+      "search_files",
+      "git_status",
+      "git_diff",
+      "rusty_crew_help",
+      "list_available_tools",
+    ],
   );
   assert.deepEqual(
     context.skills.map((skill) => skill.slug),
@@ -202,7 +209,7 @@ Use Codex for bounded coding delegation when context isolation helps.
   });
   assert.deepEqual(
     missingMemory.toolSelection.toolProfile.tools.map((tool) => tool.name),
-    ["rusty_crew_help"],
+    ["rusty_crew_help", "list_available_tools"],
   );
   assert.equal(
     missingMemory.toolSelection.inventory.items.find(
@@ -230,7 +237,13 @@ Use Codex for bounded coding delegation when context isolation helps.
   });
   assert.deepEqual(
     metadataMemory.toolSelection.toolProfile.tools.map((tool) => tool.name),
-    ["memory_recall", "memory_read", "memory_search", "rusty_crew_help"],
+    [
+      "memory_recall",
+      "memory_read",
+      "memory_search",
+      "rusty_crew_help",
+      "list_available_tools",
+    ],
   );
   assert.equal(
     metadataMemory.toolSelection.inventory.items.find(
@@ -426,6 +439,7 @@ backgroundReview:
       "capture_lore_fact",
       "get_lore_layer_config",
       "get_scene_state",
+      "list_available_tools",
       "list_lore_layers",
       "promote_lore_entry",
       "recall_lore",

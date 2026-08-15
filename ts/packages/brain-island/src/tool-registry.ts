@@ -561,6 +561,12 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:skills-tools",
   },
   {
+    name: "list_available_tools",
+    implementationModule:
+      "./tool-introspection.js#createToolIntrospectionResolver",
+    inventoryTest: "smoke:tool-session-selection",
+  },
+  {
     name: "skills_list",
     implementationModule: "./skills-tools.js#skillsListTool",
     inventoryTest: "smoke:tool-registry",

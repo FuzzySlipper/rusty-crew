@@ -7,6 +7,10 @@ import {
   reconcileProfileMcpBindings,
   reconcileRuntimeProfileMcpBindings,
 } from "../src/profile-mcp-reconciliation.js";
+import {
+  profileMcpBindingsForRuntimeMutation,
+  profileMcpBindingsFromRegistryRecord,
+} from "../src/service-profile-runtime-mutations.js";
 
 test("materializes distinct exact-session bindings for concurrent sessions", () => {
   const result = reconcileProfileMcpBindings({
@@ -34,6 +38,76 @@ test("materializes distinct exact-session bindings for concurrent sessions", () 
   );
   assert.equal(result.changed, true);
   assert.equal(result.materialized.length, 2);
+});
+
+test("normalizes legacy nested materialization ids to one desired template", () => {
+  const result = reconcileProfileMcpBindings({
+    profileId: "rusty-engineer",
+    desired: [
+      {
+        serverId: "den",
+        bindingId:
+          "rusty-engineer-den--session--old-session--session--new-session",
+      },
+    ],
+    sessions: [
+      {
+        ...session("current-session"),
+        agentId: "rusty-engineer" as never,
+        profileId: "rusty-engineer" as never,
+      },
+    ],
+    existing: [],
+  });
+
+  assert.equal(
+    result.materialized[0]?.bindingId,
+    "rusty-engineer-den--session--current-session",
+  );
+  assert.equal(
+    result.materialized[0]?.diagnostics.desiredProfileBindingId,
+    "rusty-engineer-den",
+  );
+});
+
+test("profile mutation keeps desired intent instead of copying materialized runtime ids", () => {
+  const record = {
+    profileId: "rusty-engineer",
+    lifecycleStatus: "active",
+    defaultSessionKind: "full",
+    agentId: "rusty-engineer",
+    activeRuntimeSettingsJson: {
+      mcpBindings: [
+        {
+          serverId: "den",
+          bindingId: "rusty-engineer-den--session--legacy-session",
+        },
+      ],
+    },
+    sourceAssetRefs: [],
+    derivedRuntimeRefs: [],
+    importExport: { metadataJson: {} },
+    revision: 1,
+    createdAt: "2026-08-15T00:00:00.000Z",
+    updatedAt: "2026-08-15T00:00:00.000Z",
+  } as never;
+  const runtime = [
+    binding(
+      "rusty-engineer-den--session--legacy-session--session--current-session",
+      "current-session",
+      "rusty-engineer",
+    ),
+  ];
+
+  const identity = (items: Array<{ serverId: string; bindingId?: string }>) =>
+    items.map(({ serverId, bindingId }) => ({ serverId, bindingId }));
+  assert.deepEqual(identity(profileMcpBindingsFromRegistryRecord(record)), [
+    { serverId: "den", bindingId: "rusty-engineer-den" },
+  ]);
+  assert.deepEqual(
+    identity(profileMcpBindingsForRuntimeMutation(record, runtime)),
+    [{ serverId: "den", bindingId: "rusty-engineer-den" }],
+  );
 });
 
 test("removes dangling, duplicate, and partial legacy materializations idempotently", () => {

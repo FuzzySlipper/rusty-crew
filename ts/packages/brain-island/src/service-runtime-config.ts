@@ -113,6 +113,7 @@ import {
   type ServiceMcpToolDiscoveryClientFactory,
   type ServiceMcpToolExecutorFactory,
 } from "./service-mcp-tools.js";
+import { createToolIntrospectionResolver } from "./tool-introspection.js";
 import {
   createServiceBrainWakeExecutor,
   type ServiceBrainWakeResultObservation,
@@ -1596,7 +1597,7 @@ function createServiceToolResolver(
   },
 ): BrainToolResolver {
   const todoStore = createServiceTodoStore(options.serviceConfig);
-  return combineResolvers(
+  const baseResolver = combineResolvers(
     createLocalCodeToolResolver({
       resourcePolicy: options.localCodeResourcePolicy,
       bridge: options.bridge,
@@ -1671,6 +1672,13 @@ function createServiceToolResolver(
       runtimeConfig: options.runtimeConfig,
       curatorExecutor: options.curatorExecutor,
       todoStore,
+    }),
+  );
+  return combineResolvers(
+    baseResolver,
+    createToolIntrospectionResolver({
+      baseResolver,
+      mcpToolCatalog: options.mcpToolCatalog,
     }),
   );
 }

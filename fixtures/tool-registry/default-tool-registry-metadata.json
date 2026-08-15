@@ -645,6 +645,16 @@
       "version": "0.1.0"
     },
     {
+      "name": "list_available_tools",
+      "description": "List the tools actually executable for this wake, including dynamic MCP tools and their bindings. Use this instead of guessing tool availability.",
+      "category": "diagnostics",
+      "toolsets": ["crew_help"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "tools.available_inventory.v1",
+      "version": "1.0.0"
+    },
+    {
       "name": "skills_list",
       "description": "List configured skills visible to the current profile.",
       "category": "skills",

@@ -182,7 +182,7 @@ assert.equal(created.creation.session.sessionId, creation.session.sessionId);
 assert.equal((runtimeValue.sessions as unknown[]).length, 1);
 assert.deepEqual(runtimeValue.mcpBindings, [
   {
-    bindingId: "prime-mcp-den",
+    bindingId: "prime-mcp-den--session--crew-session-created",
     adapterId: "mcp-ts-main",
     agentId: "prime",
     sessionId: "crew-session-created",
@@ -192,7 +192,10 @@ assert.deepEqual(runtimeValue.mcpBindings, [
     transport: "streamable_http",
     toolProfileKey: "prime",
     status: "active",
-    diagnostics: {},
+    diagnostics: {
+      desiredProfileBindingId: "prime-mcp-den",
+      reconciliationSource: "profile_registry",
+    },
   },
 ]);
 
@@ -220,8 +223,8 @@ assert.deepEqual(
     (binding) => [binding.bindingId, binding.sessionId],
   ),
   [
-    ["prime-mcp-den", "crew-session-created"],
-    ["prime-mcp-den-crew-session-sibling", "crew-session-sibling"],
+    ["prime-mcp-den--session--crew-session-created", "crew-session-created"],
+    ["prime-mcp-den--session--crew-session-sibling", "crew-session-sibling"],
   ],
   "a sibling must receive its own MCP binding without retargeting the first session",
 );

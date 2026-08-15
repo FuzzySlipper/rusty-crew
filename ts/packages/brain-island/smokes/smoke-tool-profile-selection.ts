@@ -53,7 +53,14 @@ try {
   });
   assert.deepEqual(
     readonlySelection.toolProfile.tools.map((tool) => tool.name),
-    ["read_file", "search_files", "git_status", "git_diff", "rusty_crew_help"],
+    [
+      "read_file",
+      "search_files",
+      "git_status",
+      "git_diff",
+      "rusty_crew_help",
+      "list_available_tools",
+    ],
   );
   assert.equal(
     readonlySelection.inventory.items.find(
@@ -162,7 +169,14 @@ try {
   });
   assert.deepEqual(
     registration.toolProfile.tools.map((tool) => tool.name),
-    ["read_file", "search_files", "git_status", "git_diff", "rusty_crew_help"],
+    [
+      "read_file",
+      "search_files",
+      "git_status",
+      "git_diff",
+      "rusty_crew_help",
+      "list_available_tools",
+    ],
   );
 
   const brain = await registerBrainHostRuntime(
@@ -210,7 +224,14 @@ try {
   const bodyState = await readBodyState(request);
   assert.deepEqual(
     bodyState.session.tool_profile.tools.map((tool) => tool.name),
-    ["read_file", "search_files", "git_status", "git_diff", "rusty_crew_help"],
+    [
+      "read_file",
+      "search_files",
+      "git_status",
+      "git_diff",
+      "rusty_crew_help",
+      "list_available_tools",
+    ],
   );
 
   console.log(

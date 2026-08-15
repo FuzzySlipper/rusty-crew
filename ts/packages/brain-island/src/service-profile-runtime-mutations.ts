@@ -34,6 +34,7 @@ import type {
 } from "./service-runtime-config.js";
 import type { ProfileMcpReconciliationDiagnostic } from "./profile-mcp-reconciliation.js";
 import { buildBuiltInToolCatalog } from "./tool-registry.js";
+import { desiredMcpBindingTemplateId } from "./mcp-binding-identity.js";
 
 export type ProfileRegistryWritePlan = NativeProfileRegistryMutationPlan;
 
@@ -135,7 +136,9 @@ export function profileMcpBindingsFromRegistryRecord(
     return [
       {
         serverId,
-        bindingId: optionalString(item.bindingId ?? item.binding_id),
+        bindingId: normalizedDesiredBindingId(
+          optionalString(item.bindingId ?? item.binding_id),
+        ),
         adapterId: optionalString(item.adapterId ?? item.adapter_id),
         serverNames,
         transport: optionalString(item.transport),
@@ -145,6 +148,18 @@ export function profileMcpBindingsFromRegistryRecord(
       },
     ];
   });
+}
+
+export function profileMcpBindingsForRuntimeMutation(
+  record: NativeProfileRegistryRecord,
+  runtimeBindings: readonly McpBindingRecord[],
+): EditableProfileMcpBinding[] {
+  const desiredMcpBindings = profileMcpBindingsFromRegistryRecord(record);
+  if (hasExplicitProfileMcpIntent(record)) return desiredMcpBindings;
+  const activeMcpBindings = runtimeBindings
+    .filter((binding) => String(binding.profileId) === record.profileId)
+    .map(editableMcpBindingFromRuntime);
+  return activeMcpBindings.length > 0 ? activeMcpBindings : desiredMcpBindings;
 }
 
 export async function planProfileRegistryWrite(
@@ -404,13 +419,10 @@ async function editableRuntimeConfigForProfile(
     settings.externalMessageDeliveryPolicy ??
       profile?.externalMessageDeliveryPolicy,
   );
-  const activeMcpBindings = context.runtimeConfig.mcpBindings
-    .filter((binding) => String(binding.profileId) === record.profileId)
-    .map(editableMcpBindingFromRuntime);
-  const mcpBindings =
-    activeMcpBindings.length > 0
-      ? activeMcpBindings
-      : profileMcpBindingsFromRegistryRecord(record);
+  const mcpBindings = profileMcpBindingsForRuntimeMutation(
+    record,
+    context.runtimeConfig.mcpBindings,
+  );
   const runtimeConfig: EditableProfileRuntimeConfig = {
     modelConfigId,
     externalMessageDeliveryPolicy,
@@ -699,7 +711,7 @@ function editableMcpBindingFromRuntime(
       serverIdFromEndpointRef(binding.endpointRef) ??
       binding.serverNames[0] ??
       binding.bindingId,
-    bindingId: binding.bindingId,
+    bindingId: desiredMcpBindingTemplateId(binding.bindingId),
     adapterId: String(binding.adapterId),
     serverNames: binding.serverNames,
     transport: binding.transport,
@@ -745,12 +757,33 @@ function normalizedEditableMcpBinding(
   const agentId = String(record.agentId ?? record.profileId);
   return {
     ...binding,
-    bindingId: binding.bindingId ?? `${agentId}-mcp-${index + 1}`,
+    bindingId: desiredMcpBindingTemplateId(
+      binding.bindingId ?? `${agentId}-mcp-${index + 1}`,
+    ),
     adapterId: binding.adapterId ?? "mcp-ts-main",
     serverNames: binding.serverNames ?? [binding.serverId],
     transport: binding.transport ?? "streamable_http",
     toolProfileKey: binding.toolProfileKey ?? record.profileId,
   };
+}
+
+function normalizedDesiredBindingId(
+  bindingId: string | undefined,
+): string | undefined {
+  return bindingId === undefined
+    ? undefined
+    : desiredMcpBindingTemplateId(bindingId);
+}
+
+function hasExplicitProfileMcpIntent(
+  record: NativeProfileRegistryRecord,
+): boolean {
+  const settings = optionalRecord(record.activeRuntimeSettingsJson);
+  return (
+    settings !== undefined &&
+    (Object.hasOwn(settings, "mcpBindings") ||
+      Object.hasOwn(settings, "mcp_bindings"))
+  );
 }
 
 function profileToolPolicyFromUnknown(

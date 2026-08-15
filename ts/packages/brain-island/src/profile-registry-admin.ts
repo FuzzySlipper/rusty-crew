@@ -20,6 +20,7 @@ import {
   type ContextStrategyPolicy,
 } from "./context-strategy.js";
 import { parseExternalMessageDeliveryPolicy } from "./profile-loading.js";
+import { desiredMcpBindingTemplateId } from "./mcp-binding-identity.js";
 
 export type AdminProfileRegistrySource = "registry";
 export type AdminProfileAssetStatus =
@@ -626,7 +627,7 @@ function mcpBindingsFromSettings(
       return [
         {
           serverId,
-          bindingId: stringValue(binding.bindingId),
+          bindingId: normalizedDesiredBindingId(stringValue(binding.bindingId)),
           adapterId: stringValue(binding.adapterId),
           serverNames: stringList(binding.serverNames),
           transport: stringValue(binding.transport),
@@ -643,6 +644,14 @@ function serverIdFromMcpBinding(binding: McpBindingRecord): string {
     binding.serverNames[0] ??
     binding.bindingId
   );
+}
+
+function normalizedDesiredBindingId(
+  bindingId: string | undefined,
+): string | undefined {
+  return bindingId === undefined
+    ? undefined
+    : desiredMcpBindingTemplateId(bindingId);
 }
 
 function serverIdFromEndpointRef(

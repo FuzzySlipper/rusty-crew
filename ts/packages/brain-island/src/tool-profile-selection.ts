@@ -46,6 +46,7 @@ export interface ToolProfileSelection {
 const DELEGATION_DEPTH_EXHAUSTED_REASON =
   "delegation_depth_exhausted: session max delegation depth is zero";
 export const MANDATORY_NATIVE_HELP_TOOL = "rusty_crew_help";
+export const MANDATORY_NATIVE_TOOL_INTROSPECTION = "list_available_tools";
 export const MANDATORY_NATIVE_HELP_TOOLSET = "crew_help";
 
 export function resourceDeniedToolsForLimits(
@@ -115,6 +116,11 @@ export function selectToolProfile(
 ): ToolProfileSelection {
   const registry = input.registry ?? defaultToolRegistry;
   const hasNativeHelp = registry.get(MANDATORY_NATIVE_HELP_TOOL) !== undefined;
+  const mandatoryNativeTools = new Set(
+    [MANDATORY_NATIVE_HELP_TOOL, MANDATORY_NATIVE_TOOL_INTROSPECTION].filter(
+      (name) => registry.get(name) !== undefined,
+    ),
+  );
   const resourceDeniedTools = new Set(input.session?.resourceDeniedTools ?? []);
   for (const entry of registry.entries) {
     if (input.session?.readOnly && !entry.safety.includes("read_only")) {
@@ -128,13 +134,13 @@ export function selectToolProfile(
       resourceDeniedTools.add(entry.name);
     }
   }
-  if (hasNativeHelp) {
-    resourceDeniedTools.delete(MANDATORY_NATIVE_HELP_TOOL);
+  for (const name of mandatoryNativeTools) {
+    resourceDeniedTools.delete(name);
   }
 
   const withoutMandatoryHelp = (names: readonly string[] | undefined) =>
     hasNativeHelp
-      ? names?.filter((name) => name !== MANDATORY_NATIVE_HELP_TOOL)
+      ? names?.filter((name) => !mandatoryNativeTools.has(name))
       : names;
   const requestedToolsets = hasNativeHelp
     ? [
