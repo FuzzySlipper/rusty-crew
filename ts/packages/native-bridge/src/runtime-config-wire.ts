@@ -90,6 +90,7 @@ export function toRawNewSessionControlPlanInput(
           agent_id: input.template.agentId,
           profile_id: input.template.profileId,
           kind: input.template.kind,
+          workspace_cwd: input.template.workspaceCwd,
           channel_binding_id: input.template.channelBindingId,
           channel_id: input.template.channelId,
           tool_profile_key: input.template.toolProfileKey,

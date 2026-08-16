@@ -291,6 +291,7 @@ pub struct NewSessionControlTemplate {
     pub agent_id: AgentId,
     pub profile_id: ProfileId,
     pub kind: SessionKind,
+    pub workspace_cwd: Option<String>,
     pub channel_binding_id: Option<String>,
     pub channel_id: Option<String>,
     pub tool_profile_key: Option<String>,
@@ -2029,6 +2030,34 @@ pub fn plan_new_session_control(input: &NewSessionControlPlanInput) -> NewSessio
     preconditions.push(satisfied_precondition(
         "session_template_loaded",
         "current-session template is loaded",
+    ));
+
+    let workspace_cwd = template
+        .workspace_cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if template.kind == SessionKind::Full
+        && !workspace_cwd.is_some_and(|value| value.starts_with('/'))
+    {
+        preconditions.push(failed_precondition(
+            "session_workspace_inheritable",
+            "full-session /new requires an absolute canonical workspace on the current session",
+        ));
+        return denied_new_session_plan(
+            denied_context(preconditions),
+            "session_workspace_missing",
+            "Cannot create a replacement session without the current canonical workspace.",
+        );
+    }
+    preconditions.push(satisfied_precondition(
+        "session_workspace_inheritable",
+        match workspace_cwd {
+            Some(workspace_cwd) => {
+                format!("replacement inherits canonical workspace {workspace_cwd}")
+            }
+            None => "non-full replacement does not require a canonical workspace".to_string(),
+        },
     ));
 
     let Some(new_session_id) = new_session_id else {
@@ -3780,6 +3809,7 @@ mod tests {
                 agent_id: AgentId::new("agent-alpha"),
                 profile_id: ProfileId::new("prime"),
                 kind: SessionKind::Full,
+                workspace_cwd: Some("/home/dev/rusty-crew".to_string()),
                 channel_binding_id: Some("binding-alpha".to_string()),
                 channel_id: Some("crew-room".to_string()),
                 tool_profile_key: Some("prime-tools".to_string()),
@@ -3822,6 +3852,7 @@ mod tests {
                 agent_id: AgentId::new("agent-alpha"),
                 profile_id: ProfileId::new("prime"),
                 kind: SessionKind::Full,
+                workspace_cwd: Some("/home/dev/rusty-crew".to_string()),
                 channel_binding_id: None,
                 channel_id: None,
                 tool_profile_key: None,
@@ -3855,6 +3886,7 @@ mod tests {
                 agent_id: AgentId::new("agent-alpha"),
                 profile_id: ProfileId::new("prime"),
                 kind: SessionKind::Full,
+                workspace_cwd: Some("/home/dev/rusty-crew".to_string()),
                 channel_binding_id: Some("binding-alpha".to_string()),
                 channel_id: None,
                 tool_profile_key: None,
@@ -3874,6 +3906,40 @@ mod tests {
             precondition.code == "channel_rebind_available"
                 && precondition.status == AdminControlPlanPreconditionStatus::Failed
         }));
+    }
+
+    #[test]
+    fn denies_full_new_session_without_canonical_workspace_before_actions() {
+        let plan = plan_new_session_control(&NewSessionControlPlanInput {
+            command: AdminControlPlanCommand {
+                command_kind: "new_session".to_string(),
+                target_session_id: Some("session-alpha".to_string()),
+                request_id: Some("req-new".to_string()),
+                idempotency_key: None,
+                operator_reason: None,
+                operator_reason_code: None,
+            },
+            template: Some(NewSessionControlTemplate {
+                agent_id: AgentId::new("agent-alpha"),
+                profile_id: ProfileId::new("prime"),
+                kind: SessionKind::Full,
+                workspace_cwd: None,
+                channel_binding_id: None,
+                channel_id: None,
+                tool_profile_key: None,
+            }),
+            generated_session_id: Some("session-beta".to_string()),
+            rebind_handler_available: false,
+        });
+
+        assert!(!plan.accepted);
+        assert_eq!(
+            plan.denial
+                .as_ref()
+                .map(|denial| denial.reason_code.as_str()),
+            Some("session_workspace_missing"),
+        );
+        assert!(plan.actions.is_empty());
     }
 
     #[test]

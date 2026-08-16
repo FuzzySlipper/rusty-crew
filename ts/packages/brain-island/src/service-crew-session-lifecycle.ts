@@ -119,10 +119,10 @@ export async function archiveCrewSession(
   },
 ): Promise<ArchiveCrewSessionResult> {
   const session = await context.sessionById(input.sessionId);
-  if (session.kind !== "full") {
+  if (session.kind !== "full" && session.kind !== "delegated") {
     throw new CrewSessionLifecycleError(
       "crew_session_archive_kind_invalid",
-      "Only full Crew brain sessions can be archived through this lifecycle.",
+      "Only full or delegated Crew sessions can be archived through this lifecycle.",
     );
   }
   if (session.status === "archived") {

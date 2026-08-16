@@ -29,6 +29,7 @@ export interface NewSessionTemplate {
   agentId: string;
   profileId: string;
   kind: "full" | "worker" | "delegated";
+  workspaceCwd?: string;
   channelBindingId?: string;
   channelId?: string | number;
   toolProfileKey?: string;
@@ -135,6 +136,7 @@ export function createNewSessionLifecycleExecutor(
         agentId: template.agentId,
         profileId: template.profileId,
         kind: template.kind,
+        workspaceCwd: template.workspaceCwd,
         channelBindingId: template.channelBindingId,
         channelId:
           template.channelId === undefined

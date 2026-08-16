@@ -1465,6 +1465,7 @@ export interface NativeNewSessionControlTemplate {
   agentId: string;
   profileId: string;
   kind: "full" | "worker" | "delegated";
+  workspaceCwd?: string;
   channelBindingId?: string;
   channelId?: string;
   toolProfileKey?: string;

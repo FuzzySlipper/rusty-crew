@@ -111,6 +111,7 @@ impl CoreEngine {
         self.update_lifecycle_for_actions(&batch)?;
         self.apply_fan_out_failure_policy(&batch)?;
         self.schedule_parent_completion_wakes(&batch)?;
+        self.archive_terminal_delegated_sessions_for_actions(&batch)?;
         Ok(receipt)
     }
 

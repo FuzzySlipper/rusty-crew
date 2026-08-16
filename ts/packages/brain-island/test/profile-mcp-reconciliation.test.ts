@@ -301,6 +301,57 @@ test("submits exact managed-external session identities to the Rust planner", as
   ]);
 });
 
+test("validates configured sessions before startup materializes them", async () => {
+  let plannedSessionIds: string[] = [];
+  let plannedProfileIds: string[] = [];
+  await reconcileRuntimeProfileMcpBindings({
+    bridge: {
+      async listSessions() {
+        return [];
+      },
+      async getProfileRegistryRecord() {
+        return undefined;
+      },
+      async planRuntimeConfig(input) {
+        plannedSessionIds = input.runtimeConfig.sessions.map(
+          (item) => item.sessionId,
+        );
+        plannedProfileIds = input.profiles.map((item) => item.profileId);
+        return {
+          runtimeConfig: input.runtimeConfig,
+          diagnostics: [],
+          derivedScheduledJobs: [],
+          derivedMcpBindings: [],
+        };
+      },
+    },
+    runtimeConfig: {
+      profilesDir: "/profiles",
+      brains: [],
+      sessions: [
+        {
+          sessionId: "configured-session",
+          agentId: "configured-agent",
+          profileId: "reviewer",
+          kind: "full",
+          workspaceCwd: "/home/dev/rusty-crew",
+        },
+      ],
+      scheduledJobs: [],
+      channelBindings: [],
+      mcpBindings: [
+        binding(
+          "reviewer-den--session--configured-session",
+          "configured-session",
+        ),
+      ],
+    },
+  });
+
+  assert.deepEqual(plannedSessionIds, ["configured-session"]);
+  assert.deepEqual(plannedProfileIds.sort(), ["ambassador", "reviewer"]);
+});
+
 test("omits archived recovery sessions from the active Rust runtime plan", async () => {
   const archived = {
     ...session("external-session-recovery"),

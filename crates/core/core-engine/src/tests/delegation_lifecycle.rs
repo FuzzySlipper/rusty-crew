@@ -436,13 +436,18 @@ fn delegated_completion_packets_route_to_parent_body_and_policy_wake() {
                 session_id: child_session_id.clone(),
                 actions: vec![BrainAction::DeliverCompletion {
                     packet: CompletionPacket {
-                        session_id: child_session_id,
+                        session_id: child_session_id.clone(),
                         status: status.clone(),
                         summary: format!("child {index} finished as {status:?}"),
                     },
                 }],
             })
             .unwrap();
+        assert_eq!(
+            engine.get_session(&child_session_id).unwrap().status,
+            SessionStatus::Archived,
+            "terminal delegated session {index} should archive immediately",
+        );
     }
 
     for _ in 0..3 {
@@ -600,7 +605,7 @@ fn delegated_session_timeout_expires_without_completion_packet() {
 }
 
 #[test]
-fn delegated_resource_cleanup_archives_terminal_sessions() {
+fn delegated_completion_archives_before_resource_cleanup() {
     let data_dir = unique_data_dir("delegated-resource-cleanup");
     let engine = test_engine_with_data_dir(data_dir.clone());
     let planner = engine
@@ -628,7 +633,7 @@ fn delegated_resource_cleanup_archives_terminal_sessions() {
         .unwrap();
 
     let report = engine.cleanup_delegated_resources().unwrap();
-    assert_eq!(report.terminal_archived, vec![terminal.clone()]);
+    assert!(report.terminal_archived.is_empty());
     assert!(report.expired_archived.is_empty());
     assert!(report.orphaned_archived.is_empty());
     assert_eq!(report.resources_released, 0);
@@ -690,16 +695,8 @@ fn duplicate_delegated_completion_is_rejected_after_terminal_run() {
                 },
             }],
         })
-        .unwrap();
-    assert_eq!(duplicate.accepted_actions, 0);
-    assert_eq!(duplicate.rejected_actions.len(), 1);
-    assert_eq!(
-        duplicate.rejected_actions[0].kind,
-        CoreErrorKind::ActionRejected
-    );
-    assert!(duplicate.rejected_actions[0]
-        .message
-        .contains("already terminal"));
+        .expect_err("archived delegated sessions reject duplicate completion wakes");
+    assert_eq!(duplicate.kind, CoreErrorKind::SessionExpired);
 
     let store = CoordinationStore::open(data_dir).unwrap();
     assert_eq!(store.count_rows("completion_packets").unwrap(), 1);

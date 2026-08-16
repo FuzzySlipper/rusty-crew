@@ -62,6 +62,29 @@ export async function reconcileRuntimeProfileMcpBindings(input: {
   const activeSessions = sessions.filter(
     (session) => session.status !== "archived",
   );
+  const validationSessions = new Map(
+    input.runtimeConfig.sessions.map((session) => [
+      String(session.sessionId),
+      {
+        sessionId: session.sessionId,
+        agentId: session.agentId,
+        profileId: session.profileId,
+        kind: session.kind,
+        workspaceCwd: session.workspaceCwd,
+        resourceLimits: session.resourceLimits,
+      },
+    ]),
+  );
+  for (const session of activeSessions) {
+    validationSessions.set(String(session.sessionId), {
+      sessionId: session.sessionId,
+      agentId: session.agentId,
+      profileId: session.profileId,
+      kind: session.kind,
+      workspaceCwd: session.workspace?.cwd,
+      resourceLimits: session.resourceLimits,
+    });
+  }
   const profileIds = new Set(
     input.profileIds ?? [
       ...sessions.map((session) => String(session.profileId)),
@@ -89,14 +112,7 @@ export async function reconcileRuntimeProfileMcpBindings(input: {
     runtimeConfig: {
       profilesDir: input.runtimeConfig.profilesDir,
       brains: [],
-      sessions: activeSessions.map((session) => ({
-        sessionId: String(session.sessionId),
-        agentId: String(session.agentId),
-        profileId: String(session.profileId),
-        kind: session.kind,
-        workspaceCwd: session.workspace?.cwd,
-        resourceLimits: session.resourceLimits,
-      })),
+      sessions: [...validationSessions.values()],
       scheduledJobs: [],
       channelBindings: [],
       mcpBindings: bindings.map((binding) => ({
@@ -121,6 +137,9 @@ export async function reconcileRuntimeProfileMcpBindings(input: {
     },
     profiles: [
       ...new Set([
+        ...[...validationSessions.values()].map((session) =>
+          String(session.profileId),
+        ),
         ...activeSessions.map((session) => String(session.profileId)),
         ...bindings.map((binding) => String(binding.profileId)),
       ]),

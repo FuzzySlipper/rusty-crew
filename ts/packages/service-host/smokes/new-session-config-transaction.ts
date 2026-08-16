@@ -33,8 +33,7 @@ async function smokeSuccessfulNewSessionConfigMove(): Promise<void> {
     newSessionId = String(
       (
         response.body.data.outcome.affectedIds as
-          | { newSessionId?: unknown }
-          | undefined
+          { newSessionId?: unknown } | undefined
       )?.newSessionId,
     );
     assert.match(newSessionId, /^agent-alpha-session-/);
@@ -46,6 +45,10 @@ async function smokeSuccessfulNewSessionConfigMove(): Promise<void> {
     );
     assert.equal(runtimeConfig.channelBindings?.[0]?.sessionId, newSessionId);
     assert.equal(runtimeConfig.mcpBindings?.[0]?.sessionId, newSessionId);
+    assert.equal(
+      runtimeConfig.sessions?.[0]?.workspaceCwd,
+      "/home/dev/rusty-crew",
+    );
     assert.equal(
       runtimeConfig.scheduledJobs?.[0]?.targetSessionId,
       newSessionId,
@@ -59,6 +62,11 @@ async function smokeSuccessfulNewSessionConfigMove(): Promise<void> {
     assert.equal(
       sessions.find((session) => session.sessionId === newSessionId)?.status,
       "idle",
+    );
+    assert.equal(
+      sessions.find((session) => session.sessionId === newSessionId)?.workspace
+        ?.cwd,
+      "/home/dev/rusty-crew",
     );
     const events = await get(port, token, "/v1/admin/events/recent?limit=40");
     assert.equal(events.status, 200, JSON.stringify(events.body));
@@ -102,6 +110,7 @@ async function smokeFailedNewSessionLeavesConfigUntouched(): Promise<void> {
     agentId: "agent-alpha",
     profileId: "alpha-profile",
     kind: "full",
+    workspaceCwd: "relative/not-canonical",
   });
   const invalidConfig = `${JSON.stringify(parsed, null, 2)}\n`;
   writeFileSync(configPath, invalidConfig);
@@ -120,7 +129,7 @@ async function smokeFailedNewSessionLeavesConfigUntouched(): Promise<void> {
     assert.equal(response.body.data.outcome.status, "failed");
     assert.match(
       response.body.data.outcome.summary,
-      /duplicate configured agent agent-alpha/,
+      /workspaceCwd must be an absolute path/,
     );
     assert.equal(readFileSync(configPath, "utf8"), invalidConfig);
 
@@ -210,6 +219,7 @@ function readRuntimeConfig(root: string): {
     agentId?: string;
     profileId?: string;
     kind?: "full" | "worker" | "delegated";
+    workspaceCwd?: string;
   }>;
   channelBindings?: Array<{ bindingId?: string; sessionId?: string }>;
   mcpBindings?: Array<{ bindingId?: string; sessionId?: string }>;
@@ -236,6 +246,7 @@ function writeRuntimeConfig(root: string): void {
             agentId: "agent-alpha",
             profileId: "alpha-profile",
             kind: "full",
+            workspaceCwd: "/home/dev/rusty-crew",
           },
         ],
         channelBindings: [
@@ -283,7 +294,11 @@ function writeRuntimeConfig(root: string): void {
     JSON.stringify(
       {
         profileId: "alpha-profile",
-        modelConfig: { provider: "local", modelName: "deterministic" },
+        modelConfig: {
+          provider: "local",
+          modelName: "deterministic",
+          baseUrl: "http://127.0.0.1:1/v1",
+        },
         skills: "all",
       },
       null,

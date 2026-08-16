@@ -17,6 +17,12 @@ const workerSession: SlashCommandSession = {
   profileId: "coder",
   kind: "worker",
 };
+const delegatedSession: SlashCommandSession = {
+  sessionId: "session-delegated",
+  agentId: "agent-delegated",
+  profileId: "coder",
+  kind: "delegated",
+};
 
 const passThrough = routeSlashCommand(input("hello there", primeSession));
 assert.equal(passThrough.kind, "pass_through");
@@ -108,6 +114,17 @@ const deniedWorkerControl = intercepted(
 );
 assert.equal(deniedWorkerControl.status, "denied");
 assert.equal(deniedWorkerControl.controlRequest, undefined);
+
+const delegatedArchive = intercepted(
+  routeSlashCommand(input("/archive completed", delegatedSession)),
+);
+assert.equal(delegatedArchive.status, "ok");
+assert.equal(delegatedArchive.controlRequest?.commandName, "archive_session");
+
+const delegatedNewDenied = intercepted(
+  routeSlashCommand(input("/new", delegatedSession)),
+);
+assert.equal(delegatedNewDenied.status, "denied");
 
 const allowedWorkerControl = intercepted(
   routeSlashCommand(

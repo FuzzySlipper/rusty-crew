@@ -844,6 +844,34 @@ impl CoreEngine {
         Ok(())
     }
 
+    pub(crate) fn archive_terminal_delegated_sessions_for_actions(
+        &self,
+        batch: &BrainActionBatch,
+    ) -> CoreResult<()> {
+        for action in &batch.actions {
+            let BrainAction::DeliverCompletion { packet } = action else {
+                continue;
+            };
+            let session = match self.sessions.get_session(&packet.session_id) {
+                Ok(session) => session,
+                Err(error) if error.kind == CoreErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            if session.kind != SessionKind::Delegated || session.status == SessionStatus::Archived {
+                continue;
+            }
+            let Some(run) = load_delegated_worker_run_by_session(&self.store, &session.session_id)?
+            else {
+                continue;
+            };
+            if !run.status.is_terminal() {
+                continue;
+            }
+            self.archive_session(&session.session_id)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn apply_fan_out_failure_policy(&self, batch: &BrainActionBatch) -> CoreResult<()> {
         for action in &batch.actions {
             let BrainAction::DeliverCompletion { packet } = action else {

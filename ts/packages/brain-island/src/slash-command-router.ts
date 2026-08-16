@@ -283,11 +283,16 @@ function authorizeSlashCommand(
     session.profileId,
   );
   const isFullPrime = session.kind === "full" && isPrime;
+  const isDelegatedSelfArchive =
+    commandName === "archive" && session.kind === "delegated";
 
   if (!isControl && (isFullPrime || options?.allowNonPrimeReadCommands)) {
     return { allowed: true };
   }
-  if (isControl && (isFullPrime || options?.allowWorkerControls)) {
+  if (
+    isControl &&
+    (isFullPrime || isDelegatedSelfArchive || options?.allowWorkerControls)
+  ) {
     return { allowed: true };
   }
   return {

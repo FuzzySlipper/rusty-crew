@@ -4796,6 +4796,7 @@ function createServiceControlExecutor(
             agentId: session.agentId,
             profileId: session.profileId,
             kind: session.kind,
+            workspaceCwd: session.workspace?.cwd,
             channelBindingId: channelBinding?.bindingId,
             channelId: channelBinding?.externalChannelId,
             toolProfileKey: mcpBindingForSession(state, currentSessionId)
@@ -4842,6 +4843,14 @@ function createServiceControlExecutor(
             agentId: template.agentId,
             profileId: template.profileId,
             kind: template.kind,
+            workspace:
+              template.workspaceCwd === undefined
+                ? undefined
+                : {
+                    cwd: template.workspaceCwd,
+                    revision: 1,
+                    updatedAt: state.now(),
+                  },
             resourceLimits: compactRecord(
               optionalRecord(sessionConfig.resourceLimits) ?? {},
             ),
@@ -7325,8 +7334,17 @@ function wakeDispatchContext(state: ServiceState): ServiceWakeDispatchContext {
     bridge: state.bridge,
     inFlightWakes: state.inFlightWakes,
     deferredWakeSessions: state.deferredWakeSessions,
-    afterWakeSettled: ({ profileId }) =>
-      retryDeferredCredentialRuntimeRefresh(state, profileId),
+    afterWakeSettled: async ({ sessionId, profileId }) => {
+      await retryDeferredCredentialRuntimeRefresh(state, profileId);
+      const session = (await state.bridge.listSessions()).find(
+        (candidate) => candidate.sessionId === sessionId,
+      );
+      if (session?.status !== "archived") return;
+      await closeBrowserSessionForServiceLifecycle(state, sessionId);
+      if (profileId !== undefined) {
+        await reconcileServiceProfileMcpBindings(state, String(profileId));
+      }
+    },
     toolCallDebugStore: state.toolCallDebugStore,
     brainForProfile: (profileId) =>
       state.runtimeConfigApplyResult.brainHandlesByProfileId[profileId],

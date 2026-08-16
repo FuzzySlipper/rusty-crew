@@ -32,6 +32,7 @@ const template: NewSessionTemplate = {
   agentId: "agent-alpha",
   profileId: "prime",
   kind: "full",
+  workspaceCwd: "/home/dev/rusty-crew",
   channelBindingId: "binding-alpha",
   channelId: "crew-room",
   toolProfileKey: "prime-tools",
@@ -51,7 +52,9 @@ const newSession = createNewSessionLifecycleExecutor({
     order.push(`archive:${input.sessionId}:${input.reasonCode}`);
   },
   createSession(input) {
-    order.push(`create:${input.sessionId}:${input.template.agentId}`);
+    order.push(
+      `create:${input.sessionId}:${input.template.agentId}:${input.template.workspaceCwd}`,
+    );
   },
   rebindChannel(input) {
     order.push(
@@ -105,7 +108,7 @@ assert.deepEqual(order, [
   "load:session-alpha",
   "generate",
   "archive:session-alpha:slash_command_new",
-  "create:session-alpha-new:agent-alpha",
+  "create:session-alpha-new:agent-alpha:/home/dev/rusty-crew",
   "rebind:binding-alpha:session-alpha->session-alpha-new",
 ]);
 assert.deepEqual(
