@@ -13,7 +13,7 @@ Depends on:
 
 ## Purpose
 
-Rusty Crew should support MCP tools without recreating pi-crew's old centralized
+Rusty Crew should support MCP tools without recreating the old centralized
 client problem. MCP remains TypeScript-side for now, but Rust owns the runtime
 identity, session, profile, resource, and audit contracts that decide which
 tools a brain may see.

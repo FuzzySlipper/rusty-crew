@@ -79,9 +79,10 @@ const DEFAULT_EXTERNAL_THREAD_TURN_PAGE_LIMIT = 50;
 const MAX_EXTERNAL_THREAD_TURN_PAGE_LIMIT = 100;
 const MAX_EXTERNAL_THREAD_ITEMS_PER_TURN = 128;
 const EXTERNAL_TURN_EVENT_PAGE_LIMIT = 128;
-const MAX_EXTERNAL_THREAD_ITEM_TEXT_CHARS = 4_096;
+const MAX_EXTERNAL_THREAD_ITEM_TEXT_CHARS = 64 * 1_024;
 const MAX_EXTERNAL_THREAD_ITEM_SUMMARY_ENTRIES = 8;
 const MAX_EXTERNAL_THREAD_ITEM_SUMMARY_CHARS = 1_024;
+const EXTERNAL_THREAD_TEXT_TRUNCATION_MARKER = "...[truncated]";
 export const EXTERNAL_AGENT_SESSION_CREATION_REASON_CODES = [
   "external_agent_creation_idempotency_key_required",
   "external_agent_creation_idempotency_conflict",
@@ -4670,6 +4671,8 @@ export class ServiceExternalRuntimeController {
           reviewerSessionId: binding.sessionId ?? undefined,
           reviewCorrelationId:
             activeReviewTurn?.request.provenance.correlationId ?? undefined,
+          reviewDispatchMessageId:
+            activeReviewTurn?.request.provenance.sourceId ?? undefined,
         },
         port: this.#bridge,
         onDelivery: this.#onCoordinationDelivery,
@@ -5912,10 +5915,16 @@ function boundedExternalThreadText(
   limit = MAX_EXTERNAL_THREAD_ITEM_TEXT_CHARS,
 ): { value: string; truncated: boolean } {
   if (value.length <= limit) return { value, truncated: false };
+  let end = limit - EXTERNAL_THREAD_TEXT_TRUNCATION_MARKER.length;
+  if (end > 0 && isHighSurrogate(value.charCodeAt(end - 1))) end -= 1;
   return {
-    value: `${value.slice(0, limit - 15)}...[truncated]`,
+    value: `${value.slice(0, end)}${EXTERNAL_THREAD_TEXT_TRUNCATION_MARKER}`,
     truncated: true,
   };
+}
+
+function isHighSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xd800 && codeUnit <= 0xdbff;
 }
 
 function terminalError(

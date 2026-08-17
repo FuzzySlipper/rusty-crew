@@ -6,7 +6,7 @@ Date: 2026-06-20
 
 ## Scope
 
-Rusty Crew needs pi-crew parity for:
+Rusty Crew needs the following browser and web tool behavior:
 
 - `web_search`
 - `web_extract`
@@ -96,7 +96,7 @@ provider/brain path with profile policy and result refs.
 
 ## Web Search
 
-`web_search` is safe to port as a provider abstraction from pi-crew if the
+`web_search` is safe to expose as a provider abstraction if the
 Rusty Crew version keeps provider selection out of model input.
 
 Provider policy should be runtime/profile configuration:
@@ -114,7 +114,7 @@ network escape flags.
 
 ## Web Extract Network Guardrails
 
-`web_extract` must preserve pi-crew's SSRF posture and be stricter where runtime
+`web_extract` must preserve the established SSRF posture and be stricter where runtime
 shape allows it.
 
 Default policy:
@@ -138,9 +138,8 @@ Default policy:
 
 Private-network access must be a runtime configuration escape hatch, not a tool
 argument. Prefer `RUSTY_CREW_ALLOW_PRIVATE_NET=1` or equivalent service config.
-Keep support for pi-crew's old `PI_CREW_ALLOW_PRIVATE_NET=1` only as a temporary
-compatibility alias if migration needs it; do not document it as the Rusty Crew
-primary switch.
+Do not add compatibility aliases for retired environment names; the Rusty Crew
+switch is the only supported form.
 
 Guardrails must account for DNS rebinding. The implementation should either use
 an HTTP client/agent that can pin and inspect the resolved address for the
@@ -233,7 +232,7 @@ Rules:
 - no full DOM dump by default;
 - console output is bounded and redacted for obvious secret patterns.
 
-The pi-crew snapshot/ref pattern is safe to adapt, but the Rusty Crew version
+The established snapshot/ref pattern is safe to adapt, but the Rusty Crew version
 must add explicit session scoping because the service is expected to host many
 agents.
 
@@ -258,9 +257,9 @@ It must not:
 Future model-backed analysis should use the normal model/provider path and
 reference the screenshot artifact.
 
-## Copy/Adapt Guidance From Pi-Crew
+## Reusable Safety Guidance
 
-Safe to copy/adapt closely:
+Safe to reuse closely:
 
 - `web_search` provider abstraction and result shaping;
 - `web_extract` URL parsing, redirect cap, private-network detection, IPv4-mapped

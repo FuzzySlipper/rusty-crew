@@ -19,9 +19,9 @@ boundary:
   durable coordination events, wake/lifecycle authority, and hooks that must
   not be bypassed.
 
-Pi-crew has useful tool implementations and catalog concepts, but it also has
-tool policy, worker-pool, MCP, and runtime concerns interleaved in ways Rusty
-Crew should not copy directly. Rusty Crew tools must flow through one
+The predecessor runtime had useful tool implementations and catalog concepts,
+but it also interleaved tool policy, worker-pool, MCP, and runtime concerns in
+ways Rusty Crew should not copy directly. Rusty Crew tools must flow through one
 centralized registry so duplicate tools do not quietly drift into separate
 behaviors.
 
@@ -200,9 +200,9 @@ Ordinary file, shell, web, browser, memory, and MCP tools can remain TypeScript
 executors as long as they respect the selected inventory and session resource
 limits.
 
-## Pi-Crew Adaptation Rules
+## Predecessor Adaptation Rules
 
-Adapt pi-crew behavior by responsibility:
+Adapt predecessor behavior by responsibility:
 
 - Local filesystem, shell, git, web, browser, memory, skills, and patch tools
   should be ported as TypeScript tool executors through the canonical registry.
@@ -213,7 +213,7 @@ Adapt pi-crew behavior by responsibility:
   remain Rust-owned actions.
 - Worker-pool-specific policy should not become the default full/prime-agent
   tool gate.
-- Useful pi-crew guardrails such as SSRF checks, syntax-check rollback, and
+- Useful guardrails such as SSRF checks, syntax-check rollback, and
   stable output shapes should be preserved in the TypeScript executor modules.
 
 ## Implementation Sequence

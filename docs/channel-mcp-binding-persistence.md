@@ -8,7 +8,6 @@ Depends on:
 
 - `multi-agent-adapter-architecture`
 - `normalized-channel-adapter-contract`
-- `unified-runtime-persistence-architecture`
 
 ## Purpose
 
@@ -117,4 +116,3 @@ configuration.
 
 Projection failures should update binding health and diagnostics. They must not
 roll back accepted runtime events.
-

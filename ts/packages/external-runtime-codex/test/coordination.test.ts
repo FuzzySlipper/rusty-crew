@@ -44,6 +44,11 @@ test("coordination catalog keeps model arguments small", () => {
     "body",
     "ttlSeconds",
   ]);
+  assert.match(
+    namespace.tools.find((tool) => tool.name === "complete_routed_review")
+      ?.description ?? "",
+    /emit the returned contentItems text/,
+  );
 });
 
 test("managed reviewer catalog removes the raw reply primitive by profile", () => {

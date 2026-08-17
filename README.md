@@ -5,7 +5,7 @@ multiple full agents, delegated workers, and external Codex app-server
 sessions while keeping coordination, lifecycle, and durable service data under
 one Rust-owned authority.
 
-The project began as a structural successor to pi-crew, but it is now a working
+The project began as a coordination-runtime rewrite and is now a working
 service rather than a scaffold. It provides profile and provider management,
 two production LLM brain loops, model-callable local and MCP tools, durable
 sessions and chat streams, direct agent messaging, delegation and worker
@@ -210,5 +210,5 @@ When a static frontend is copied to `<runtime-root>/site`, Crew serves it at
   work must not be resurrected by restart or reconnect.
 - Intentional stubs, fakes, and partial paths require a discoverable follow-up
   task and known-limitation record.
-- Use current pi sources from `https://github.com/earendil-works/pi` only when
-  pi reference behavior is needed; old local package locations are historical.
+- Use the current Rust brain and host contracts when adding providers or tools;
+  do not reintroduce retired package-source or compatibility paths.

@@ -11,8 +11,7 @@ Rusty Crew browser state is scoped per Rust `SessionId`.
 It is not scoped per wake, because multi-step browser work needs continuity. It
 is not scoped per profile, because one hosted service may run many agents with
 the same profile and must avoid cross-agent leakage. It is not a process-global
-singleton, because hidden globals made the pi-crew browser surface hard to
-reason about.
+singleton, because hidden globals make browser surfaces hard to reason about.
 
 The TypeScript brain island owns Chromium/CDP process control and volatile page
 state. Rust owns the durable session identity, selected tool profile, lifecycle
@@ -79,8 +78,8 @@ Rules:
   be exposed as durable data.
 - Snapshot output is bounded by element count and text length.
 
-The pi-crew ref idea is worth adapting; its module-global `sessions` map and
-raw selector cache should not be copied as-is.
+The predecessor ref idea is worth adapting; its module-global `sessions` map
+and raw selector cache should not be copied as-is.
 
 ## Process Lifecycle
 
@@ -215,7 +214,7 @@ Across sessions:
 
 ## Implementation Notes
 
-Safe to reuse from pi-crew:
+Safe to reuse from the predecessor implementation:
 
 - CDP client request/response structure.
 - `DevToolsActivePort` discovery idea.

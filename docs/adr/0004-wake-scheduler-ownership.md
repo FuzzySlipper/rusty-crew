@@ -90,7 +90,7 @@ types. If a trait is needed, define it in a transport-neutral Rust crate or
 module and implement the napi binding in `core-bridge-node`.
 
 The first production proof may use a deterministic TS brain, but it must use
-the same registered-brain and `wake_brain` path that real pi-agent brains use.
+the same registered-brain and `wake_brain` path used by the production brains.
 Diagnostic helpers such as `projectBodyStateJson` and
 `submitBrainActionsJson` remain useful for tests, but they must not be the
 core runtime path.

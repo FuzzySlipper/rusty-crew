@@ -11,7 +11,7 @@ MCP is a per-agent/profile tool surface in Rusty Crew. It is not a centralized g
 - each profile discovers a different MCP tool set;
 - registry selection uses the matching `mcp:<toolProfileKey>` toolset;
 - each agent receives only its selected MCP tools;
-- the Pi-compatible MCP tool wrapper executes against the correct binding and source tool;
+- the MCP tool wrapper executes against the correct binding and source tool;
 - local/MCP name collisions fail closed by default;
 - explicit namespacing can resolve an intentional collision;
 - cross-profile tool-profile checks deny the wrong MCP tool;

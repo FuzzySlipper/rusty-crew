@@ -286,7 +286,7 @@ function projectPayload(
   }
 }
 
-const DYNAMIC_TOOL_RESULT_LIMIT = 4_096;
+const DYNAMIC_TOOL_RESULT_LIMIT = 64 * 1_024;
 const DYNAMIC_TOOL_RESULT_TRUNCATION_MARKER = "...[truncated]";
 const UNSAFE_RESULT_CONTROL_CHARACTERS =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;

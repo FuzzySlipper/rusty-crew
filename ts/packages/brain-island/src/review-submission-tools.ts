@@ -128,6 +128,8 @@ export interface ReviewSubmissionToolRuntime {
       caller: AgentCoordinationCaller;
       reviewerSessionId: string;
       correlationId?: string;
+      /** Exact Rust-owned routed wake identity; never model supplied. */
+      dispatchMessageId?: string;
     },
   ): Promise<CompleteRoutedReviewToolReceipt>;
 }

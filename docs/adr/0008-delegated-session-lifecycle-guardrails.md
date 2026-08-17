@@ -10,10 +10,11 @@ Delegated sessions are Rust-owned child sessions created from
 `BrainAction::RequestDelegation`. They are the baseline subagent mechanism for
 prime and full agents, independent of worker pools.
 
-Pi-crew accumulated checkpoint, timeout, drain, cancellation, and orphan cleanup
-behavior around worker runtime code. Rusty Crew needs the same safety properties,
-but the guardrails should attach to Rust-owned sessions, worker-run records, and
-resource limits rather than to a pool-first worker abstraction.
+The predecessor runtime accumulated checkpoint, timeout, drain, cancellation,
+and orphan cleanup behavior around worker runtime code. Rusty Crew needs the
+same safety properties, but the guardrails should attach to Rust-owned sessions,
+worker-run records, and resource limits rather than to a pool-first worker
+abstraction.
 
 ## Decision
 

@@ -9,7 +9,6 @@ Related docs:
 - `tool-registry-metadata-ownership`
 - `tool-architecture-registry-rules`
 - `mcp-registry-integration-and-collision-policy`
-- `[doc: rusty-crew/typescript-authority-refactor-catalog-2026-07-07]`
 
 ## Purpose
 

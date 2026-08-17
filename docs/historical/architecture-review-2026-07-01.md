@@ -131,7 +131,7 @@ mapping layer, config normalization — has none.
 
 ## 6. brain-island became the application, not the brain
 
-AGENTS.md defines brain-island as the "pi Agent/LLM boundary," but it now
+AGENTS.md defines brain-island as the "brain/LLM boundary," but it now
 contains the service host, a hand-rolled `node:http` router (28 path-match
 branches in service-host.ts), admin control/diagnostics APIs, tool registry,
 runtime config, curator mutations, scheduler reads, and memory-space APIs —

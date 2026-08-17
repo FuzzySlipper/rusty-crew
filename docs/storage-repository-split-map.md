@@ -667,7 +667,7 @@ Owns:
 
 Tests:
 
-- legacy import metadata maps pi-crew and Hermes ids without runtime coupling
+- legacy import metadata maps external ids without runtime coupling
 - logical storage import dry run validates capabilities/idempotency
 - logical import refuses queue resurrection risks
 

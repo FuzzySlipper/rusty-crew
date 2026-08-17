@@ -9,7 +9,6 @@ Related docs:
 - `bridge-contract-validation`
 - `native-bridge-artifact-strategy`
 - `core-bridge-node-decomposition-plan`
-- `[doc: rusty-crew/typescript-authority-refactor-catalog-2026-07-07]`
 
 ## Purpose
 
@@ -253,7 +252,7 @@ The artifact currently covers these bridge families:
 - memory manifest operations for session memory, memory proposals, governance
   decisions, activity digests, and context compaction artifacts;
 - brain/provider manifest operations for wake execution, provider-state
-  persistence, OpenAI Responses and pi-agent buffered run control, provider
+  persistence, OpenAI Responses and Chat Completions buffered run control, provider
   diagnostics, and buffered run cleanup;
 - runtime/scheduler manifest operations for runtime config validation/planning,
   scheduled job/run control, scheduler tick reports, storage diagnostics, and
@@ -451,7 +450,7 @@ manifest operations now have generated, fixture-backed, unit-return, or
 runtime boundary validation evidence, with no exemption catalog remaining.
 
 The ST import smoke now declares its service-host lane explicitly and uses the
-supported `pi-agent` production brain without invoking a provider. This keeps
+supported Chat Completions production brain without invoking a provider. This keeps
 API-only roleplay import coverage independent of removed deterministic brain
 fallbacks.
 

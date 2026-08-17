@@ -40,7 +40,8 @@ Disallowed paths:
 
 - directly invoking a TS brain because a cron tick fired;
 - editing Den/channel state as if it were runtime truth;
-- using pi-agent `steer()` or `followUp()` as a durable coordination queue;
+- using provider-internal `steer()` or `followUp()` as a durable coordination
+  queue;
 - replaying old queued messages or expired background work;
 - mutating skill/memory/profile state without preview, audit, and scoped
   authority.
@@ -245,13 +246,13 @@ small caps, and expired-message drop behavior.
 
 Any steer/follow-up implementation must:
 
-- be body-owned rather than pi-agent-owned;
+- be body-owned rather than provider-owned;
 - use aggressive TTL;
 - never replay expired messages;
 - avoid mutating an in-flight provider stream;
 - schedule a later Rust-owned wake when appropriate.
 
-Porting pi-crew's direct `Agent.steer()` / `followUp()` bridge is not approved
+Porting legacy provider's direct `Agent.steer()` / `followUp()` bridge is not approved
 by this note.
 
 ## Prime-Agent-First Runtime

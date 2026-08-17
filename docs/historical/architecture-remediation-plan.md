@@ -237,7 +237,7 @@ contracts, unit tests, smokes runnable from new locations).
    router composes. The 28-branch if-chain becomes a handler table. This is
    where Phase 4's route-parsing unit tests pay off.
 4. **brain-island afterwards** should be recognizably the lane AGENTS.md
-   describes: profile/role assembly, pi-agent integration, brain modules,
+   describes: profile/role assembly, provider integration, brain modules,
    model-callable tools. Update the lane table and the repository-structure
    diagram in AGENTS.md, and extend `ownership.toml`'s lane rules to cover
    the new package (`service-host` may depend on everything; adapters and

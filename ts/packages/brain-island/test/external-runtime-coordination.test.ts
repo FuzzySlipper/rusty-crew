@@ -136,6 +136,7 @@ test("Codex review completion carries persisted routed correlation", async () =>
       controllerGeneration: 11,
       reviewerSessionId: "reviewer-session",
       reviewCorrelationId: `review:6574:${"a".repeat(40)}`,
+      reviewDispatchMessageId: "review-message:review-submission:test",
     },
     port,
     onReviewCompletion: async (input) => {
@@ -157,6 +158,10 @@ test("Codex review completion carries persisted routed correlation", async () =>
   assert.equal((calls[0] as { taskId?: number }).taskId, 6574);
   assert.equal((calls[0] as { commitSha?: string }).commitSha, "a".repeat(40));
   assert.equal("correlationId" in (calls[0] as Record<string, unknown>), true);
+  assert.equal(
+    (calls[0] as { dispatchMessageId?: string }).dispatchMessageId,
+    "review-message:review-submission:test",
+  );
 });
 
 test("Codex review completion rejects only half of an explicit target", async () => {

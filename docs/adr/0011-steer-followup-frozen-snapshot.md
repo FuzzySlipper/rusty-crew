@@ -6,9 +6,9 @@ Date: 2026-06-20
 
 ## Context
 
-Pi-crew had a steer/follow-up bridge that could route channel events directly
-into active upstream Agent queues. That made sense in a system where the
-TypeScript agent loop owned much of the runtime behavior.
+The predecessor runtime had a steer/follow-up bridge that could route channel
+events directly into active provider queues. That made sense in a system where
+the TypeScript agent loop owned much of the runtime behavior.
 
 Rusty Crew has a different ownership model:
 
@@ -19,13 +19,13 @@ Rusty Crew has a different ownership model:
 - Queued messages are explicitly TTL-bounded recovery state, not an unbounded
   backlog.
 
-Directly porting pi-crew's steer/follow-up bridge would recreate a second
+Directly porting that steer/follow-up bridge would recreate a second
 message-routing path inside the TS brain island and could resurrect stale
 instructions after the body context that made them valid has expired.
 
 ## Decision
 
-Do not port pi-crew's direct `Agent.steer()` / `Agent.followUp()` bridge.
+Do not restore a direct provider `Agent.steer()` / `Agent.followUp()` bridge.
 
 For v1, steer/follow-up behavior is:
 
@@ -36,8 +36,8 @@ For v1, steer/follow-up behavior is:
 - expired-message dropping, not replay;
 - Rust wake scheduling remains the only activation authority.
 
-The upstream pi-agent queue APIs may still be used as transient implementation
-details inside one brain wake, but they are not Rusty Crew coordination state.
+Provider queue APIs may still be used as transient implementation details inside
+one brain wake, but they are not Rusty Crew coordination state.
 The brain island clears upstream queues after wake completion.
 
 ## Replacement Shape
@@ -65,7 +65,7 @@ Any implementation of task 2981 must preserve:
 - small cap, currently 32 messages by default;
 - terminal states for expired, discarded, cancelled, and delivered messages;
 - no direct injection into an in-flight provider request;
-- no durable dependency on pi-agent's internal steer/follow-up queues;
+- no durable dependency on provider-internal steer/follow-up queues;
 - query/readback tooling for expired messages that does not move them back to
   pending.
 

@@ -6,8 +6,8 @@ Date: 2026-06-22
 
 ## Decision
 
-Rusty Crew should not port pi-crew's `script_only` or `data_collection` cron
-jobs as generic script runners.
+Rusty Crew should not port the predecessor runtime's `script_only` or
+`data_collection` cron jobs as generic script runners.
 
 The scheduler remains Rust-owned. Non-wake jobs may be added only as named,
 typed job kinds with bounded payload schemas and explicit executor ownership.
@@ -17,8 +17,8 @@ Rust-claimed scheduled run and report the terminal outcome back through typed
 scheduler APIs.
 
 The current `scheduledJobs[]` runtime config accepts only executable
-`shape: "session_wake"`. Legacy pi-crew shapes may be parsed for migration
-awareness, but they must fail closed until a named job kind exists.
+`shape: "session_wake"`. Retired shapes must fail closed until a named job
+kind exists.
 
 ## Why Not Generic Scripts
 
@@ -55,7 +55,7 @@ TypeScript host owns:
 Both sides share one rule: only a claimed run may execute, and every executor
 must complete the run with a bounded output object.
 
-## Replacement For pi-crew Shapes
+## Replacement For Retired Shapes
 
 `script_only` should be replaced by one of:
 
@@ -125,7 +125,7 @@ Future work should be split this way:
 
 ## Compatibility
 
-For pi-crew migration, old cron config should be converted explicitly:
+Old cron config should be converted explicitly:
 
 - `session_wake` maps directly to Rusty Crew `scheduledJobs[]`.
 - `script_only` must map to an approved named job kind or remain unsupported.

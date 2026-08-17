@@ -76,10 +76,10 @@ app-server and the direct Responses brain:
 - Codex thread: `019f5031-d816-7ee0-b1e1-e757324e365f`;
 - Responses session: `responses-cert-5389-session`.
 
-The direct pi-agent path also completed a live debug-service turn:
+The direct Chat Completions path also completed a live debug-service turn:
 
 - session: `tester-session`;
-- client message: `pi-coexist-1783756942946`;
+- client message: `brain-coexist-1783756942946`;
 - replay cursor: `tester-session:190` through `tester-session:236`;
 - exact marker observed and terminal status `completed`.
 

@@ -200,4 +200,5 @@ Every extraction should record which bucket it achieves:
 - `certified-current-boundary` when TS remains the intentional owner;
 - `planned` when only a lane is named.
 
-Use `docs/migration-task-semantics-audit-2026-07-09.md` as the vocabulary.
+Use the `migrated`, `ratcheted`, `certified-current-boundary`, and `planned`
+vocabulary above when describing follow-up work.

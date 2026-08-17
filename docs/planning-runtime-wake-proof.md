@@ -16,7 +16,7 @@ of the 2818 tool family through the normal Rusty Crew wake path:
   `counter_reset`;
 - brain registration through the production native bridge;
 - role assembly with planning guidance;
-- a brain wake that calls the selected tools through the Pi tool surface.
+- a brain wake that calls the selected tools through the canonical tool surface.
 
 ## Expected Runtime Effects
 

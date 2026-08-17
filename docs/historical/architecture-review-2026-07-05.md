@@ -46,9 +46,9 @@ code has not reached, and nothing mechanical closes the gap.**
   are real, deterministic, offline gates (production-fake exceptions are
   count-pinned so the list cannot silently rot).
 - **The critical external dependency is pinned properly**:
-  `@earendil-works/pi-*` at exact `0.79.8` with the upstream commit recorded
-  in `docs/pi-package-source-lock.md`. SQLite has a real 31-step versioned
-  migration chain. `Cargo.lock` and `package-lock.json` are committed.
+  external provider packages at exact versions with their source recorded.
+  SQLite has a real 31-step versioned migration chain. `Cargo.lock` and
+  `package-lock.json` are committed.
 - **Doc curation exists**: `docs/historical/` moves with a README explaining
   each supersession, and most docs carry a source-of-truth posture note.
 

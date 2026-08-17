@@ -11,7 +11,7 @@ Accepted
 The Rust body loop wakes the TypeScript brain island with a projected
 `BodyState`. While the brain is active, new user messages, Den observations, or
 adapter events may arrive. Task 2771 tested whether the current
-`@earendil-works/pi-agent-core` Agent loop gives us a safe hook for injecting
+The previous provider agent loop gave us a safe hook for injecting
 those deltas into an in-flight inference turn.
 
 The upstream Agent API exposes `steer()` and `followUp()` queues, plus lower
@@ -39,7 +39,7 @@ Use `frozen_snapshot_next_wake` for v1.
 - New messages arriving while the brain is active are candidates for the next
   wake only.
 - If a queue is used between active wake and next wake, it is owned by the body
-  policy, not by pi-agent's internal queues.
+  policy, not by a provider loop's internal queues.
 - The body queue is aggressively bounded: default TTL is 5 seconds and default
   capacity is 32 messages.
 - Expired queued messages are dropped, not replayed.
@@ -52,7 +52,7 @@ upstream Agent queues when a Rust wake exits and configures upstream queues as
 ## Evidence
 
 The integrated smoke `npm run smoke:mid-turn` simulates a message arriving while
-a pi-agent-backed wake is active. It verifies:
+a provider-backed wake is active. It verifies:
 
 - the current wake prompt contains only the frozen snapshot message;
 - the mid-turn message is available to the next wake while fresh;

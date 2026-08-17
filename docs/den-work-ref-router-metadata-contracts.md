@@ -6,7 +6,6 @@ Date: 2026-06-20
 
 Related docs:
 
-- `den-assignment-completion-evidence-loop-plan`
 - `multi-agent-adapter-architecture`
 - `evidence-result-reference-policy`
 

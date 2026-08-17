@@ -50,8 +50,9 @@ On connect/reconnect, the controller reads both:
 - the locally persisted cursor for the binding;
 - the optional Den subscription cursor.
 
-It resumes from the greatest cursor. This preserves the pi-channels lesson that
-a subscription-owned cursor must beat a stale local cursor on restart.
+It resumes from the greatest cursor. This preserves the subscription-cursor
+precedence lesson: a subscription-owned cursor must beat a stale local cursor
+on restart.
 
 Accepted inbound messages advance the local cursor. Stale cursors are dropped
 and counted as diagnostics.
@@ -93,4 +94,3 @@ Live WebSocket and HTTP-poll transports should implement the same
 `DenChannelsTransport` interface. They should not directly inject runtime
 events. They should emit or pass provider payloads through the anti-corruption
 normalizer and controller gates first.
-

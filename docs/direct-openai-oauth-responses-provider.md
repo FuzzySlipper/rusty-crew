@@ -291,7 +291,7 @@ For model-provider create/update routes:
 - Provider read/list routes expose only `credential.hasSecret`,
   `credential.secretRef`, `credential.updatedAt`, and `credential.kind`. They
   must not expose `credentialSecret`, token values, or raw secret JSON.
-- Existing TypeScript pi-brain provider resolution unwraps only `api_key`
+- Existing TypeScript host provider resolution unwraps only `api_key`
   envelopes. `openai_oauth` envelopes require the direct Rust Responses brain
   provider path.
 

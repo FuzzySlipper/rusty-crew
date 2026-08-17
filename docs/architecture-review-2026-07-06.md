@@ -178,9 +178,8 @@ boundary, so the engine still cannot be unit-tested against a fake store.
   crate behind a process-global `OnceLock<Mutex<HashMap<...>>>`
   (`core-bridge-node/src/responses.rs:252`) rather than in the brain crate or
   behind engine-owned state.
-- Owner-only (`-rw-------`) permissions persist on several docs
-  (`docs/README.md`, the `pi-*` audit docs) and one smoke, which will
-  surprise a fresh checkout.
+- Owner-only (`-rw-------`) permissions persist on several docs and one smoke,
+  which will surprise a fresh checkout.
 - Config shape is still duplicated between `service-runtime-config.ts`
   (2,311 lines) and `core-config` (2,996 lines); acceptable now that the
   parity smoke is CI-enforced, but still two copies to edit.

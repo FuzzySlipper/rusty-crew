@@ -1,8 +1,8 @@
 # Rusty Crew Local Bootstrap
 
 Project-specific live guidance and planning live in Den project `rusty-crew`.
-Historical planning still exists in `pi-crew`; prefer `rusty-crew` for new
-project docs, task updates, and guidance.
+Current planning and guidance live in Den project `rusty-crew`; use that
+project for new docs, task updates, and guidance.
 
 Primary Den documents:
 
@@ -60,7 +60,7 @@ not the current planning queue.
 ```text
 /rusty-crew
   /adr
-    0001-current-pi-package-source.md
+    # current ADRs live under docs/adr
   /crates
     /core
       /core-protocol      # transport-free Rust protocol types
@@ -160,12 +160,11 @@ cargo run --release -p rusty-crew-core-bridge-node --bin measure_brain_event_thr
 TypeScript in this repo is boundary code and brain/adaptor code. Prefer longer,
 clearer code over compact cleverness. Name conversions across Rust/TS shapes
 explicitly, especially snake_case/camelCase and branded contract types. Avoid
-ambient registries or hidden runtime coupling unless they are established by the
-pi packages being wrapped.
+ambient registries or hidden runtime coupling unless they are established by
+the repository's explicit Rust/TypeScript contracts.
 
-When dealing with pi packages, use the current packages from
-`https://github.com/earendil-works/pi`. Older local checkout references are
-historical audit context only.
+Use the current repository contracts and provider adapters. Do not reintroduce
+retired package-source or local-checkout compatibility paths.
 
 ## Rust House Style
 

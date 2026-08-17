@@ -367,7 +367,7 @@ against Rust diagnostics for representative configs.
 
 - Do not move prompt rendering, `soul.md`, `memory.md`, or skill Markdown
   loading into Rust.
-- Do not move OpenAI/pi/Anthropic/den-router provider SDK details into Rust.
+- Do not move provider SDK details into Rust.
 - Do not make Rust discover MCP tools or call Den/Telegram/browser APIs.
 - Do not force Rust to parse every profile file format in the first pass.
 - Do not make the validator mutate service files directly.

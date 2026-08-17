@@ -7,9 +7,9 @@ Date: 2026-06-20
 ## Context
 
 Prime agents need a way to split work across parallel delegated sessions while
-keeping worker pools optional. Pi-crew had fan-out behavior tied to subagent and
-worker-pool assumptions; Rusty Crew should preserve the useful coordination
-shape without making a pool the default runtime model.
+keeping worker pools optional. The predecessor runtime had fan-out behavior tied
+to subagent and worker-pool assumptions; Rusty Crew should preserve the useful
+coordination shape without making a pool the default runtime model.
 
 ## Decision
 

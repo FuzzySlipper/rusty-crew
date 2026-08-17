@@ -7,7 +7,7 @@ Date: 2026-07-07
 
 The brain-island tool/profile/prompt cluster is intentionally TypeScript-heavy:
 it talks to Node APIs, browser automation, web providers, Markdown/YAML profile
-assets, pi-compatible tool wrappers, and prompt renderers. That is acceptable
+assets, tool wrappers, and prompt renderers. That is acceptable
 as execution and presentation code. The problem is when those wrappers also
 become durable policy owners for safety, selection, resource denial, telemetry
 schema, context strategy, or delegated-session invariants.

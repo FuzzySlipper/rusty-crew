@@ -42,7 +42,7 @@ TypeScript responsibilities:
 
 - maintain the canonical tool registry and inventory diagnostics;
 - load profile policy into requested toolsets/tools;
-- convert selected registry entries into concrete Pi tool implementations;
+- convert selected registry entries into concrete tool implementations;
 - filter concrete implementations by the Rust-projected `ToolProfile`;
 - refuse unavailable, duplicate, or not-requested implementations defensively;
 - expose model schemas only for selected callable tools.
@@ -76,6 +76,6 @@ directly in TypeScript.
 
 ## Consequences
 
-This avoids rebuilding pi-crew's worker-policy-first tool gate. Profiles and
+This avoids rebuilding a worker-policy-first tool gate. Profiles and
 session/resource constraints select tools; worker pools may later affect
 capacity but must not become the default authority for full or prime agents.

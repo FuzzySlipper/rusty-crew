@@ -6,7 +6,6 @@ Date: 2026-06-20
 
 Related docs:
 
-- `den-assignment-completion-evidence-loop-plan`
 - `den-work-ref-router-metadata-contracts`
 - `evidence-result-reference-policy`
 - `outbound-channel-projections`

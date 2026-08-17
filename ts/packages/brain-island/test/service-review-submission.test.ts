@@ -1676,6 +1676,49 @@ test("same task and SHA remain ambiguous when Den round identity differs", () =>
   assert.equal(selected.ambiguous, true);
 });
 
+test("trusted dispatch identity selects the exact rereview when task and SHA repeat", () => {
+  const sha = "d".repeat(40);
+  const oldReview = {
+    ...record("review-old", "6658", sha, "review_terminal"),
+    reviewRoundId: 4275,
+    dispatchMessageId: "review-message:review-old",
+  } as ReviewSubmissionRecord;
+  const currentReview = {
+    ...record("review-current", "6658", sha, "reviewer_dispatched"),
+    reviewRoundId: 4280,
+    dispatchMessageId: "review-message:review-current",
+  } as ReviewSubmissionRecord;
+
+  const selected = selectRoutedReviewRecord(
+    [oldReview, currentReview],
+    `review:6658:${sha}`,
+    { taskId: 6658, commitSha: sha },
+    "review-message:review-current",
+  );
+  assert.equal(selected.ambiguous, false);
+  assert.equal(selected.notFound, undefined);
+  assert.equal(selected.record?.submissionId, "review-current");
+});
+
+test("trusted dispatch identity fails closed when the explicit target disagrees", () => {
+  const sha = "e".repeat(40);
+  const review = {
+    ...record("review-one", "6659", sha, "reviewer_dispatched"),
+    reviewRoundId: 4281,
+    dispatchMessageId: "review-message:review-one",
+  } as ReviewSubmissionRecord;
+
+  const selected = selectRoutedReviewRecord(
+    [review],
+    `review:6659:${sha}`,
+    { taskId: 6660, commitSha: sha },
+    "review-message:review-one",
+  );
+  assert.equal(selected.record, undefined);
+  assert.equal(selected.ambiguous, false);
+  assert.equal(selected.notFound, true);
+});
+
 test("explicit review target cannot cross-select a different task or SHA", () => {
   const sha = "a".repeat(40);
   const review = record("review-one", "6600", sha, "reviewer_dispatched");
@@ -1722,6 +1765,40 @@ test("managed closeout uses the explicit target within a reused reviewer session
   assert.equal(result.submissionId, "review-second");
   assert.equal(result.taskId, 6601);
   assert.equal(result.commitSha, secondSha);
+  assert.equal(result.reasonCode, "review_reply_terminal");
+});
+
+test("managed closeout uses trusted dispatch identity across same-SHA rereview rounds", async () => {
+  const sha = "f".repeat(40);
+  const oldReview = {
+    ...record("review-old", "6602", sha, "reply_terminal"),
+    reviewRoundId: 4275,
+    dispatchMessageId: "review-message:review-old",
+  } as ReviewSubmissionRecord;
+  const currentReview = {
+    ...record("review-current", "6602", sha, "reply_terminal"),
+    reviewRoundId: 4280,
+    dispatchMessageId: "review-message:review-current",
+  } as ReviewSubmissionRecord;
+  const runtime = createServiceReviewSubmissionRuntime(() => ({
+    bridge: {
+      listReviewSubmissions: async () => [oldReview, currentReview],
+    } as never,
+    runtimeConfig: { sessions: [] } as never,
+    serviceConfig: { deploymentRole: "production" } as never,
+    now: () => "2026-08-05T00:00:00.000Z",
+    applyCoordinationDelivery: async (receipt) => receipt,
+  }));
+
+  const result = await runtime.complete({
+    verdict: "looks_good",
+    taskId: 6602,
+    commitSha: sha,
+    caller: { type: "review_submission", submissionId: "context-resolved" },
+    reviewerSessionId: "reviewer-session",
+    dispatchMessageId: "review-message:review-current",
+  });
+  assert.equal(result.submissionId, "review-current");
   assert.equal(result.reasonCode, "review_reply_terminal");
 });
 

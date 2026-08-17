@@ -758,6 +758,7 @@ async function completeReview(
     caller: AgentCoordinationCaller;
     reviewerSessionId: string;
     correlationId?: string;
+    dispatchMessageId?: string;
   },
 ): Promise<CompleteRoutedReviewToolReceipt> {
   const invalidFinding = input.newFindings?.find(
@@ -785,11 +786,21 @@ async function completeReview(
   });
   const selection =
     input.taskId === undefined
-      ? selectRoutedReviewRecord(records, input.correlationId)
-      : selectRoutedReviewRecord(records, input.correlationId, {
-          taskId: input.taskId,
-          commitSha: input.commitSha as string,
-        });
+      ? selectRoutedReviewRecord(
+          records,
+          input.correlationId,
+          undefined,
+          input.dispatchMessageId,
+        )
+      : selectRoutedReviewRecord(
+          records,
+          input.correlationId,
+          {
+            taskId: input.taskId,
+            commitSha: input.commitSha as string,
+          },
+          input.dispatchMessageId,
+        );
   const result = canonicalReviewResult(input);
   if (selection.notFound) {
     return {
@@ -887,12 +898,24 @@ export function selectRoutedReviewRecord(
     readonly taskId: number;
     readonly commitSha: string;
   },
+  dispatchMessageId?: string,
 ): {
   readonly record?: ReviewSubmissionRecord;
   readonly ambiguous: boolean;
   readonly notFound?: boolean;
 } {
   const eligible = records.filter(isRoutedReviewRecord);
+  if (dispatchMessageId !== undefined) {
+    const candidates = eligible.filter(
+      (record) =>
+        record.dispatchMessageId === dispatchMessageId &&
+        (explicitTarget === undefined ||
+          (record.taskId === String(explicitTarget.taskId) &&
+            record.commitSha.toLowerCase() ===
+              explicitTarget.commitSha.toLowerCase())),
+    );
+    return routedReviewSelection(candidates, candidates.length === 0);
+  }
   if (explicitTarget !== undefined) {
     const candidates = eligible.filter(
       (record) =>

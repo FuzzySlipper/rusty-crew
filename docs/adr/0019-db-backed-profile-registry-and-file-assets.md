@@ -16,7 +16,7 @@ profiles and profile directories with `profile.yaml`, `soul.md`, and
 such as brains, sessions, channel bindings, MCP bindings, and scheduled jobs.
 
 This worked well for bootstrapping because files are visible, editable,
-git-friendly, and easy to compare with pi-crew/Hermes examples. It is becoming
+git-friendly, and easy to compare with earlier runtime examples. It is becoming
 awkward for GUI-created profiles and runtime admin surfaces: creating a profile
 means writing profile files, mutating `service.json`, reloading config, and
 knowing which derived entries must be present.

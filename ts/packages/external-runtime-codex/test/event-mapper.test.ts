@@ -158,7 +158,7 @@ test("failed dynamic tool completion preserves a bounded readable result", () =>
           contentItems: [
             {
               type: "inputText",
-              text: `No managed review submission\u0000${"x".repeat(5_000)}`,
+              text: `No managed review submission\u0000${"x".repeat(70_000)}`,
             },
             { type: "inputImage", imageUrl: "data:image/png;base64,ignored" },
           ],
@@ -173,7 +173,7 @@ test("failed dynamic tool completion preserves a bounded readable result", () =>
   assert.equal(event.kind, "dynamic_tool_activity");
   assert.equal(event.payload.tool, "complete_routed_review");
   assert.equal(event.payload.success, false);
-  assert.equal(event.payload.text?.length, 4_096);
+  assert.equal(event.payload.text?.length, 65_536);
   assert.equal(event.payload.text?.includes("\u0000"), false);
   assert.match(event.payload.text ?? "", /^No managed review submission /);
   assert.match(event.payload.text ?? "", /\.\.\.\[truncated\]$/);
@@ -238,7 +238,7 @@ test("dynamic tool completion formats primary structured text and still bounds i
         type: "text",
         text: JSON.stringify({
           task: { id: 6961, title: "Remove PNG flipping" },
-          description: "x".repeat(5_000),
+          description: "x".repeat(70_000),
         }),
       },
     ],
@@ -269,7 +269,7 @@ test("dynamic tool completion formats primary structured text and still bounds i
 
   assert.match(event.payload.text ?? "", /^\{\n  "task":/);
   assert.doesNotMatch(event.payload.text ?? "", /structuredContent|details/);
-  assert.equal(event.payload.text?.length, 4_096);
+  assert.equal(event.payload.text?.length, 65_536);
   assert.match(event.payload.text ?? "", /\.\.\.\[truncated\]$/);
 });
 

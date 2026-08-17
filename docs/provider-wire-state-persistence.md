@@ -13,7 +13,7 @@ Related docs:
 
 ## Purpose
 
-Some non-pi brain modules need provider-specific state across wakes. Examples
+Some non-canonical brain modules need provider-specific state across wakes. Examples
 include OpenAI Responses replay metadata, `previous_response_id` chaining, or
 provider cache handles.
 

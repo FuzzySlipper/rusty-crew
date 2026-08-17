@@ -127,9 +127,9 @@ The catalog lives in a focused Rust brain/runtime or config crate, not in
 | `chat-completions` | chat completions | `default`, `roleplay_narrator` | Rust |
 | `openai-responses` | Responses | `replay`, `previous-response-chain` | Rust |
 
-`pi-agent`, `pi-agent-core`, `rust-pi-agent`, and `local` are rejected module
-ids. Profile and test fixtures use canonical `chat-completions`; no input
-canonicalization or alias fallback remains.
+Retired and test-only module ids are rejected. Profile and test fixtures use
+canonical `chat-completions`; no input canonicalization or alias fallback
+remains.
 
 The deterministic `local` brain is not a production catalog entry. Fake
 provider clients and deterministic brains belong in Rust unit tests, package
@@ -389,8 +389,8 @@ Use the SQLite debug service and Rusty View:
 Run the persistence-relevant registration/rebuild subset against the PostgreSQL
 service without using live service data as disposable test state.
 
-Task 5389's deterministic and live results are recorded in
-`docs/rust-brain-catalog-live-certification-5389.md`.
+Task 5389's deterministic and live results are superseded by the current
+Rust-authority certification record.
 
 ## Consequences
 

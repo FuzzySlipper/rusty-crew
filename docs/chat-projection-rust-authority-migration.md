@@ -10,7 +10,6 @@ Related docs:
 - `rusty-view-chat-api-contract`
 - `postgres-conversation-transcript-backend-slice`
 - `postgres-attachments-data-bank-backend-slice`
-- `[doc: rusty-crew/typescript-authority-refactor-catalog-2026-07-07]`
 
 ## Purpose
 
@@ -160,4 +159,3 @@ read model and mutation authority, TS-owned route/transport glue.
 Do not move SSE socket mechanics into Rust unless a later task proves it is
 needed. The immediate risk is not Node writing bytes to a response; it is TS
 deciding what the durable chat stream means.
-

@@ -129,7 +129,7 @@ export const CODEX_COORDINATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = [
         type: "function",
         name: "complete_routed_review",
         description:
-          "Complete the currently routed Den review with a structured verdict; Crew finalizes Den and sends one receipt-based reply. If several queued reviews share the reviewer session, include taskId and commitSha from the review envelope to explicitly select the target.",
+          "Complete the currently routed Den review with a structured verdict; Crew finalizes Den and sends one receipt-based reply. If several queued reviews share the reviewer session, include taskId and commitSha from the review envelope to validate the target. This is a Codex dynamic tool: exec-composition callers must emit the returned contentItems text, not look for an MCP content array.",
         inputSchema: {
           type: "object",
           properties: {

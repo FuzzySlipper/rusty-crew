@@ -124,15 +124,15 @@ projection populated from `tool_call_started` and `tool_call_finished` brain
 events. If a new tool needs richer audit fields, add a typed contract rather
 than hiding data in free-form text output.
 
-## Adapting Pi-Crew Tools
+## Adapting Predecessor Tools
 
-Pi-crew tools are useful sources, but port by responsibility:
+Predecessor tools are useful sources, but port by responsibility:
 
 - Keep model-callable execution in TypeScript.
 - Keep Rust-owned coordination as `BrainAction`s and `BrainEvent`s.
 - Remove worker-pool assumptions unless the feature is actually worker-pool
   specific.
-- Replace Hermes/profile-specific path guards with Rusty Crew session
+- Replace external-profile-specific path guards with Rusty Crew session
   resource limits.
 - Preserve useful safety behavior such as bounded workdirs, syntax rollback,
   stable details objects, and unified diff output.

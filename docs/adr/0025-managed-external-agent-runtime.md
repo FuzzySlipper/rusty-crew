@@ -20,7 +20,7 @@ Related evidence:
 Rusty Crew has direct brain modules whose provider loops implement the neutral
 wake contract. Rust freezes body state, starts a wake, receives streamed brain
 events, and accepts one terminal action batch or failure. This remains the right
-contract for Rust-owned pi-agent and OpenAI Responses loops.
+contract for Rust-owned Chat Completions and OpenAI Responses loops.
 
 Codex app-server is a complete agent runtime above that boundary. It owns native
 threads, turns, provider calls, command and file execution, MCP, skills, hooks,
@@ -631,7 +631,8 @@ compatibility-policy authority.
 
 ## Existing Direct Brains
 
-Existing pi-agent and OpenAI Responses modules remain direct brains and remain
+Existing Chat Completions and OpenAI Responses modules remain direct brains and
+remain
 the default for profiles that select them. No existing profile silently switches
 to Codex. External runtime binding is explicit and exclusive with direct-brain
 execution for a given session.

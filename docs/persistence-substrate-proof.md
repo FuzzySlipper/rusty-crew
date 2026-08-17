@@ -38,7 +38,7 @@ The test uses real engine and store APIs to:
 
 ## Boundary
 
-The proof intentionally does not import pi-crew or Hermes data. It proves that
+The proof intentionally does not import external legacy data. It proves that
 Rusty Crew's own runtime state can survive restart and remain queryable through
 typed APIs. Migration tooling can build on this later through the import
 metadata from task 2878.

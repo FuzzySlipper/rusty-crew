@@ -265,6 +265,6 @@ tool output, secrets, or executable commands.
 - Do not make Den Channels the Rusty Crew bus.
 - Do not make MCP a separate global tool registry.
 - Do not port Telegram before the normalized channel contract is stable.
-- Do not expose old pi-crew centralized worker-pool adapter assumptions as the
-  default full/prime-agent model.
+- Do not expose retired centralized worker-pool assumptions as the default
+  full/prime-agent model.
 - Do not store secrets in runtime binding records.

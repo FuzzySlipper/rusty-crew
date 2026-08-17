@@ -8,7 +8,6 @@ Related docs:
 
 - `den-work-ref-router-metadata-contracts`
 - `multi-agent-adapter-architecture`
-- `den-assignment-completion-evidence-loop-plan`
 
 ## Purpose
 

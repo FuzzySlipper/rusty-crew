@@ -62,5 +62,5 @@ production wake loop must use projected body state and registered profile data.
 
 This preserves deterministic state ownership while keeping prompt and role
 composition close to the brain/profile surface. The first implementation can be
-minimal, but it must keep the owner lines visible so later pi-profile assembly
+minimal, but it must keep the owner lines visible so later profile assembly
 does not require reshaping the wake transport.

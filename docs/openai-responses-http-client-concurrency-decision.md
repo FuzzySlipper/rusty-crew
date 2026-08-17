@@ -32,7 +32,7 @@ host assumption.
 
 The expected near-term Rust responses brain concurrency is low:
 
-- Most active brains still use the TypeScript pi-agent path.
+- Most active brains still use the TypeScript host path.
 - Rust responses is currently a targeted provider-loop module under evaluation.
 - Wake execution is per-session guarded by `inFlightWakes`.
 - Phase-1 smokes only require one or a few concurrent direct Rust wakes.

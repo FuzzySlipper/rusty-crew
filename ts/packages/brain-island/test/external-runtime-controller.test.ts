@@ -3772,6 +3772,7 @@ test("durable thread reconstruction folds legacy sparse completions across event
   const fixture = await externalCreationFixture(false);
   let reloaded: ServiceExternalRuntimeController | undefined;
   try {
+    const longRoutedBody = `exercise durable item folding\n${"message detail ".repeat(1_200)}`;
     const created = await fixture.controller.createAgentSession({
       idempotencyKey: "durable-item-fold-session",
       runtimeId: fixture.runtimeId,
@@ -3786,7 +3787,7 @@ test("durable thread reconstruction folds legacy sparse completions across event
       messageId: "durable-item-fold-message",
       toAddress: created.creation.session.agentId,
       inputKind: "operator",
-      body: "exercise durable item folding",
+      body: longRoutedBody,
       requireWake: true,
       createdAt: new Date().toISOString(),
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -3942,6 +3943,8 @@ test("durable thread reconstruction folds legacy sparse completions across event
         "final-after-command",
       ],
     );
+    assert.equal(items[0]?.text, longRoutedBody);
+    assert.notEqual(items[0]?.truncated, true);
     assert.equal(
       items.some((item) => item.kind === "item"),
       false,

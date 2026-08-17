@@ -19,14 +19,13 @@ real work directly, while delegating bounded slices to subagents for context,
 token, or parallelism reasons. It also warns that worker pools are a capability,
 not the organizing principle.
 
-The parity audit in Den document
-`pi-crew-vs-rusty-crew-parity-2026-06-19` is useful as feature inventory, but it
-was written before later Rusty Crew wake-path work landed. Treat its worker and
-delegation analysis as grounding material, not as binding design authority.
+An earlier parity audit was useful as a feature inventory, but it was written
+before later Rusty Crew wake-path work landed. Treat its worker and delegation
+analysis as grounding material, not as binding design authority.
 
-Pi-crew began with a strong worker-pool/orchestrator center of gravity and later
-had to loosen that coupling to support full agents properly. Rusty Crew should
-avoid rebuilding that pressure into the architecture.
+The predecessor runtime began with a strong worker-pool/orchestrator center of
+gravity and later had to loosen that coupling to support full agents properly.
+Rusty Crew should avoid rebuilding that pressure into the architecture.
 
 ## Decision
 
@@ -54,7 +53,7 @@ delegated sessions must not depend on a pool existing.
 
 ## Porting Rules
 
-Port from pi-crew by responsibility, not by file shape.
+Port predecessor behavior by responsibility, not by file shape.
 
 First-class now:
 

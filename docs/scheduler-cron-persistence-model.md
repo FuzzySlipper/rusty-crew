@@ -11,7 +11,7 @@ runtime work. It should let the service claim due jobs, request Rust-owned
 wakes or internal events, survive restart without duplicate runs, and expose
 bounded diagnostics.
 
-This design does not port pi-crew cron scripts directly. Script execution is
+This design does not port predecessor runtime cron scripts directly. Script execution is
 not the default first implementation.
 
 ## Ownership

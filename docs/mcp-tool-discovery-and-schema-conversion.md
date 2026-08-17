@@ -27,7 +27,7 @@ The module exports:
 - `discoverMcpToolCandidates`
 - `convertMcpToolsToCandidates`
 - `normalizeMcpInputSchema`
-- `createMcpPiAgentTool`
+- the MCP tool factory
 
 ## Discovery Shape
 
@@ -78,15 +78,15 @@ converter preserves common JSON Schema fields such as:
 - anyOf/oneOf/allOf;
 - `$defs` and `definitions`.
 
-Non-object root schemas are wrapped as `{ value: ... }`, because pi-compatible
-agent tools expect object-style parameter payloads. Boolean `true` schemas
+Non-object root schemas are wrapped as `{ value: ... }`, because the tool
+surface expects object-style parameter payloads. Boolean `true` schemas
 become empty objects. Boolean `false` schemas are sanitized with a warning.
 Nullable type arrays are converted to a non-null type plus `nullable: true`.
 
-## Pi-Compatible Tool Shape
+## Tool Surface Shape
 
-`createMcpPiAgentTool` returns the same runtime shape used by current
-`@earendil-works/pi-agent-core` tools:
+The MCP tool factory returns the runtime shape used by the current tool
+surface:
 
 - `name`;
 - `description`;
@@ -95,10 +95,9 @@ Nullable type arrays are converted to a non-null type plus `nullable: true`.
 - `executionMode`;
 - `execute(...)`.
 
-The adapter uses a local structural mirror rather than importing the upstream
-type directly. This avoids pulling unrelated provider SDK type dependencies
-into `adapter-mcp` while preserving runtime compatibility with the pi tool
-shape.
+The adapter uses a local structural mirror rather than importing a provider SDK
+type directly. This avoids pulling unrelated provider dependencies into
+`adapter-mcp` while keeping the boundary explicit.
 
 ## Deferred To Later Tasks
 
@@ -122,4 +121,4 @@ Those are owned by tasks `2939`, `2940`, and `2941`.
 - sanitation warnings for false schemas;
 - duplicate source tool diagnostics;
 - destructive annotation mapping to `external_write`;
-- pi-compatible tool execution through a surface executor.
+- tool execution through a surface executor.

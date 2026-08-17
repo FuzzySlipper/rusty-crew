@@ -41,6 +41,8 @@ export interface CodexCoordinationBinding {
   readonly reviewerSessionId?: string;
   /** Derived from Rust-owned active-turn provenance; never model supplied. */
   readonly reviewCorrelationId?: string;
+  /** Derived from Rust-owned active-turn provenance; never model supplied. */
+  readonly reviewDispatchMessageId?: string;
 }
 
 export interface CodexCoordinationPort {
@@ -73,6 +75,7 @@ export async function resolveCodexCoordinationToolCall(input: {
       caller: import("@rusty-crew/contracts").AgentCoordinationCaller;
       reviewerSessionId: string;
       correlationId?: string;
+      dispatchMessageId?: string;
     },
   ) => Promise<CompleteRoutedReviewToolReceipt>;
   readonly now?: () => Date;
@@ -144,6 +147,9 @@ export async function resolveCodexCoordinationToolCall(input: {
       ...(input.binding.reviewCorrelationId === undefined
         ? {}
         : { correlationId: input.binding.reviewCorrelationId }),
+      ...(input.binding.reviewDispatchMessageId === undefined
+        ? {}
+        : { dispatchMessageId: input.binding.reviewDispatchMessageId }),
     });
     return receipt.ok ? succeeded(receipt.summary) : failed(receipt.summary);
   }

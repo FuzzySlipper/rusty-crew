@@ -29,10 +29,8 @@ by landed work; see `docs/historical/README.md`.
 
 Production brain loops are Rust brain modules behind the neutral
 wake/stream/action/provider-state contract. Chat-completions providers use the
-canonical `chat-completions` brain. The retired `pi-agent` identity and the old
-`@earendil-works/pi-*` packages are not accepted production paths. References
-in these docs to older local research checkouts, package locations, or
-version-skewed comparisons are historical audit context only.
+canonical `chat-completions` brain, and no retired identity or compatibility
+fallback is accepted as a production path.
 
 ## Start here
 
@@ -72,8 +70,7 @@ Operator setup references:
    Den-owned planning/product data plus observability; and tool availability is
    profile-based rather than gated by a `WorkerPolicy` allow/deny model.
 
-1. **`adr/` (both repo-root `adr/0001-*` and `docs/adr/0002`–`0026`)** — the
-   decision trail. Notable recent decisions:
+1. **`docs/adr/`** — the decision trail. Notable recent decisions:
    - `0026-durable-logical-turn-continuation.md` — stable logical-turn identity,
      immutable Rust-owned checkpoints, fair execution epochs, restart
      hydration, effect deduplication, attention states, and explicit
@@ -82,9 +79,7 @@ Operator setup references:
      production built-in catalog, both provider loops, and run policy;
      TypeScript supplies narrow tool, client, and projection host adapters.
      Live cutover evidence is in
-     `rust-brain-catalog-live-certification-5389.md`.
-   - `0021-first-class-brain-modules.md` — historical neutral-contract decision,
-     superseded by ADR 0023 where it made TypeScript brains a permanent peer.
+     `live-chat-rust-authority-certification-5387.md`.
    - `0022-crew-owned-service-storage.md` — Rusty Crew owns Crew service data
      (coordination, profiles, providers, transcripts, memory, lore, module
      data, telemetry, diagnostics), partitioned by durable concern rather than
@@ -103,8 +98,6 @@ Operator setup references:
    - `service-composition-decomposition-plan.md` — current migration path for
      moving service composition out of the oversized brain-island service app
      without breaking the working service.
-   - `rust-pi-agent-brain-port-contract.md` — historical parity matrix for the
-     Rust port that is now named the Chat Completions brain.
 
 2. **Two brain surfaces, one contract.** Rust coordination wakes a brain with a
    frozen `BodyState` snapshot; brain implementations emit
@@ -121,20 +114,12 @@ Operator setup references:
      MCP clients, platform adapters, and execution of Rust-issued roleplay
      narrator tool/provider directives.
 
-3. **Historical audit context (read-only, not binding).** The `pi-crew-*` and
-   `pi-agent-rust-port-inspiration.md` / `rust-llm-ecosystem-research.md` docs
-   record the parity and dependency research that motivated the rewrite. They
-   are kept as evidence of *why* the boundary looks the way it does. They are
-   not the current PRD: where they describe a TS-only LLM boundary, a
-   `spawn_worker`/`prompt_worker` TS-called FFI verb, or a `WorkerPolicy`
-   allow/deny tool gate, ADR 0021 and the unified architecture supersede them.
-
 ## Repository structure
 
 ```text
 /rusty-crew
   /adr
-    0001-current-pi-package-source.md
+    # current ADRs live under docs/adr
   /crates
     /core
       /core-protocol      # transport-free Rust protocol types
@@ -164,7 +149,7 @@ Operator setup references:
     /packages
       /contracts          # TypeScript contracts until codegen owns this
       /native-bridge      # native addon loader and TS bridge facade
-      /brain-island       # pi Agent brain boundary and tool/profile assembly
+      /brain-island       # TypeScript host, tool, and profile assembly
       /service-host       # service process composition root
       /adapter-den        # Den data + observability adapter
       /adapter-mcp        # MCP client adapter
@@ -209,9 +194,8 @@ Crate / package roles:
   active unified manifest scaffold.
 - `ts/packages/contracts` — generated-contract placeholder.
 - `ts/packages/native-bridge` — TS bridge facade and native addon loader.
-- `ts/packages/brain-island` — current pi package brain boundary, tool/profile
-  assembly, and adapter-neutral service ports; also hosts the roleplay narrator
-  brain.
+- `ts/packages/brain-island` — TypeScript host, tool/profile assembly, and
+  adapter-neutral service ports; it also hosts roleplay narrator adapters.
 - `ts/packages/service-host` — service process composition root, concrete
   adapter injection, startup entrypoint, host-level CORS, browser shell/static
   site mounting, storage boot preflight, configured background-loop timer
@@ -261,8 +245,6 @@ lifecycle, action validation, and packet routing.
 
 The current decision is recorded in
 `adr/0023-rust-brain-catalog-and-host-capabilities.md`.
-The pi package source decision is in `adr/0001-current-pi-package-source.md`
-(repo-root `adr/`) and `pi-package-source-lock.md`.
 
 ## Decisions landed (formerly "open-question milestones")
 
@@ -271,7 +253,7 @@ the real path rather than detached mock spikes. The decision trail:
 
 - Rust substrate routing, body projection, brain action validation, and
   session creation — landed in `core-engine` / `core-body` / `core-session`.
-- TS brain island wired to current pi packages — `ts/packages/brain-island`.
+- TypeScript host capabilities wired through `ts/packages/brain-island`.
 - Native bridge around a real brain wake path —
   `crates/bridge/core-bridge-node`, measured in `ffi-throughput-napi.md`
   (baseline in `ffi-throughput-pre-napi.md`), decision in
@@ -292,19 +274,17 @@ the real path rather than detached mock spikes. The decision trail:
   `storage-scope-governance.md` and `storage-repository-split-map.md` enforced
   by `tools/check-storage-scope.mjs`.
 
-The 2824 architecture closeout index lives in `2824-architecture-decision-index.md`;
-the 2825 stub/fake audit lives in `2825-stub-fake-audit.md`; stub/fake/placeholder
+The 2825 stub/fake audit lives in `2825-stub-fake-audit.md`; stub/fake/placeholder
 policy lives in `stubs-fakes-placeholders-policy.md`, `adr/0015-test-seams-and-public-exports.md`,
-and `adr/0016-runtime-clock-policy.md`. The parity-audit grounding snapshot is
-`parity-open-questions-grounding.md` (a dated snapshot; re-check against code
-before relying on its findings). The current maintenance/durability review
-snapshot is `architecture-review-2026-07-06.md` (dated; code wins on conflict).
+and `adr/0016-runtime-clock-policy.md`. The current maintenance/durability
+review snapshot is `architecture-review-2026-07-06.md` (dated; code wins on
+conflict).
 
 ## What this service is *not*
 
-- **Not a fork of pi-crew.** Rusty Crew is its own runtime with explicit
-  migration/parity lessons from pi-crew and Hermes. Do not copy pi-crew
-  worker-pool assumptions or manually mirrored Den tools as the default path.
+- **Not a legacy compatibility host.** Rusty Crew is its own runtime. Do not
+  copy retired worker-pool assumptions or manually mirrored Den tools as the
+  default path.
 - **Not a generic framework.** Rusty Crew owns a concrete service runtime:
   coordination, sessions, profiles, model providers, transcripts, memory,
   lore, local tools, adapters, and diagnostics. It should stay modular without

@@ -11,9 +11,9 @@ a full agent that owns the main work context, performs substantive work itself,
 and delegates bounded slices to subagents when that saves context, reduces token
 cost, or isolates a narrow task.
 
-Pi-crew started with worker pools and orchestrators near the center of the
-runtime model. Rusty Crew should keep the useful capacity concepts from that
-history without making every delegation path depend on a pool.
+The predecessor runtime started with worker pools and orchestrators near the
+center of its model. Rusty Crew should keep the useful capacity concepts from
+that history without making every delegation path depend on a pool.
 
 The project glossary defines a worker pool as available worker capacity that can
 be leased or assigned. It also defines delegated sessions as worker-like child
@@ -41,7 +41,8 @@ system.
 
 ## Useful Pool Concepts to Keep
 
-The following pi-crew concepts are still useful if introduced deliberately:
+The following predecessor-runtime concepts are still useful if introduced
+deliberately:
 
 - availability: whether a pool member can accept work;
 - leases: bounded claims on capacity with explicit release/expiry;
@@ -90,8 +91,8 @@ Future work should be split only when a concrete use case needs pool capacity:
 - add concurrency and capability matching tests;
 - add Den projection and operator controls for status, quarantine, drain, and
   release;
-- add migration tooling if existing pi-crew/Hermes agents move onto pooled
-  capacity.
+- add explicit import tooling only if a future external agent source needs to
+  move onto pooled capacity.
 
 ## Consequences
 
