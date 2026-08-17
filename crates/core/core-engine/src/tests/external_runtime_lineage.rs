@@ -10,6 +10,7 @@ fn external_binding_lineage_is_rust_validated_immutable_idempotent_and_restartab
     for (session_id, agent_id) in [
         ("codex-session", "codex-agent"),
         ("successor-session", "successor-agent"),
+        ("referenced-successor-session", "referenced-successor-agent"),
     ] {
         engine
             .create_session(session_config(
@@ -117,6 +118,53 @@ fn external_binding_lineage_is_rust_validated_immutable_idempotent_and_restartab
         .unwrap();
     assert_eq!(replay, established, "exact stale replay is idempotent");
 
+    let mut refreshed = established.clone();
+    refreshed.native_thread_id = Some("native-thread-9".into());
+    refreshed.updated_at = "2026-06-19T00:00:02Z".into();
+    let refreshed = engine
+        .bind_external_agent(&refreshed, Some(established.revision))
+        .unwrap();
+    assert_eq!(
+        refreshed.native_thread_id.as_deref(),
+        Some("native-thread-9"),
+        "a lineaged binding may replace its current external thread"
+    );
+
+    let mut referenced_successor_seed = external_runtime::binding();
+    referenced_successor_seed.binding_id = ExternalBindingId::new("referenced-successor-binding");
+    referenced_successor_seed.session_id = Some(SessionId::new("referenced-successor-session"));
+    referenced_successor_seed.agent_id = Some(AgentId::new("referenced-successor-agent"));
+    referenced_successor_seed.native_thread_id = Some("native-thread-10".into());
+    let referenced_successor_seed = engine
+        .bind_external_agent(&referenced_successor_seed, None)
+        .unwrap();
+    let mut referenced_successor = referenced_successor_seed.clone();
+    referenced_successor.lineage = Some(ExternalAgentBindingLineage {
+        predecessor_binding_id: refreshed.binding_id.clone(),
+        predecessor_session_id: refreshed.session_id.clone().unwrap(),
+        predecessor_native_thread_id: refreshed.native_thread_id.clone().unwrap(),
+        transition_id: "transition-2".into(),
+        reason_code: "explicit_new".into(),
+        created_at: "2026-06-19T00:00:02Z".into(),
+    });
+    engine
+        .bind_external_agent(
+            &referenced_successor,
+            Some(referenced_successor_seed.revision),
+        )
+        .unwrap();
+
+    let mut redirected_referenced_predecessor = refreshed.clone();
+    redirected_referenced_predecessor.native_thread_id = Some("native-thread-11".into());
+    assert_eq!(
+        engine
+            .bind_external_agent(&redirected_referenced_predecessor, Some(refreshed.revision),)
+            .unwrap_err()
+            .kind,
+        CoreErrorKind::ActionRejected,
+        "a lineaged binding referenced by a successor cannot replace its thread"
+    );
+
     let mut redirected_predecessor = predecessor.clone();
     redirected_predecessor.native_thread_id = Some("redirected-thread".into());
     assert_eq!(
@@ -164,5 +212,14 @@ fn external_binding_lineage_is_rust_validated_immutable_idempotent_and_restartab
             .unwrap()
             .lineage,
         Some(authoritative_lineage)
+    );
+    assert_eq!(
+        restarted
+            .get_external_binding(&refreshed.binding_id)
+            .unwrap()
+            .unwrap()
+            .native_thread_id
+            .as_deref(),
+        Some("native-thread-9")
     );
 }

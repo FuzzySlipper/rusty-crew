@@ -725,8 +725,7 @@ pub fn validate_external_agent_binding_transition(
             && (current.runtime_id != candidate.runtime_id
                 || current.session_id != candidate.session_id
                 || current.agent_id != candidate.agent_id
-                || current.purpose != candidate.purpose
-                || current.native_thread_id != candidate.native_thread_id))
+                || current.purpose != candidate.purpose))
             || (referenced_as_predecessor
                 && (current.runtime_id != candidate.runtime_id
                     || current.session_id != candidate.session_id
