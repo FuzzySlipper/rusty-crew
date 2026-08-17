@@ -2659,7 +2659,9 @@ test("external commands use native catalogs and settings without creating turns"
     );
     assert.ok(
       independentlyVisible.items.some(
-        (item) => item.threadId === replacement.nativeThreadId,
+        (item) =>
+          item.threadId === replacement.nativeThreadId &&
+          item.nativeMaterialized,
       ),
     );
     const archivedVisible = await fixture.controller.listThreads(

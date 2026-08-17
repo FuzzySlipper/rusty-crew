@@ -629,22 +629,44 @@ export class ServiceExternalRuntimeController {
         ),
       );
     }
-    // Binding-backed empty threads are absent from Codex's native list. Overlay
-    // them only on the first page so opaque native cursors cannot repeat the
-    // same synthetic row on every subsequent page.
+    // Binding-backed empty threads can be absent from Codex's native list even
+    // though their exact thread identity remains readable. Recover those
+    // threads directly before falling back to a synthetic recovery row. Do
+    // this only on the first page so opaque native cursors cannot repeat the
+    // same overlay on every subsequent page.
     if (input.cursor == null) {
       for (const binding of bindingsByThread.values()) {
+        const nativeThreadId = binding.nativeThreadId;
+        if (typeof nativeThreadId !== "string") continue;
         if (
-          nativeThreadIds.has(binding.nativeThreadId ?? "") ||
+          nativeThreadIds.has(nativeThreadId) ||
           (input.archived === true
             ? binding.status !== "archived"
             : binding.status === "archived")
         ) {
           continue;
         }
-        items.push(
-          this.#projectUnmaterializedBindingThread(controlled, binding),
-        );
+        try {
+          const recovered = await controlled.driver.threadRead({
+            threadId: nativeThreadId,
+            includeTurns: false,
+          });
+          items.push(
+            await this.#projectExternalThread(
+              controlled,
+              {
+                ...requireNativeRecord(recovered.thread, "thread"),
+                turns: [],
+              },
+              input.archived === true,
+              binding,
+            ),
+          );
+        } catch {
+          items.push(
+            this.#projectUnmaterializedBindingThread(controlled, binding),
+          );
+        }
       }
     }
     return {
