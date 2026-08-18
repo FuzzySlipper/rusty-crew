@@ -1308,6 +1308,15 @@ function gatePendingRecord(): ReviewSubmissionRecord {
 function gateReconciliationContext(
   gate: Record<string, unknown>,
   transitions: unknown[],
+  options: {
+    readonly bypass?: {
+      readonly enabled: true;
+      readonly reason: string;
+      readonly configRevision: string;
+      readonly deploymentRole: "production" | "debug";
+    };
+    readonly denCalls?: string[];
+  } = {},
 ) {
   const pending = gatePendingRecord();
   return {
@@ -1328,10 +1337,14 @@ function gateReconciliationContext(
         },
       ],
       mcpServers: [],
+      ...(options.bypass === undefined
+        ? {}
+        : { reviewGithubGateBypass: options.bypass }),
     } as never,
     serviceConfig: reviewServiceConfig(),
     now: () => "2026-08-05T00:01:00.000Z",
     callDenTool: async (_binding: unknown, toolName: string) => {
+      options.denCalls?.push(toolName);
       if (toolName === "list_review_rounds") return { items: [] };
       if (toolName === "get_task") {
         return {
@@ -1556,41 +1569,34 @@ test("managed gate reconciliation leaves a pending exact-SHA gate untouched", as
   assert.deepEqual(transitions, []);
 });
 
-test("enabled operator bypass advances a pending gate without calling Den", async () => {
+test("enabled operator bypass advances a gate only after Den confirms it is pending", async () => {
   const pending = gatePendingRecord();
   const transitions: Array<Record<string, unknown>> = [];
-  await reconcileReviewSubmissions({
-    bridge: {
-      listReviewSubmissions: async () => [pending],
-      transitionReviewSubmission: async (request: Record<string, unknown>) => {
-        transitions.push(request);
-        return {
-          ...pending,
-          phase: "reviewer_dispatch_pending",
-          gateStatus: "passed",
-          terminalReason: "operator_bypass_github_gate",
-          revision: pending.revision + 1,
-        } as ReviewSubmissionRecord;
-      },
-    } as never,
-    runtimeConfig: {
-      sessions: [],
-      mcpBindings: [],
-      mcpServers: [],
-      reviewGithubGateBypass: {
+  const denCalls: string[] = [];
+  const context = gateReconciliationContext(
+    {
+      id: pending.gateId,
+      project_id: pending.projectId,
+      task_id: Number(pending.taskId),
+      commit_sha: pending.commitSha,
+      status: "pending",
+    },
+    transitions,
+    {
+      bypass: {
         enabled: true,
         reason: "GitHub Actions unavailable",
         configRevision: "bypass-config-1",
         deploymentRole: "production",
       },
-    } as never,
-    serviceConfig: reviewServiceConfig(),
-    now: () => "2026-08-18T05:10:00.000Z",
-    callDenTool: async () => {
-      assert.fail("bypassing an existing pending gate must not call Den");
+      denCalls,
     },
-    applyCoordinationDelivery: async (receipt: never) => receipt,
+  );
+  await reconcileReviewSubmissions({
+    ...context,
+    now: () => "2026-08-18T05:10:00.000Z",
   });
+  assert.ok(denCalls.includes("get_github_check_gate"));
   assert.deepEqual(transitions, [
     {
       submissionId: pending.submissionId,
@@ -1604,6 +1610,110 @@ test("enabled operator bypass advances a pending gate without calling Den", asyn
       now: "2026-08-18T05:10:00.000Z",
     },
   ]);
+});
+
+test("enabled operator bypass preserves an authoritative failed gate", async () => {
+  const pending = gatePendingRecord();
+  const transitions: Array<Record<string, unknown>> = [];
+  await reconcileReviewSubmissions(
+    gateReconciliationContext(
+      {
+        id: pending.gateId,
+        project_id: pending.projectId,
+        task_id: Number(pending.taskId),
+        commit_sha: pending.commitSha,
+        status: "failed",
+        terminal_reason: "checks_failed",
+      },
+      transitions,
+      {
+        bypass: {
+          enabled: true,
+          reason: "GitHub Actions unavailable",
+          configRevision: "bypass-config-1",
+          deploymentRole: "production",
+        },
+      },
+    ),
+  );
+  assert.deepEqual(transitions[0], {
+    submissionId: pending.submissionId,
+    expectedRevision: pending.revision,
+    transition: {
+      type: "gate_terminal",
+      gateStatus: "failed",
+      terminalReason: "checks_failed",
+    },
+    now: "2026-08-05T00:01:00.000Z",
+  });
+});
+
+test("reviewer dispatch identifies operator bypass and its durable evidence", async () => {
+  const pending = {
+    ...gatePendingRecord(),
+    phase: "reviewer_dispatch_pending" as const,
+    gateStatus: "passed",
+    terminalReason: "operator_bypass_github_gate",
+    gateBypassEvidence: {
+      reason: "GitHub Actions allowance exhausted",
+      configRevision: "bypass-config-7",
+      deploymentRole: "production" as const,
+      bypassedAt: "2026-08-18T05:10:00.000Z",
+    },
+  } as ReviewSubmissionRecord;
+  let body = "";
+  await reconcileReviewSubmissions({
+    bridge: {
+      listReviewSubmissions: async () => [pending],
+      transitionReviewSubmission: async () => ({
+        ...pending,
+        phase: "reviewer_dispatched",
+        revision: pending.revision + 1,
+      }),
+      resolveAgentAddress: async () => ({
+        address: "@reviewer",
+        routable: true,
+        route: { revision: 11 },
+        resolvedTarget: {
+          bindingRevision: 4,
+          sessionId: "reviewer-session",
+        },
+      }),
+      getAgentMessageDelivery: async () => undefined,
+      deliverAgentMessage: async (request: {
+        body: string;
+        messageId: string;
+        deliveryId: string;
+      }) => {
+        body = request.body;
+        return {
+          status: "accepted",
+          request: { ...request, toSessionId: "reviewer-session" },
+        };
+      },
+    } as never,
+    runtimeConfig: { sessions: [], mcpBindings: [], mcpServers: [] } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-18T05:11:00.000Z",
+    callDenTool: async (_binding: unknown, toolName: string) => {
+      if (toolName === "list_review_rounds") return { items: [] };
+      if (toolName === "get_task") {
+        return {
+          id: Number(pending.taskId),
+          project_id: pending.projectId,
+          status: "in_progress",
+        };
+      }
+      assert.fail(`unexpected Den tool ${toolName}`);
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  });
+  assert.match(body, /Required GitHub checks: \["Verify Offline"\]/);
+  assert.match(body, /operator bypass, not a genuine passing check result/);
+  assert.match(body, /GitHub Actions allowance exhausted/);
+  assert.match(body, /config_revision="bypass-config-7"/);
+  assert.match(body, /deployment_role=production/);
+  assert.match(body, /bypassed_at=2026-08-18T05:10:00.000Z/);
 });
 
 test("new managed submission preserves checks but skips GitHub after Den handoff", async () => {

@@ -176,7 +176,10 @@ new submissions to advance after their Den handoff without waiting for GitHub.
 Each durable submission preserves its requested checks and records
 `gateStatus=passed`, `terminalReason=operator_bypass_github_gate`, the operator
 reason, policy revision, deployment role, and timestamp. Existing
-`gate_failed` submissions remain failures.
+`gate_failed` submissions remain failures. For an already-registered gate,
+Crew first reads the authoritative Den gate and bypasses only when it still
+reports `pending`; authoritative `passed`, `failed`, `timed_out`, and
+`superseded` outcomes are preserved.
 
 Disable the incident policy with another revision-guarded PATCH using
 `"enabled":false`. The default for absent configuration is disabled. This

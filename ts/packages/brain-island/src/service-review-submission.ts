@@ -611,8 +611,7 @@ export async function reconcileReviewSubmissions(
   for (const pendingRecord of pending) {
     if (
       githubGateBypassEnabled(context) &&
-      (pendingRecord.phase === "den_handoff_recorded" ||
-        pendingRecord.phase === "gate_pending")
+      pendingRecord.phase === "den_handoff_recorded"
     ) {
       try {
         await bypassGithubGate(context, pendingRecord);
@@ -637,7 +636,10 @@ export async function reconcileReviewSubmissions(
       await advanceDenHandoff(context, record);
     } else if (record.phase === "gate_failed") {
       await settleFailedGate(context, record);
-    } else if (record.phase === "gate_pending" && retryDue(record)) {
+    } else if (
+      record.phase === "gate_pending" &&
+      (githubGateBypassEnabled(context) || retryDue(record))
+    ) {
       await reconcilePendingGate(context, record);
     } else if (record.phase === "reviewer_dispatch_pending") {
       await dispatchReviewer(context, record);
@@ -1779,7 +1781,12 @@ async function reconcilePendingGate(
       commit_sha: record.commitSha,
     });
     const state = existingGateState(gate, record);
-    if (state.status === "pending") return;
+    if (state.status === "pending") {
+      if (githubGateBypassEnabled(context)) {
+        await bypassGithubGate(context, record);
+      }
+      return;
+    }
     await context.bridge.transitionReviewSubmission({
       submissionId: record.submissionId,
       expectedRevision: record.revision,
@@ -2337,6 +2344,7 @@ async function recordAdapterFailure(
 }
 
 function reviewerRequestBody(record: ReviewSubmissionRecord): string {
+  const gateContext = reviewerGateContext(record);
   return [
     `Rusty Crew managed review submission: ${record.submissionId}.`,
     `Review Den task #${record.taskId} at exact SHA ${record.commitSha}.`,
@@ -2344,6 +2352,7 @@ function reviewerRequestBody(record: ReviewSubmissionRecord): string {
     `Repository: ${record.repository}`,
     `Ref: ${record.gitRef}`,
     `Review round: ${record.reviewRoundId ?? "unknown"}`,
+    ...gateContext,
     `If this reviewer session has multiple queued reviews, call complete_routed_review with taskId ${record.taskId} and commitSha ${record.commitSha} to select this review explicitly.`,
     "If complete_routed_review rejects local validation and explicitly says that no review result was persisted, correct the structured input and call it again. Do not retry after persistence, a Den request, or an ambiguous completion receipt.",
     "",
@@ -2353,6 +2362,30 @@ function reviewerRequestBody(record: ReviewSubmissionRecord): string {
       ? "Return findings and the verdict once through complete_routed_review. Crew owns Den finalization. This was submitted by an external CLI; do not attempt a requester reply."
       : "Return findings and the verdict once through complete_routed_review. Crew owns Den finalization and sends the one receipt-based reply to the requester.",
   ].join("\n");
+}
+
+function reviewerGateContext(record: ReviewSubmissionRecord): string[] {
+  const requiredChecks = JSON.stringify(record.requiredChecks);
+  if (record.terminalReason !== "operator_bypass_github_gate") {
+    return [
+      `Required GitHub checks: ${requiredChecks}`,
+      `GitHub gate outcome: ${record.terminalReason ?? record.gateStatus ?? "unknown"}.`,
+    ];
+  }
+
+  const evidence = record.gateBypassEvidence;
+  if (evidence === undefined || evidence === null) {
+    return [
+      `Required GitHub checks: ${requiredChecks}`,
+      "GitHub gate outcome: operator_bypass_github_gate (operator bypass, not a genuine passing check result).",
+      "Operator bypass evidence: missing from the durable submission record.",
+    ];
+  }
+  return [
+    `Required GitHub checks: ${requiredChecks}`,
+    "GitHub gate outcome: operator_bypass_github_gate (operator bypass, not a genuine passing check result).",
+    `Operator bypass evidence: reason=${JSON.stringify(evidence.reason)}; config_revision=${JSON.stringify(evidence.configRevision)}; deployment_role=${evidence.deploymentRole}; bypassed_at=${evidence.bypassedAt}.`,
+  ];
 }
 
 function isExternalCliSubmission(record: ReviewSubmissionRecord): boolean {
