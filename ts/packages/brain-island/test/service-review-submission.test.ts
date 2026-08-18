@@ -1556,6 +1556,134 @@ test("managed gate reconciliation leaves a pending exact-SHA gate untouched", as
   assert.deepEqual(transitions, []);
 });
 
+test("enabled operator bypass advances a pending gate without calling Den", async () => {
+  const pending = gatePendingRecord();
+  const transitions: Array<Record<string, unknown>> = [];
+  await reconcileReviewSubmissions({
+    bridge: {
+      listReviewSubmissions: async () => [pending],
+      transitionReviewSubmission: async (request: Record<string, unknown>) => {
+        transitions.push(request);
+        return {
+          ...pending,
+          phase: "reviewer_dispatch_pending",
+          gateStatus: "passed",
+          terminalReason: "operator_bypass_github_gate",
+          revision: pending.revision + 1,
+        } as ReviewSubmissionRecord;
+      },
+    } as never,
+    runtimeConfig: {
+      sessions: [],
+      mcpBindings: [],
+      mcpServers: [],
+      reviewGithubGateBypass: {
+        enabled: true,
+        reason: "GitHub Actions unavailable",
+        configRevision: "bypass-config-1",
+        deploymentRole: "production",
+      },
+    } as never,
+    serviceConfig: reviewServiceConfig(),
+    now: () => "2026-08-18T05:10:00.000Z",
+    callDenTool: async () => {
+      assert.fail("bypassing an existing pending gate must not call Den");
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  });
+  assert.deepEqual(transitions, [
+    {
+      submissionId: pending.submissionId,
+      expectedRevision: pending.revision,
+      transition: {
+        type: "gate_bypassed",
+        reason: "GitHub Actions unavailable",
+        configRevision: "bypass-config-1",
+        deploymentRole: "production",
+      },
+      now: "2026-08-18T05:10:00.000Z",
+    },
+  ]);
+});
+
+test("new managed submission preserves checks but skips GitHub after Den handoff", async () => {
+  const submitted = {
+    ...scopedSubmissionRecord("den-services", {
+      type: "external_cli",
+      clientId: "bypass-new",
+      idempotencyKey: "bypass-new-7084",
+    }),
+    phase: "submitted",
+    reviewRoundId: undefined,
+    gateId: undefined,
+    revision: 1,
+  } as ReviewSubmissionRecord;
+  let current = submitted;
+  const transitions: Array<Record<string, unknown>> = [];
+  const denCalls: string[] = [];
+  await reconcileReviewSubmissions({
+    bridge: {
+      listReviewSubmissions: async () => [current],
+      transitionReviewSubmission: async (request: Record<string, unknown>) => {
+        transitions.push(request);
+        const transition = request.transition as Record<string, unknown>;
+        current = {
+          ...current,
+          phase:
+            transition.type === "den_handoff_recorded"
+              ? "den_handoff_recorded"
+              : "reviewer_dispatch_pending",
+          reviewRoundId:
+            transition.type === "den_handoff_recorded" ? 708401 : 708401,
+          gateStatus:
+            transition.type === "gate_bypassed" ? "passed" : undefined,
+          terminalReason:
+            transition.type === "gate_bypassed"
+              ? "operator_bypass_github_gate"
+              : undefined,
+          revision: current.revision + 1,
+        } as ReviewSubmissionRecord;
+        return current;
+      },
+    } as never,
+    runtimeConfig: {
+      sessions: [],
+      mcpBindings: [],
+      mcpServers: [],
+      reviewGithubGateBypass: {
+        enabled: true,
+        reason: "GitHub outage",
+        configRevision: "bypass-config-2",
+        deploymentRole: "debug",
+      },
+    } as never,
+    serviceConfig: reviewServiceConfig("debug"),
+    now: () => "2026-08-18T05:20:00.000Z",
+    callDenTool: async (_binding: unknown, toolName: string) => {
+      denCalls.push(toolName);
+      if (toolName === "list_review_rounds") return { items: [] };
+      if (toolName === "get_task") {
+        return {
+          id: Number(submitted.taskId),
+          project_id: submitted.projectId,
+          status: "in_progress",
+        };
+      }
+      if (toolName === "request_review") return { review_round_id: 708401 };
+      assert.fail(`unexpected Den tool ${toolName}`);
+    },
+    applyCoordinationDelivery: async (receipt: never) => receipt,
+  });
+  assert.equal(denCalls.includes("watch_github_checks"), false);
+  assert.deepEqual(
+    transitions.map(
+      (request) => (request.transition as Record<string, unknown>).type,
+    ),
+    ["den_handoff_recorded", "gate_bypassed"],
+  );
+  assert.deepEqual(current.requiredChecks, submitted.requiredChecks);
+});
+
 test("reused reviewer sessions select the new active review over old terminal work", () => {
   const oldSha = "a".repeat(40);
   const newSha = "b".repeat(40);

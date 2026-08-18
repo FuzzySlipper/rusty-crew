@@ -8450,6 +8450,36 @@
       ],
       "type": "object"
     },
+    "ReviewSubmissionDeploymentRole": {
+      "enum": [
+        "production",
+        "debug"
+      ],
+      "type": "string"
+    },
+    "ReviewSubmissionGateBypassEvidence": {
+      "properties": {
+        "bypassedAt": {
+          "type": "string"
+        },
+        "configRevision": {
+          "type": "string"
+        },
+        "deploymentRole": {
+          "$ref": "#/$defs/ReviewSubmissionDeploymentRole"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "configRevision",
+        "deploymentRole",
+        "bypassedAt"
+      ],
+      "type": "object"
+    },
     "ReviewSubmissionPhase": {
       "enum": [
         "submitted",
@@ -8552,6 +8582,16 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "gateBypassEvidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewSubmissionGateBypassEvidence"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "gateId": {
@@ -8861,6 +8901,30 @@
           "required": [
             "type",
             "gateId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "configRevision": {
+              "type": "string"
+            },
+            "deploymentRole": {
+              "$ref": "#/$defs/ReviewSubmissionDeploymentRole"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "type": {
+              "const": "gate_bypassed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "reason",
+            "configRevision",
+            "deploymentRole"
           ],
           "type": "object"
         },

@@ -1,4 +1,5 @@
 use super::*;
+use rusty_crew_core_protocol::ReviewSubmissionDeploymentRole;
 
 #[test]
 fn repeated_unchanged_adapter_failure_is_a_durable_noop() {
@@ -546,6 +547,148 @@ fn external_cli_checkless_review_advances_directly_after_den_handoff() {
         record.terminal_reason.as_deref(),
         Some("no_required_checks")
     );
+}
+
+#[test]
+fn operator_gate_bypass_is_typed_durable_and_cannot_rewrite_failure() {
+    let data_dir = unique_data_dir("review-gate-bypass");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let session = engine
+        .create_session(session_config(
+            "review-bypass-session",
+            "review-bypass-agent",
+            "review-bypass-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let mut handoff = begin(&engine, &session.session_id, 7084, 'b');
+    handoff = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: handoff.submission_id.clone(),
+            expected_revision: handoff.revision,
+            transition: ReviewSubmissionTransition::DenHandoffRecorded {
+                review_round_id: 708401,
+            },
+            now: "2026-08-18T05:00:00Z".to_string(),
+        })
+        .unwrap();
+    let bypassed = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: handoff.submission_id.clone(),
+            expected_revision: handoff.revision,
+            transition: ReviewSubmissionTransition::GateBypassed {
+                reason: "GitHub Actions quota exhausted".to_string(),
+                config_revision: "config-revision-1".to_string(),
+                deployment_role: ReviewSubmissionDeploymentRole::Production,
+            },
+            now: "2026-08-18T05:01:00Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(
+        bypassed.phase,
+        ReviewSubmissionPhase::ReviewerDispatchPending
+    );
+    assert_eq!(bypassed.gate_status.as_deref(), Some("passed"));
+    assert_eq!(
+        bypassed.terminal_reason.as_deref(),
+        Some("operator_bypass_github_gate")
+    );
+    assert_eq!(bypassed.required_checks, handoff.required_checks);
+    let evidence = bypassed.gate_bypass_evidence.as_ref().unwrap();
+    assert_eq!(evidence.reason, "GitHub Actions quota exhausted");
+    assert_eq!(evidence.config_revision, "config-revision-1");
+    assert_eq!(
+        evidence.deployment_role,
+        ReviewSubmissionDeploymentRole::Production
+    );
+    assert_eq!(evidence.bypassed_at, "2026-08-18T05:01:00Z");
+
+    let mut pending = begin(&engine, &session.session_id, 7086, 'd');
+    for transition in [
+        ReviewSubmissionTransition::DenHandoffRecorded {
+            review_round_id: 708601,
+        },
+        ReviewSubmissionTransition::GateRegistered { gate_id: 708602 },
+    ] {
+        pending = engine
+            .transition_review_submission(ReviewSubmissionTransitionRequest {
+                submission_id: pending.submission_id.clone(),
+                expected_revision: pending.revision,
+                transition,
+                now: "2026-08-18T05:01:30Z".to_string(),
+            })
+            .unwrap();
+    }
+    pending = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: pending.submission_id,
+            expected_revision: pending.revision,
+            transition: ReviewSubmissionTransition::GateBypassed {
+                reason: "GitHub outage".to_string(),
+                config_revision: "config-revision-pending".to_string(),
+                deployment_role: ReviewSubmissionDeploymentRole::Debug,
+            },
+            now: "2026-08-18T05:01:45Z".to_string(),
+        })
+        .unwrap();
+    assert_eq!(
+        pending.phase,
+        ReviewSubmissionPhase::ReviewerDispatchPending
+    );
+    assert_eq!(pending.gate_id, Some(708602));
+    drop(engine);
+    let hydrated = test_engine_with_data_dir(data_dir);
+    let durable = hydrated
+        .list_review_submissions(&ReviewSubmissionQuery {
+            submission_id: Some(bypassed.submission_id.clone()),
+            ..ReviewSubmissionQuery::default()
+        })
+        .unwrap()
+        .remove(0);
+    assert_eq!(durable.gate_bypass_evidence, bypassed.gate_bypass_evidence);
+
+    let engine = test_engine();
+    let session = engine
+        .create_session(session_config(
+            "review-bypass-failed-session",
+            "review-bypass-failed-agent",
+            "review-bypass-failed-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let mut failed = begin(&engine, &session.session_id, 7085, 'c');
+    for transition in [
+        ReviewSubmissionTransition::DenHandoffRecorded {
+            review_round_id: 708501,
+        },
+        ReviewSubmissionTransition::GateRegistered { gate_id: 708502 },
+        ReviewSubmissionTransition::GateTerminal {
+            gate_status: "failed".to_string(),
+            terminal_reason: "checks_failed".to_string(),
+        },
+    ] {
+        failed = engine
+            .transition_review_submission(ReviewSubmissionTransitionRequest {
+                submission_id: failed.submission_id.clone(),
+                expected_revision: failed.revision,
+                transition,
+                now: "2026-08-18T05:02:00Z".to_string(),
+            })
+            .unwrap();
+    }
+    let error = engine
+        .transition_review_submission(ReviewSubmissionTransitionRequest {
+            submission_id: failed.submission_id,
+            expected_revision: failed.revision,
+            transition: ReviewSubmissionTransition::GateBypassed {
+                reason: "outage".to_string(),
+                config_revision: "config-revision-2".to_string(),
+                deployment_role: ReviewSubmissionDeploymentRole::Debug,
+            },
+            now: "2026-08-18T05:03:00Z".to_string(),
+        })
+        .unwrap_err();
+    assert_eq!(error.kind, CoreErrorKind::ActionRejected);
 }
 
 #[test]

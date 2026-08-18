@@ -139,6 +139,50 @@ requires terminal Crew plus Den readback. The flag is mutually exclusive with
 `--check`; omitting both is a usage error. Prefer a checked-in repository
 contract so external agents do not guess which mode applies.
 
+## Emergency GitHub gate bypass
+
+When GitHub Actions cannot produce a terminal result because of an outage or
+account quota exhaustion, an operator may temporarily bypass GitHub waiting for
+all managed submissions handled by one Crew deployment. Agents keep using the
+normal submission tooling and keep declaring the repository's required checks.
+Do not switch callers to `--no-checks` or edit repository workflows for this
+incident response.
+
+Read the current default-off policy, then use its revision for an authenticated
+write:
+
+```bash
+curl -fsS \
+  -H "Authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN" \
+  'http://127.0.0.1:9347/v1/admin/review-operator/github-gate-bypass?expectedDeploymentRole=production'
+
+curl -fsS -X PATCH \
+  -H "Authorization: Bearer $RUSTY_CREW_ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "expectedDeploymentRole":"production",
+    "expectedConfigRevision":"<revision-from-readback>",
+    "enabled":true,
+    "reason":"GitHub Actions monthly quota exhausted"
+  }' \
+  http://127.0.0.1:9347/v1/admin/review-operator/github-gate-bypass
+```
+
+The setting is global within that deployment, not across both service roots.
+Production (`9347`) and debug (`9348`) have separate `service.json` files and
+must be changed independently with the matching expected role. Enabling the
+policy immediately reconciles existing `gate_pending` submissions and causes
+new submissions to advance after their Den handoff without waiting for GitHub.
+Each durable submission preserves its requested checks and records
+`gateStatus=passed`, `terminalReason=operator_bypass_github_gate`, the operator
+reason, policy revision, deployment role, and timestamp. Existing
+`gate_failed` submissions remain failures.
+
+Disable the incident policy with another revision-guarded PATCH using
+`"enabled":false`. The default for absent configuration is disabled. This
+Crew-managed policy does not affect direct Den `watch_github_checks` gates,
+which remain fail-closed.
+
 ## Status And Waiting
 
 Every submit response includes a `submissionId`. Read it later with an

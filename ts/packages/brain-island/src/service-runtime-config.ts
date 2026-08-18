@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type {
@@ -125,7 +126,9 @@ import {
 } from "./service-browser-resources.js";
 import {
   reviewConfig,
+  type RustyCrewDeploymentRole,
   type RustyCrewMcpServerConfig,
+  type RustyCrewReviewGithubGateBypassPolicy,
   type RustyCrewServiceConfig,
   type RustyCrewStorageConfig,
 } from "./service-config.js";
@@ -198,6 +201,7 @@ export interface ServiceRuntimeEnvelope {
   denObservation?: RustyCrewDenObservationConfig;
   mcpServers?: RustyCrewMcpServerConfig[];
   reviewDenAuthority?: ReturnType<typeof reviewConfig>;
+  reviewGithubGateBypass?: RustyCrewReviewGithubGateBypassPolicy;
   imageGeneration?: ImageGenerationConfig;
   recoveryDiagnostics?: NativeRuntimeConfigDiagnostic[];
 }
@@ -285,6 +289,94 @@ export interface RuntimeConfigValidationPreflightReport {
       resourceLimits: boolean;
       maxHistoryMessages: boolean;
     }>;
+  };
+}
+
+type ReviewGithubGateBypassRevisionInput = Omit<
+  RustyCrewReviewGithubGateBypassPolicy,
+  "configRevision"
+>;
+
+/** Return the fail-closed policy used when older service.json files omit it. */
+export function defaultReviewGithubGateBypassPolicy(
+  deploymentRole: RustyCrewDeploymentRole,
+): RustyCrewReviewGithubGateBypassPolicy {
+  const policy: ReviewGithubGateBypassRevisionInput = {
+    enabled: false,
+    deploymentRole,
+  };
+  return {
+    ...policy,
+    configRevision: reviewGithubGateBypassConfigRevision(policy),
+  };
+}
+
+/**
+ * Compute the optimistic-concurrency revision without trusting a caller or
+ * including the revision itself in its hash.
+ */
+export function reviewGithubGateBypassConfigRevision(
+  policy: ReviewGithubGateBypassRevisionInput,
+): string {
+  const canonical: Record<string, string | boolean> = {
+    enabled: policy.enabled,
+    deploymentRole: policy.deploymentRole,
+  };
+  if (policy.reason !== undefined) canonical.reason = policy.reason;
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+/** Parse and validate the persisted, deployment-scoped bypass policy. */
+export function reviewGithubGateBypassPolicyFromUnknown(
+  value: unknown,
+  deploymentRole: RustyCrewDeploymentRole,
+): RustyCrewReviewGithubGateBypassPolicy {
+  if (value === undefined || value === null) {
+    return defaultReviewGithubGateBypassPolicy(deploymentRole);
+  }
+  if (!isRecord(value)) {
+    throw new Error("reviewGithubGateBypass must be an object");
+  }
+  const enabled = value.enabled;
+  if (typeof enabled !== "boolean") {
+    throw new Error("reviewGithubGateBypass.enabled must be a boolean");
+  }
+  const configuredRole = value.deploymentRole;
+  if (
+    configuredRole !== undefined &&
+    configuredRole !== "production" &&
+    configuredRole !== "debug"
+  ) {
+    throw new Error(
+      "reviewGithubGateBypass.deploymentRole must be production or debug",
+    );
+  }
+  if (configuredRole !== undefined && configuredRole !== deploymentRole) {
+    throw new Error(
+      `reviewGithubGateBypass targets ${configuredRole}, but this deployment is ${deploymentRole}`,
+    );
+  }
+  const reason = optionalString(value.reason);
+  if (enabled && reason === undefined) {
+    throw new Error(
+      "reviewGithubGateBypass.reason is required when the policy is enabled",
+    );
+  }
+  const policy: ReviewGithubGateBypassRevisionInput = {
+    enabled,
+    deploymentRole,
+    ...(reason === undefined ? {} : { reason }),
+  };
+  const configRevision = optionalString(value.configRevision);
+  const computedRevision = reviewGithubGateBypassConfigRevision(policy);
+  if (configRevision !== undefined && configRevision !== computedRevision) {
+    throw new Error(
+      "reviewGithubGateBypass.configRevision does not match the persisted policy",
+    );
+  }
+  return {
+    ...policy,
+    configRevision: computedRevision,
   };
 }
 
@@ -441,6 +533,7 @@ interface RuntimeGraphAuthoredSource {
   denObservation: RustyCrewDenObservationConfig;
   mcpServers: RustyCrewMcpServerConfig[];
   reviewDenAuthority?: ReturnType<typeof reviewConfig>;
+  reviewGithubGateBypass: RustyCrewReviewGithubGateBypassPolicy;
   imageGeneration: ImageGenerationConfig;
   recoveryDiagnostics: NativeRuntimeConfigDiagnostic[];
 }
@@ -502,6 +595,10 @@ function runtimeGraphAuthoredSource(
       serviceConfig.mcp.servers,
     ).map((item, index) => configuredMcpServer(item, index)),
     reviewDenAuthority: reviewConfig(parsed, serviceConfig.reviewDenAuthority),
+    reviewGithubGateBypass: reviewGithubGateBypassPolicyFromUnknown(
+      parsed.reviewGithubGateBypass,
+      serviceConfig.deploymentRole,
+    ),
     imageGeneration: imageGenerationConfigFromUnknown(parsed.imageGeneration),
     recoveryDiagnostics,
   };
@@ -754,6 +851,7 @@ function runtimeConfigFromGraphPlan(
     denObservation: source.denObservation,
     mcpServers: source.mcpServers,
     reviewDenAuthority: source.reviewDenAuthority,
+    reviewGithubGateBypass: source.reviewGithubGateBypass,
     imageGeneration: source.imageGeneration,
     recoveryDiagnostics: source.recoveryDiagnostics,
     brains: effective.brains.map((brain) => ({
@@ -844,6 +942,7 @@ function runtimeGraphSourceFromEffective(
     denObservation: runtimeConfig.denObservation,
     mcpServers: runtimeConfig.mcpServers,
     reviewDenAuthority: runtimeConfig.reviewDenAuthority,
+    reviewGithubGateBypass: runtimeConfig.reviewGithubGateBypass,
     imageGeneration: runtimeConfig.imageGeneration,
     brains: runtimeConfig.brains,
     sessions: runtimeConfig.sessions,

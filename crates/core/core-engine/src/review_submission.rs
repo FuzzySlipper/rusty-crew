@@ -1,8 +1,8 @@
 use super::*;
 use rusty_crew_core_protocol::{
-    AgentCoordinationCaller, ProjectId, ReviewSubmissionPhase, ReviewSubmissionQuery,
-    ReviewSubmissionRecord, ReviewSubmissionRequest, ReviewSubmissionTransition,
-    ReviewSubmissionTransitionRequest, TaskId,
+    AgentCoordinationCaller, ProjectId, ReviewSubmissionGateBypassEvidence, ReviewSubmissionPhase,
+    ReviewSubmissionQuery, ReviewSubmissionRecord, ReviewSubmissionRequest,
+    ReviewSubmissionTransition, ReviewSubmissionTransitionRequest, TaskId,
 };
 use sha2::{Digest, Sha256};
 
@@ -136,6 +136,7 @@ impl CoreEngine {
             review_round_id: None,
             gate_id: None,
             gate_status: None,
+            gate_bypass_evidence: None,
             reviewer_session_id: None,
             dispatch_message_id: None,
             dispatch_delivery_id: None,
@@ -231,6 +232,40 @@ impl CoreEngine {
                         },
                     )?;
                 }
+            }
+            ReviewSubmissionTransition::GateBypassed {
+                reason,
+                config_revision,
+                deployment_role,
+            } => {
+                if !matches!(
+                    record.phase,
+                    ReviewSubmissionPhase::DenHandoffRecorded | ReviewSubmissionPhase::GatePending
+                ) {
+                    return Err(CoreError::new(
+                        CoreErrorKind::ActionRejected,
+                        format!(
+                            "review_submission_phase_mismatch: gate bypass cannot settle {:?}",
+                            record.phase
+                        ),
+                    ));
+                }
+                if reason.trim().is_empty() || config_revision.trim().is_empty() {
+                    return Err(CoreError::new(
+                        CoreErrorKind::InvalidInput,
+                        "review gate bypass requires a reason and config revision",
+                    ));
+                }
+                record.gate_status = Some("passed".to_string());
+                record.terminal_reason = Some("operator_bypass_github_gate".to_string());
+                record.gate_bypass_evidence = Some(ReviewSubmissionGateBypassEvidence {
+                    reason,
+                    config_revision,
+                    deployment_role,
+                    bypassed_at: request.now.clone(),
+                });
+                record.phase = ReviewSubmissionPhase::ReviewerDispatchPending;
+                record.last_adapter_error = None;
             }
             ReviewSubmissionTransition::GateTerminal {
                 gate_status,

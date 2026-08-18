@@ -169,6 +169,18 @@ export interface RustyCrewTelegramConfig {
 export type RustyCrewStorageBackend = "sqlite" | "postgres";
 export type RustyCrewDeploymentRole = "production" | "debug";
 
+/**
+ * The managed-review GitHub gate bypass is deliberately runtime-configured.
+ * Its scope is one Crew deployment, so the deployment role is part of the
+ * persisted policy and is validated against the process role on load.
+ */
+export interface RustyCrewReviewGithubGateBypassPolicy {
+  enabled: boolean;
+  reason?: string;
+  configRevision: string;
+  deploymentRole: RustyCrewDeploymentRole;
+}
+
 export interface RustyCrewSqliteStorageConfig {
   path: string;
   wal: boolean;

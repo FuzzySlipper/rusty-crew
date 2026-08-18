@@ -4,6 +4,7 @@ import type {
 } from "@rusty-crew/contracts";
 import type {
   RustyCrewDeploymentRole,
+  RustyCrewReviewGithubGateBypassPolicy,
   RustyCrewReviewDenAuthorityConfig,
 } from "./service-config.js";
 import { validateReviewDenAuthorityConfig } from "./service-config.js";
@@ -24,6 +25,7 @@ const PREFIX = "/v1/admin/review-operator";
 
 export interface ReviewOperatorRouteContext {
   deploymentRole: RustyCrewDeploymentRole;
+  githubGateBypass?(): RustyCrewReviewGithubGateBypassPolicy;
   authority(): RustyCrewReviewDenAuthorityConfig | undefined;
   diagnostics(): ReviewDenAuthorityDiagnostics;
   refreshDiagnostics(): Promise<ReviewDenAuthorityDiagnostics>;
@@ -33,6 +35,7 @@ export interface ReviewOperatorRouteContext {
   readRuntimeConfigFile(): Promise<{ value: Record<string, unknown> }>;
   writeRuntimeConfigFile(value: Record<string, unknown>): Promise<void>;
   applyRuntimeConfigFromDisk(): Promise<unknown>;
+  reconcileSubmissions?(): Promise<void>;
   withRuntimeConfigMutation<T>(mutation: () => Promise<T>): Promise<T>;
   pipeline(input: {
     projectId: string;
@@ -69,6 +72,64 @@ export async function handleReviewOperatorRequest(
       input.url.searchParams.get("expectedDeploymentRole"),
       context.deploymentRole,
     );
+    if (input.url.pathname === `${PREFIX}/github-gate-bypass`) {
+      if (input.method === "GET") {
+        return successRoute(
+          input.requestId,
+          requiredGithubGateBypass(context)(),
+        );
+      }
+      if (input.method !== "PATCH") return methodNotAllowed(input.requestId);
+      const body = recordBody(input.body);
+      assertExpectedRole(
+        optionalString(body.expectedDeploymentRole),
+        context.deploymentRole,
+      );
+      const expectedRevision = requiredString(
+        body.expectedConfigRevision,
+        "expectedConfigRevision",
+      );
+      if (typeof body.enabled !== "boolean") {
+        throw new Error("enabled must be a boolean");
+      }
+      const reason = optionalString(body.reason);
+      if (body.enabled && reason === undefined) {
+        throw new Error(
+          "reason is required when enabling the GitHub gate bypass",
+        );
+      }
+      return await context.withRuntimeConfigMutation(async () => {
+        const current = requiredGithubGateBypass(context)();
+        if (current.configRevision !== expectedRevision) {
+          throw new ReviewOperatorConflictError(
+            "review_github_gate_bypass_revision_conflict",
+            "review GitHub gate bypass config revision conflict",
+          );
+        }
+        const runtimeFile = await context.readRuntimeConfigFile();
+        const previousValue = structuredClone(runtimeFile.value);
+        runtimeFile.value.reviewGithubGateBypass = {
+          enabled: body.enabled,
+          deploymentRole: context.deploymentRole,
+          ...(reason === undefined ? {} : { reason }),
+        };
+        await context.writeRuntimeConfigFile(runtimeFile.value);
+        let applyResult: unknown;
+        try {
+          applyResult = await context.applyRuntimeConfigFromDisk();
+          await context.reconcileSubmissions?.().catch(() => undefined);
+        } catch (error) {
+          await context.writeRuntimeConfigFile(previousValue);
+          await context.applyRuntimeConfigFromDisk().catch(() => undefined);
+          throw error;
+        }
+        return successRoute(input.requestId, {
+          status: "updated",
+          config: requiredGithubGateBypass(context)(),
+          applyResult,
+        });
+      });
+    }
     if (input.url.pathname === `${PREFIX}/config`) {
       if (input.method === "GET") {
         const diagnostics = await context.refreshDiagnostics();
@@ -258,6 +319,15 @@ function requiredStaleTasks(
     throw new Error("stale review task query is unavailable");
   }
   return context.staleTasks;
+}
+
+function requiredGithubGateBypass(
+  context: ReviewOperatorRouteContext,
+): NonNullable<ReviewOperatorRouteContext["githubGateBypass"]> {
+  if (context.githubGateBypass === undefined) {
+    throw new Error("review GitHub gate bypass config is unavailable");
+  }
+  return context.githubGateBypass;
 }
 
 class ReviewOperatorConflictError extends Error {

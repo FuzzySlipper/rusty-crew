@@ -609,6 +609,23 @@ export async function reconcileReviewSubmissions(
     pendingOnly: true,
   });
   for (const pendingRecord of pending) {
+    if (
+      githubGateBypassEnabled(context) &&
+      (pendingRecord.phase === "den_handoff_recorded" ||
+        pendingRecord.phase === "gate_pending")
+    ) {
+      try {
+        await bypassGithubGate(context, pendingRecord);
+      } catch (error) {
+        await recordAdapterFailure(
+          context,
+          pendingRecord,
+          "github_gate_bypass_transition_failed",
+          errorMessage(error),
+        ).catch(() => undefined);
+      }
+      continue;
+    }
     const record = await reconcileSubmissionAgainstDen(context, pendingRecord);
     if (record === undefined) continue;
     if (reviewSubmissionTerminal(record.phase)) continue;
@@ -1552,6 +1569,22 @@ async function advanceDenHandoff(
   initial: ReviewSubmissionRecord,
 ): Promise<ReviewSubmissionToolReceipt> {
   let record = initial;
+  if (
+    record.phase === "den_handoff_recorded" &&
+    githubGateBypassEnabled(context)
+  ) {
+    try {
+      return accepted(await bypassGithubGate(context, record));
+    } catch (error) {
+      record = await recordAdapterFailure(
+        context,
+        record,
+        "github_gate_bypass_transition_failed",
+        errorMessage(error),
+      );
+      return failed(record, "github_gate_bypass_transition_failed");
+    }
+  }
   const binding = selectReviewDenBinding(context, record.submitterSessionId);
   if (binding === undefined) {
     record = await recordAdapterFailure(
@@ -1625,6 +1658,10 @@ async function advanceDenHandoff(
         now: context.now(),
       });
     }
+    if (githubGateBypassEnabled(context)) {
+      record = await bypassGithubGate(context, record);
+      return accepted(record);
+    }
     if (record.requiredChecks.length === 0) {
       record = await context.bridge.transitionReviewSubmission({
         submissionId: record.submissionId,
@@ -1672,6 +1709,31 @@ async function advanceDenHandoff(
     );
     return failed(record, reasonCode);
   }
+}
+
+function githubGateBypassEnabled(
+  context: ServiceReviewSubmissionContext,
+): boolean {
+  return context.runtimeConfig.reviewGithubGateBypass?.enabled === true;
+}
+
+async function bypassGithubGate(
+  context: ServiceReviewSubmissionContext,
+  record: ReviewSubmissionRecord,
+): Promise<ReviewSubmissionRecord> {
+  const policy = context.runtimeConfig.reviewGithubGateBypass;
+  if (policy?.enabled !== true || policy.reason === undefined) return record;
+  return context.bridge.transitionReviewSubmission({
+    submissionId: record.submissionId,
+    expectedRevision: record.revision,
+    transition: {
+      type: "gate_bypassed",
+      reason: policy.reason,
+      configRevision: policy.configRevision,
+      deploymentRole: policy.deploymentRole,
+    },
+    now: context.now(),
+  });
 }
 
 async function settleFailedGate(
@@ -2052,11 +2114,7 @@ async function denCall(
 }
 
 type ExistingGateStatus =
-  | "pending"
-  | "passed"
-  | "failed"
-  | "timed_out"
-  | "superseded";
+  "pending" | "passed" | "failed" | "timed_out" | "superseded";
 
 function existingGateState(
   payload: unknown,

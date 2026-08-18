@@ -9,6 +9,10 @@ import {
 } from "../src/service-review-operator.js";
 import { handleReviewOperatorRequest } from "../src/service-review-operator-routes.js";
 import { reviewConfig } from "../src/service-config.js";
+import {
+  defaultReviewGithubGateBypassPolicy,
+  reviewGithubGateBypassPolicyFromUnknown,
+} from "../src/service-runtime-config.js";
 
 const authority = {
   authorityId: "review-den",
@@ -773,4 +777,69 @@ test("config write rejects browser-supplied credentials", async () => {
   assert.equal(result.status, 400);
   assert.match(JSON.stringify(result.body), /server-managed/);
   assert.equal(JSON.stringify(result.body).includes("secret"), false);
+});
+
+test("operator can revision-guard a deployment-scoped GitHub gate bypass", async () => {
+  let file: Record<string, unknown> = {};
+  let policy = defaultReviewGithubGateBypassPolicy("debug");
+  const context = {
+    deploymentRole: "debug" as const,
+    githubGateBypass: () => policy,
+    authority: () => authority,
+    diagnostics: () => diagnostics,
+    refreshDiagnostics: async () => diagnostics,
+    resolveReviewer: async () => reviewerRoute,
+    readRuntimeConfigFile: async () => ({ value: structuredClone(file) }),
+    writeRuntimeConfigFile: async (value: Record<string, unknown>) => {
+      file = structuredClone(value);
+    },
+    applyRuntimeConfigFromDisk: async () => {
+      policy = reviewGithubGateBypassPolicyFromUnknown(
+        file.reviewGithubGateBypass,
+        "debug",
+      );
+      return {};
+    },
+    withRuntimeConfigMutation: <T>(mutation: () => Promise<T>) => mutation(),
+    pipeline: async () => ({
+      projectId: "den-services",
+      deploymentRole: "debug" as const,
+      limit: 50,
+      offset: 0,
+      items: [],
+    }),
+    promptReviewer: async () => ({ status: "accepted" }) as never,
+  };
+  const enabled = await handleReviewOperatorRequest(
+    {
+      method: "PATCH",
+      url: new URL("http://crew/v1/admin/review-operator/github-gate-bypass"),
+      requestId: "enable-bypass",
+      body: {
+        expectedConfigRevision: policy.configRevision,
+        expectedDeploymentRole: "debug",
+        enabled: true,
+        reason: "GitHub Actions quota exhausted",
+      },
+    },
+    context,
+  );
+  assert.equal("status" in enabled ? enabled.status : 0, 200);
+  assert.equal(policy.enabled, true);
+  assert.equal(policy.deploymentRole, "debug");
+  assert.equal(policy.reason, "GitHub Actions quota exhausted");
+
+  const stale = await handleReviewOperatorRequest(
+    {
+      method: "PATCH",
+      url: new URL("http://crew/v1/admin/review-operator/github-gate-bypass"),
+      requestId: "stale-bypass",
+      body: {
+        expectedConfigRevision: "stale",
+        enabled: false,
+      },
+    },
+    context,
+  );
+  assert.equal("status" in stale ? stale.status : 0, 409);
 });

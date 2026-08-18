@@ -593,6 +593,13 @@ pub enum ReviewSubmissionPhase {
     Superseded,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewSubmissionDeploymentRole {
+    Production,
+    Debug,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewFindingStatus {
@@ -637,6 +644,8 @@ pub struct ReviewSubmissionRecord {
     pub review_round_id: Option<u64>,
     pub gate_id: Option<u64>,
     pub gate_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_bypass_evidence: Option<ReviewSubmissionGateBypassEvidence>,
     pub reviewer_session_id: Option<SessionId>,
     pub dispatch_message_id: Option<String>,
     pub dispatch_delivery_id: Option<String>,
@@ -667,6 +676,15 @@ pub struct ReviewSubmissionRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSubmissionGateBypassEvidence {
+    pub reason: String,
+    pub config_revision: String,
+    pub deployment_role: ReviewSubmissionDeploymentRole,
+    pub bypassed_at: IsoTimestamp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(
     rename_all = "snake_case",
     rename_all_fields = "camelCase",
@@ -678,6 +696,11 @@ pub enum ReviewSubmissionTransition {
     },
     GateRegistered {
         gate_id: u64,
+    },
+    GateBypassed {
+        reason: String,
+        config_revision: String,
+        deployment_role: ReviewSubmissionDeploymentRole,
     },
     GateTerminal {
         gate_status: String,

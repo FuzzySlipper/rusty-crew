@@ -1988,6 +1988,15 @@ export type ReviewFindingStatus = {
   status: string;
 };
 
+export type ReviewSubmissionDeploymentRole = "production" | "debug";
+
+export type ReviewSubmissionGateBypassEvidence = {
+  bypassedAt: string;
+  configRevision: string;
+  deploymentRole: ReviewSubmissionDeploymentRole;
+  reason: string;
+};
+
 export type ReviewSubmissionPhase = "submitted" | "den_handoff_recorded" | "gate_pending" | "gate_failed" | "reviewer_dispatch_pending" | "reviewer_dispatched" | "den_finalization_pending" | "den_finalized" | "reply_pending" | "replied" | "reply_terminal" | "review_terminal" | "superseded";
 
 export type ReviewSubmissionQuery = {
@@ -2008,6 +2017,7 @@ export type ReviewSubmissionRecord = {
   createdAt: string;
   dispatchDeliveryId?: string | null;
   dispatchMessageId?: string | null;
+  gateBypassEvidence?: ReviewSubmissionGateBypassEvidence | null;
   gateId?: number | null;
   gateStatus?: string | null;
   gitRef: string;
@@ -2066,6 +2076,11 @@ export type ReviewSubmissionTransition = {
 } | {
   gateId: number;
   type: "gate_registered";
+} | {
+  configRevision: string;
+  deploymentRole: ReviewSubmissionDeploymentRole;
+  reason: string;
+  type: "gate_bypassed";
 } | {
   gateStatus: string;
   terminalReason: string;

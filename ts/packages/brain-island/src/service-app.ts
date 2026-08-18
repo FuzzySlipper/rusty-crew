@@ -371,6 +371,7 @@ import {
 } from "./service-config.js";
 import {
   applyRustyCrewRuntimeConfig,
+  defaultReviewGithubGateBypassPolicy,
   effectiveSessionDefaults,
   loadRustyCrewRuntimeConfig,
   preflightRustyCrewRuntimeConfig,
@@ -1779,8 +1780,7 @@ async function handleHttpRequest(
 
   if (route?.id === "chat") {
     let chatEffectiveDefaults:
-      | Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>>
-      | undefined;
+      Promise<Map<SessionId, RuntimeSessionEffectiveDefaults>> | undefined;
     const effectiveDefaultsForChatSession = async (session: SessionState) => {
       chatEffectiveDefaults ??= state.bridge
         .listSessions()
@@ -6911,6 +6911,9 @@ async function refreshReviewDenAuthorityDiagnostics(
 function reviewOperatorRouteContext(state: ServiceState) {
   return {
     deploymentRole: state.config.deploymentRole,
+    githubGateBypass: () =>
+      state.runtimeConfig.reviewGithubGateBypass ??
+      defaultReviewGithubGateBypassPolicy(state.config.deploymentRole),
     authority: () => state.reviewDenAuthority,
     diagnostics: () => state.reviewDenAuthorityDiagnostics,
     refreshDiagnostics: () => refreshReviewDenAuthorityDiagnostics(state),
@@ -6927,9 +6930,11 @@ function reviewOperatorRouteContext(state: ServiceState) {
     applyRuntimeConfigFromDisk: () =>
       applyServiceRuntimeConfigFromDisk(state, {
         createMissingSessions: false,
-        eventType: "review_den_authority_updated",
-        summaryPrefix: "Review Den authority updated",
+        eventType: "review_operator_config_updated",
+        summaryPrefix: "Review operator config updated",
       }),
+    reconcileSubmissions: () =>
+      reconcileReviewSubmissions(reviewSubmissionContext(state)),
     withRuntimeConfigMutation: <T>(mutation: () => Promise<T>) =>
       withAsyncMutationQueue(state.runtimeConfigMutationQueue, mutation),
     pipeline: (input: { projectId: string; limit: number; offset: number }) =>
