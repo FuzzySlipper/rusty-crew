@@ -83,7 +83,7 @@ export class CrewServicesDirectBrainAdapter {
   /** Claims survive here only until `begin-dispatch` is known to have started. */
   private readonly claimedBeforeDispatch = new Map<
     string,
-    { claimToken: string; possiblyBegan: boolean }
+    { claimToken: string; attemptCount: number; possiblyBegan: boolean }
   >();
 
   constructor(
@@ -127,7 +127,11 @@ export class CrewServicesDirectBrainAdapter {
     this.claimedBeforeDispatch.clear();
     await Promise.all(
       pending.map(async ([deliveryId, claim]) => {
-        await this.release(deliveryId, claim.claimToken).catch(() => undefined);
+        await this.release(
+          deliveryId,
+          claim.claimToken,
+          claim.attemptCount,
+        ).catch(() => undefined);
       }),
     );
   }
@@ -225,7 +229,7 @@ export class CrewServicesDirectBrainAdapter {
     if (this.stopped) return;
     const target = await this.resolveRoutableTarget(binding);
     if (target === undefined) return;
-    const head = await this.claimHead(binding.alias);
+    const head = await this.claimHead(binding.alias, target.fabric.generation);
     if (head === undefined) return;
     const lease = await this.ensureLease();
     const claimAttempt =
@@ -239,7 +243,10 @@ export class CrewServicesDirectBrainAdapter {
       ),
       recipient_address: binding.alias,
       recipient_generation: target.fabric.generation,
-      availability: availability(target.entry),
+      availability:
+        head.state === "claimed"
+          ? replayAvailability(head.dispatch_action)
+          : availability(target.entry),
       claim_duration: this.config.claimDuration,
     });
     if (
@@ -251,6 +258,7 @@ export class CrewServicesDirectBrainAdapter {
       return;
     this.claimedBeforeDispatch.set(claimed.delivery.delivery_id, {
       claimToken: claimed.claim_token,
+      attemptCount: claimed.delivery.attempt_count,
       possiblyBegan: false,
     });
     await this.dispatch(binding, claimed);
@@ -268,7 +276,11 @@ export class CrewServicesDirectBrainAdapter {
       target === undefined ||
       target.fabric.generation !== delivery.recipient_generation
     ) {
-      await this.release(delivery.delivery_id, claimToken);
+      await this.release(
+        delivery.delivery_id,
+        claimToken,
+        delivery.attempt_count,
+      );
       return;
     }
     const attempt = nativeAttemptRef(delivery.delivery_id);
@@ -291,9 +303,11 @@ export class CrewServicesDirectBrainAdapter {
         return;
       }
       if (observed.state !== "dispatching") {
-        await this.release(delivery.delivery_id, claimToken).catch(
-          () => undefined,
-        );
+        await this.release(
+          delivery.delivery_id,
+          claimToken,
+          delivery.attempt_count,
+        ).catch(() => undefined);
         return;
       }
     }
@@ -427,11 +441,15 @@ export class CrewServicesDirectBrainAdapter {
       );
   }
 
-  private async claimHead(alias: string): Promise<FabricDelivery | undefined> {
+  private async claimHead(
+    alias: string,
+    generation: number,
+  ): Promise<FabricDelivery | undefined> {
     const deliveries = await this.fabric.listDeliveries();
     const candidates = deliveries.deliveries.filter(
       (delivery) =>
         delivery.recipient_address === alias &&
+        delivery.recipient_generation === generation &&
         (delivery.state === "queued" ||
           (delivery.state === "claimed" &&
             delivery.claim_owner_adapter_id === this.config.adapterId &&
@@ -449,11 +467,18 @@ export class CrewServicesDirectBrainAdapter {
     return candidates[0];
   }
 
-  private async release(deliveryId: string, claimToken: string): Promise<void> {
+  private async release(
+    deliveryId: string,
+    claimToken: string,
+    attemptCount: number,
+  ): Promise<void> {
     await this.fabric.release(deliveryId, {
       adapter_id: this.config.adapterId,
       lease_token: (await this.ensureLease()).lease_token,
-      operation_id: operationId(deliveryId, "release"),
+      operation_id: operationId(
+        `${deliveryId}:attempt:${attemptCount}`,
+        "release",
+      ),
       claim_token: claimToken,
     });
   }
@@ -531,6 +556,23 @@ function availability(
     return "busy";
   if (entry.sessionStatus === "idle") return "idle";
   return entry.sessionStatus === "active" ? "busy" : "inactive";
+}
+
+function replayAvailability(
+  dispatchAction: string | undefined,
+): "busy" | "idle" | "inactive" {
+  switch (dispatchAction) {
+    case "register_next_turn":
+      return "busy";
+    case "deliver_at_idle":
+      return "idle";
+    case "wake_then_deliver":
+      return "inactive";
+    default:
+      throw new Error(
+        "crew-services adapter: claimed delivery has no replayable dispatch action",
+      );
+  }
 }
 
 /** Native delivery bounds are relative to the adapter's admission, not fabric creation. */

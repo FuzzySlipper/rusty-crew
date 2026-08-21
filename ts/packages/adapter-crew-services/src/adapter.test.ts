@@ -76,6 +76,8 @@ class FakeFabric implements FabricClient {
   dispatching: FabricDelivery[] = [];
   calls: string[] = [];
   claimOperations: string[] = [];
+  claimAvailabilities: string[] = [];
+  releaseOperations: string[] = [];
   registerCount = 0;
   onClaim: (() => void) | undefined;
   beginGate: Promise<void> | undefined;
@@ -144,6 +146,7 @@ class FakeFabric implements FabricClient {
     this.onClaim = undefined;
     const operation = String(body.operation_id);
     this.claimOperations.push(operation);
+    this.claimAvailabilities.push(String(body.availability));
     const replayed = this.replayedClaims.get(operation);
     if (replayed !== undefined) return { ...replayed, replayed: true };
     const next = this.queue.shift();
@@ -159,6 +162,12 @@ class FakeFabric implements FabricClient {
               attempt_count: next.delivery.attempt_count + 1,
               claim_owner_adapter_id: "rusty-crew-fabric",
               claim_owner_instance_id: "test",
+              dispatch_action:
+                body.availability === "busy"
+                  ? "register_next_turn"
+                  : body.availability === "idle"
+                    ? "deliver_at_idle"
+                    : "wake_then_deliver",
             },
           };
     this.replayedClaims.set(operation, claimed);
@@ -192,13 +201,17 @@ class FakeFabric implements FabricClient {
     }
     return value;
   }
-  async release(id: string): Promise<FabricDelivery> {
+  async release(
+    id: string,
+    body: Record<string, unknown>,
+  ): Promise<FabricDelivery> {
     this.calls.push(`release:${id}`);
+    this.releaseOperations.push(String(body.operation_id));
     const claimed = this.deliveryClaims.get(id);
     if (claimed?.delivery !== undefined) {
       this.queue.unshift({
         ...claimed,
-        delivery: { ...claimed.delivery, state: "queued" },
+        delivery: { ...claimed.delivery, state: "queued", dispatch_action: "" },
       });
     }
     return { ...(claimed?.delivery ?? delivery(id)), state: "queued" };
@@ -349,6 +362,7 @@ test("a replayed claim produces one native delivery, not a second claim-side eff
 test("a lost claim response replays the delivery-keyed operation after restart without skipping FIFO", async () => {
   const fabric = new FakeFabric();
   const bridge = new FakeBridge();
+  bridge.directory = [{ ...entry(), sessionStatus: "active" }];
   fabric.throwAfterClaim = true;
   fabric.queue.push(
     {
@@ -370,6 +384,7 @@ test("a lost claim response replays the delivery-keyed operation after restart w
   await first.start();
   await assert.rejects(first.tick(), /claim response lost/);
   await first.stop();
+  bridge.directory = [entry()];
   const [restarted] = adapter(fabric, bridge);
   await restarted.start();
   await restarted.tick();
@@ -382,6 +397,7 @@ test("a lost claim response replays the delivery-keyed operation after restart w
     nativeDeliveryId("d-first"),
     nativeDeliveryId("d-second"),
   ]);
+  assert.deepEqual(fabric.claimAvailabilities.slice(0, 2), ["busy", "busy"]);
   await restarted.stop();
 });
 
@@ -404,7 +420,7 @@ test("route revision drift after claim releases before native dispatch", async (
   await subject.stop();
 });
 
-test("a released route-drift claim reclaims the same delivery with its next durable attempt", async () => {
+test("each route-drift release is idempotent for its own attempt before attempt three succeeds", async () => {
   const [subject, fabric, bridge] = adapter();
   fabric.queue.push({
     claimed: true,
@@ -420,10 +436,44 @@ test("a released route-drift claim reclaims the same delivery with its next dura
   await subject.tick();
   assert.ok(fabric.calls.includes("release:d-1"));
   bridge.resolution = route(1);
+  fabric.onClaim = () => {
+    bridge.resolution = route(2);
+  };
   await subject.tick();
-  assert.notEqual(fabric.claimOperations[0], fabric.claimOperations[1]);
+  bridge.resolution = route(1);
+  await subject.tick();
+  assert.equal(fabric.claimOperations.length, 3);
+  assert.equal(fabric.releaseOperations.length, 2);
+  assert.notEqual(fabric.releaseOperations[0], fabric.releaseOperations[1]);
+  assert.ok(fabric.releaseOperations[0]?.includes("d-1:attempt:1"));
+  assert.ok(fabric.releaseOperations[1]?.includes("d-1:attempt:2"));
+  assert.ok(fabric.claimOperations[2]?.includes("d-1:attempt:3"));
   assert.ok(fabric.calls.includes("begin:d-1"));
   assert.deepEqual(bridge.delivered, [nativeDeliveryId("d-1")]);
+  await subject.stop();
+});
+
+test("a stale-generation queued row cannot select the current generation claim operation", async () => {
+  const [subject, fabric] = adapter();
+  fabric.queue.push(
+    {
+      claimed: true,
+      replayed: false,
+      claim_token: "stale-claim",
+      delivery: { ...delivery("d-stale"), recipient_generation: 99 },
+      message: message("m-stale"),
+    },
+    {
+      claimed: true,
+      replayed: false,
+      claim_token: "current-claim",
+      delivery: delivery("d-current"),
+      message: message("m-current"),
+    },
+  );
+  await subject.start();
+  await subject.tick();
+  assert.ok(fabric.claimOperations[0]?.includes("d-current:attempt:1"));
   await subject.stop();
 });
 

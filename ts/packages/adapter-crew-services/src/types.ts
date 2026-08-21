@@ -45,6 +45,7 @@ export interface FabricDelivery {
     | string;
   claim_owner_adapter_id?: string;
   claim_owner_instance_id?: string;
+  dispatch_action?: string;
   native_attempt_ref?: string;
 }
 
