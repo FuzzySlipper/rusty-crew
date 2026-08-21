@@ -161,6 +161,7 @@ const validBinding = withDirectBridgeOutputValidation(
     githubGateWaitJson: () => JSON.stringify(githubWait()),
     githubGateEventCursor: () => 9,
     requeueLogicalTurnContinuations: () => 2,
+    requeuePendingDirectAgentMessages: () => 1,
     subscribeEvents: () => 10,
     getBuffer: () => ({
       handle: 11,
@@ -215,11 +216,18 @@ const invalidBuffer = withDirectBridgeOutputValidation(
 assert.throws(() => invalidBuffer.getBuffer(), /does not match bytes length/);
 
 const invalidContinuationCount = withDirectBridgeOutputValidation(
-  { requeueLogicalTurnContinuations: () => -1 },
+  {
+    requeueLogicalTurnContinuations: () => -1,
+    requeuePendingDirectAgentMessages: () => -1,
+  },
   env,
 );
 assert.throws(
   () => invalidContinuationCount.requeueLogicalTurnContinuations(),
+  BridgeValidationError,
+);
+assert.throws(
+  () => invalidContinuationCount.requeuePendingDirectAgentMessages(),
   BridgeValidationError,
 );
 
@@ -252,7 +260,7 @@ assert.equal(crewCreation.session.workspace?.cwd, "/home/dev/repo");
 assert.equal(crewCreation.session.resourceLimits.maxDurationMs, undefined);
 assert.equal(crewCreation.profileRevision, 7);
 
-assert.equal(new Set(directBridgeValidatedOperations).size, 29);
+assert.equal(new Set(directBridgeValidatedOperations).size, 30);
 console.log(
   JSON.stringify({
     directOperationsValidated: directBridgeValidatedOperations.length,

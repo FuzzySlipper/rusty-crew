@@ -458,6 +458,231 @@ impl CoreEngine {
         self.deliver_agent_message_with_reply(command, None, None)
     }
 
+    /// Republish one wake per idle direct-brain session that has durable routed
+    /// message work waiting at its next-turn boundary.
+    ///
+    /// The queued record is the delivery authority; a wake event is only a
+    /// transient prompt for the service host to claim the next turn.  Keeping
+    /// this decision in Rust lets a restarted host recover the same work after
+    /// its event subscription is established.
+    pub fn requeue_pending_direct_agent_messages(&self) -> CoreResult<u32> {
+        let now = self.now();
+        self.store.expire_queued_messages_at(&now)?;
+        let mut requeued = 0_u32;
+
+        for session in self.sessions.all_sessions()? {
+            if self
+                .session_execution_state(&session.session_id)?
+                .phase
+                .is_working()
+            {
+                continue;
+            }
+
+            let pending = self.store.load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(session.session_id.clone()),
+                owner_agent_id: None,
+                limit: None,
+            })?;
+            let mut has_rearmable_delivery = false;
+            for queued in pending {
+                match self.queued_direct_delivery_rearmable(&session, &queued)? {
+                    QueuedDirectDeliveryRearm::Rearm => has_rearmable_delivery = true,
+                    QueuedDirectDeliveryRearm::Skip => {}
+                    QueuedDirectDeliveryRearm::Cancel(reason_code) => {
+                        self.cancel_pending_queued_direct_delivery(
+                            &session.session_id,
+                            &queued,
+                            &now,
+                            reason_code,
+                        )?;
+                    }
+                }
+            }
+            if has_rearmable_delivery {
+                self.bus.publish(CoreEvent::BrainWakeRequested {
+                    session_id: session.session_id,
+                })?;
+                requeued = requeued.saturating_add(1);
+            }
+        }
+        Ok(requeued)
+    }
+
+    pub(crate) fn queued_direct_delivery_rearmable(
+        &self,
+        session: &SessionState,
+        queued: &QueuedMessageRecord,
+    ) -> CoreResult<QueuedDirectDeliveryRearm> {
+        let Some(delivery_id) = queued
+            .state_reason
+            .as_deref()
+            .and_then(|reason| reason.strip_prefix("agent_delivery:"))
+        else {
+            return Ok(QueuedDirectDeliveryRearm::Skip);
+        };
+        let Some(message_id) = queued.message_id.strip_prefix("agent-message-queue:") else {
+            return Ok(QueuedDirectDeliveryRearm::Cancel(
+                "agent_message_queue_identity_invalid",
+            ));
+        };
+        let Some(delivery) = self
+            .store
+            .get_agent_message_delivery_by_message_id(message_id)?
+        else {
+            return Ok(QueuedDirectDeliveryRearm::Cancel(
+                "agent_message_delivery_missing",
+            ));
+        };
+        if delivery.request.delivery_id.0 != delivery_id
+            || delivery.request.to_session_id.as_ref() != Some(&session.session_id)
+            || delivery.request.to_agent_id != session.agent_id
+            || queued.message.to != session.agent_id
+        {
+            return Ok(QueuedDirectDeliveryRearm::Cancel(
+                "agent_message_recipient_session_changed",
+            ));
+        }
+
+        let target = match delivery.request.routing.as_deref() {
+            Some(routing) => {
+                let current = self.store.get_agent_route(&routing.route_key)?;
+                if current.as_ref().map(|route| route.revision) != Some(routing.route_revision) {
+                    return Ok(QueuedDirectDeliveryRearm::Cancel(
+                        "agent_route_activation_target_changed",
+                    ));
+                }
+                routing.resolved_target.clone()
+            }
+            None => AgentRouteResolvedTarget {
+                agent_id: session.agent_id.clone(),
+                session_id: session.session_id.clone(),
+                profile_id: session.profile_id.clone(),
+                display_label: session.agent_id.0.clone(),
+                runtime_kind: AgentDirectoryRuntimeKind::DirectBrain,
+                runtime_id: None,
+                binding_id: None,
+                binding_revision: None,
+                delivery_policy: None,
+            },
+        };
+        if target.runtime_kind != AgentDirectoryRuntimeKind::DirectBrain {
+            return Ok(QueuedDirectDeliveryRearm::Skip);
+        }
+        let still_direct = self
+            .resolve_agent_route_activation_target(&delivery.request.to_agent_id, &target)?
+            .is_some_and(|(current, binding)| {
+                current.session_id == session.session_id && binding.is_none()
+            });
+        Ok(if still_direct {
+            QueuedDirectDeliveryRearm::Rearm
+        } else {
+            QueuedDirectDeliveryRearm::Cancel("agent_route_activation_target_changed")
+        })
+    }
+
+    pub(crate) fn validate_pending_direct_agent_messages_for_wake(
+        &self,
+        session_id: &SessionId,
+    ) -> CoreResult<()> {
+        let now = self.now();
+        let session = self.sessions.get_session(session_id)?;
+        let pending = self.store.load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Pending),
+            owner_session_id: Some(session_id.clone()),
+            owner_agent_id: None,
+            limit: None,
+        })?;
+        for queued in pending {
+            if let QueuedDirectDeliveryRearm::Cancel(reason_code) =
+                self.queued_direct_delivery_rearmable(&session, &queued)?
+            {
+                self.cancel_pending_queued_direct_delivery(session_id, &queued, &now, reason_code)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn cancel_pending_queued_direct_delivery(
+        &self,
+        session_id: &SessionId,
+        queued: &QueuedMessageRecord,
+        now: &IsoTimestamp,
+        reason_code: &str,
+    ) -> CoreResult<()> {
+        let current = self
+            .store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(session_id.clone()),
+                owner_agent_id: None,
+                limit: None,
+            })?
+            .into_iter()
+            .find(|current| {
+                current.message_id == queued.message_id
+                    && current.state_reason == queued.state_reason
+            });
+        let Some(mut cancelled) = current else {
+            return Ok(());
+        };
+        cancelled.state = QueuedMessageState::Cancelled;
+        cancelled.terminal_at = Some(now.clone());
+        cancelled.state_reason = Some(reason_code.into());
+        self.store.save_queued_message(&cancelled)
+    }
+
+    fn existing_queued_agent_message_activation(
+        &self,
+        delivery: &AgentMessageDeliveryReceipt,
+    ) -> CoreResult<Option<ExistingQueuedAgentMessageDelivery>> {
+        let Some(session_id) = delivery.request.to_session_id.as_ref() else {
+            return Ok(None);
+        };
+        let queue_id = format!("agent-message-queue:{}", delivery.request.message_id);
+        let queued = self
+            .store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: None,
+                owner_session_id: Some(session_id.clone()),
+                owner_agent_id: None,
+                limit: None,
+            })?
+            .into_iter()
+            .find(|queued| queued.message_id == queue_id);
+        let Some(queued) = queued else {
+            return Ok(None);
+        };
+        let activation = AgentActivation::QueuedForNextTurn {
+            session_id: session_id.clone(),
+            queue_id,
+        };
+        Ok(Some(match queued.state {
+            QueuedMessageState::Pending | QueuedMessageState::Delivered => {
+                ExistingQueuedAgentMessageDelivery::Accepted(activation)
+            }
+            QueuedMessageState::Expired => ExistingQueuedAgentMessageDelivery::Terminal {
+                status: AgentMessageDeliveryStatus::Expired,
+                reason_code: queued
+                    .state_reason
+                    .unwrap_or_else(|| "agent_message_expired".into()),
+            },
+            QueuedMessageState::Cancelled => ExistingQueuedAgentMessageDelivery::Terminal {
+                status: AgentMessageDeliveryStatus::Rejected,
+                reason_code: queued
+                    .state_reason
+                    .unwrap_or_else(|| "agent_message_delivery_cancelled".into()),
+            },
+            QueuedMessageState::Discarded => ExistingQueuedAgentMessageDelivery::Terminal {
+                status: AgentMessageDeliveryStatus::Rejected,
+                reason_code: queued
+                    .state_reason
+                    .unwrap_or_else(|| "agent_message_delivery_discarded".into()),
+            },
+        }))
+    }
+
     fn deliver_agent_message_with_reply(
         &self,
         command: AgentMessageCommand,
@@ -551,6 +776,30 @@ impl CoreEngine {
                 None,
                 Some("agent_message_expired".into()),
             );
+        }
+        if let Some(existing) = self.existing_queued_agent_message_activation(&pending)? {
+            return match existing {
+                ExistingQueuedAgentMessageDelivery::Accepted(activation) => self
+                    .finish_agent_message_delivery(
+                        pending,
+                        AgentMessageDeliveryStatus::Accepted,
+                        None,
+                        Some(activation),
+                        None,
+                        None,
+                    ),
+                ExistingQueuedAgentMessageDelivery::Terminal {
+                    status,
+                    reason_code,
+                } => self.finish_agent_message_delivery(
+                    pending,
+                    status,
+                    None,
+                    None,
+                    None,
+                    Some(reason_code),
+                ),
+            };
         }
         if !address_resolution.routable && command.to_address.starts_with('@') {
             return self.finish_agent_message_delivery(
@@ -678,12 +927,10 @@ impl CoreEngine {
             Err(error) => return Err(error),
         };
 
-        let event = CoreEvent::AgentMessageRouted {
-            message: message.clone(),
-        };
-        let sequence = self.bus.publish(event)?;
-
         if !command.require_wake {
+            let sequence = self
+                .bus
+                .publish(CoreEvent::AgentMessageRouted { message })?;
             return self.finish_agent_message_delivery(
                 pending,
                 AgentMessageDeliveryStatus::Accepted,
@@ -729,11 +976,27 @@ impl CoreEngine {
             }
             None => self.activate_agent_execution(activation_request)?,
         };
+        let direct_target = address_resolution
+            .resolved_target
+            .as_ref()
+            .is_some_and(|target| target.runtime_kind == AgentDirectoryRuntimeKind::DirectBrain);
+        let _ = sender_request_id;
         match &activation {
             AgentActivation::DirectBrainWakeRequested { session_id, .. } => {
+                let sequence = self
+                    .bus
+                    .publish(CoreEvent::AgentMessageRouted { message })?;
                 self.bus.publish(CoreEvent::BrainWakeRequested {
                     session_id: session_id.clone(),
                 })?;
+                self.finish_agent_message_delivery(
+                    pending,
+                    AgentMessageDeliveryStatus::Accepted,
+                    Some(sequence),
+                    Some(activation),
+                    None,
+                    None,
+                )
             }
             AgentActivation::QueuedForNextTurn { session_id, .. } => {
                 if let Err(error) = self.enqueue_routed_agent_message_without_wake(
@@ -748,7 +1011,7 @@ impl CoreEngine {
                         return self.finish_agent_message_delivery(
                             pending,
                             AgentMessageDeliveryStatus::Rejected,
-                            Some(sequence),
+                            None,
                             Some(activation.clone()),
                             None,
                             Some(error.message),
@@ -756,13 +1019,55 @@ impl CoreEngine {
                     }
                     return Err(error);
                 }
+                if direct_target {
+                    self.bus.publish(CoreEvent::BrainWakeRequested {
+                        session_id: session_id.clone(),
+                    })?;
+                    return self.finish_agent_message_delivery(
+                        pending,
+                        AgentMessageDeliveryStatus::Accepted,
+                        None,
+                        Some(activation),
+                        None,
+                        None,
+                    );
+                }
+                let sequence = self
+                    .bus
+                    .publish(CoreEvent::AgentMessageRouted { message })?;
+                self.finish_agent_message_delivery(
+                    pending,
+                    AgentMessageDeliveryStatus::Accepted,
+                    Some(sequence),
+                    Some(activation),
+                    None,
+                    None,
+                )
             }
             AgentActivation::ExternalTurnSteerRequested { .. } => {
-                return self.observe_pending_agent_message_delivery(pending, sequence, activation);
+                let sequence = self
+                    .bus
+                    .publish(CoreEvent::AgentMessageRouted { message })?;
+                self.observe_pending_agent_message_delivery(pending, sequence, activation)
             }
-            AgentActivation::ExternalTurnRequested { .. } => {}
+            AgentActivation::ExternalTurnRequested { .. } => {
+                let sequence = self
+                    .bus
+                    .publish(CoreEvent::AgentMessageRouted { message })?;
+                self.finish_agent_message_delivery(
+                    pending,
+                    AgentMessageDeliveryStatus::Accepted,
+                    Some(sequence),
+                    Some(activation),
+                    None,
+                    None,
+                )
+            }
             AgentActivation::Rejected { reason_code } => {
-                return self.finish_agent_message_delivery(
+                let sequence = self
+                    .bus
+                    .publish(CoreEvent::AgentMessageRouted { message })?;
+                self.finish_agent_message_delivery(
                     pending,
                     AgentMessageDeliveryStatus::Rejected,
                     Some(sequence),
@@ -772,15 +1077,6 @@ impl CoreEngine {
                 )
             }
         }
-        let _ = sender_request_id;
-        self.finish_agent_message_delivery(
-            pending,
-            AgentMessageDeliveryStatus::Accepted,
-            Some(sequence),
-            Some(activation),
-            None,
-            None,
-        )
     }
 
     pub fn begin_agent_round(
@@ -1402,6 +1698,20 @@ impl CoreEngine {
         })?;
         Ok(receipt)
     }
+}
+
+enum ExistingQueuedAgentMessageDelivery {
+    Accepted(AgentActivation),
+    Terminal {
+        status: AgentMessageDeliveryStatus,
+        reason_code: String,
+    },
+}
+
+pub(crate) enum QueuedDirectDeliveryRearm {
+    Rearm,
+    Skip,
+    Cancel(&'static str),
 }
 
 fn routable_route(

@@ -5,7 +5,8 @@ use rusty_crew_core_protocol::{
     AgentMessageDeliveryStatus, AgentMessageInputKind, AgentMessageReplyCommand, AgentRoundCommand,
     AgentRoundId, AgentRouteDelete, AgentRouteKey, AgentRouteTarget, AgentRouteWrite,
     ExternalAgentBindingMetadataWrite, ExternalMessageDeliveryPolicy, ExternalTurnPhase,
-    ExternalTurnRequestId,
+    ExternalTurnRequestId, RuntimeActivityBegin, RuntimeActivityFinish, RuntimeActivityId,
+    RuntimeActivityKind, RuntimeActivityOwner, RuntimeActivityStatus,
 };
 
 #[test]
@@ -162,6 +163,530 @@ fn accepted_switchboard_message_reply_outlives_delivery_ttl_without_sender_route
         expired_reply.message,
         "agent_message_reply_original_not_accepted"
     );
+}
+
+#[test]
+fn active_direct_route_queues_once_and_rearms_after_runtime_settlement() {
+    let engine = test_engine();
+    let target = engine
+        .create_session(session_config(
+            "direct-queue-session",
+            "direct-queue-agent",
+            "direct-queue-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .put_agent_route(AgentRouteWrite {
+            route_key: AgentRouteKey::new("direct-queue"),
+            label: "Direct queue".into(),
+            description: None,
+            enabled: true,
+            target: AgentRouteTarget::DirectBrain {
+                agent_id: target.agent_id.clone(),
+                session_id: target.session_id.clone(),
+            },
+            required_runtime_kind: Some(AgentDirectoryRuntimeKind::DirectBrain),
+            required_delivery_policy: None,
+            expected_revision: None,
+            updated_at: "2026-06-19T00:00:00Z".into(),
+        })
+        .unwrap();
+    engine
+        .begin_runtime_activity(RuntimeActivityBegin {
+            activity_id: RuntimeActivityId::new("dispatch:direct-queue-current"),
+            parent_activity_id: None,
+            kind: RuntimeActivityKind::Dispatch,
+            owner: RuntimeActivityOwner::TypeScriptHost,
+            agent_id: Some(target.agent_id.clone()),
+            profile_id: Some(target.profile_id.clone()),
+            session_id: Some(target.session_id.clone()),
+            wake_id: Some("direct-queue-current".into()),
+            phase: "running".into(),
+            summary: None,
+            provider_alias: None,
+            model_config_id: None,
+            endpoint_id: None,
+            model: None,
+            tool_name: None,
+            process_id: None,
+            debug_detail_id: None,
+        })
+        .unwrap();
+    let command = AgentMessageCommand {
+        caller: AgentCoordinationCaller::System {
+            sender_agent_id: AgentId::new("direct-queue-sender"),
+        },
+        delivery_id: AgentMessageDeliveryId::new("direct-queue-delivery"),
+        idempotency_key: "direct-queue-delivery".into(),
+        message_id: "direct-queue-message".into(),
+        to_address: "@direct-queue".into(),
+        input_kind: AgentMessageInputKind::RoutedAgentMessage,
+        body: "deliver after the active turn".into(),
+        image_attachment_ids: Vec::new(),
+        collaboration_mode: None,
+        correlation_id: None,
+        require_wake: true,
+        created_at: "2026-06-19T00:00:00Z".into(),
+        expires_at: "2026-06-19T00:05:00Z".into(),
+    };
+    let (_subscription, wakes) = engine
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![CoreEventKind::BrainWakeRequested],
+            session_id: Some(target.session_id.clone()),
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+    let queued = engine.deliver_agent_message(command.clone()).unwrap();
+    assert!(matches!(
+        queued.activation,
+        Some(AgentActivation::QueuedForNextTurn { ref session_id, .. }) if session_id == &target.session_id
+    ));
+    assert_eq!(
+        engine
+            .store
+            .load_queued_messages(&QueuedMessageFilter {
+                state: Some(QueuedMessageState::Pending),
+                owner_session_id: Some(target.session_id.clone()),
+                owner_agent_id: None,
+                limit: None,
+            })
+            .unwrap()
+            .len(),
+        1
+    );
+    let replay = engine.deliver_agent_message(command).unwrap();
+    assert_eq!(replay, queued);
+    assert!(matches!(
+        wakes.recv_timeout(Duration::from_secs(1)).unwrap(),
+        CoreEvent::BrainWakeRequested { session_id } if session_id == target.session_id
+    ));
+    engine
+        .finish_runtime_activity(RuntimeActivityFinish {
+            activity_id: RuntimeActivityId::new("dispatch:direct-queue-current"),
+            status: RuntimeActivityStatus::Completed,
+            phase: "completed".into(),
+            reason_code: None,
+            summary: Some("active direct turn settled".into()),
+        })
+        .unwrap();
+    let unrelated = engine
+        .create_session(session_config(
+            "unrelated-settlement-session",
+            "unrelated-settlement-agent",
+            "unrelated-settlement-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .begin_runtime_activity(RuntimeActivityBegin {
+            activity_id: RuntimeActivityId::new("dispatch:unrelated-settlement"),
+            parent_activity_id: None,
+            kind: RuntimeActivityKind::Dispatch,
+            owner: RuntimeActivityOwner::TypeScriptHost,
+            agent_id: Some(unrelated.agent_id.clone()),
+            profile_id: Some(unrelated.profile_id.clone()),
+            session_id: Some(unrelated.session_id),
+            wake_id: Some("unrelated-settlement".into()),
+            phase: "running".into(),
+            summary: None,
+            provider_alias: None,
+            model_config_id: None,
+            endpoint_id: None,
+            model: None,
+            tool_name: None,
+            process_id: None,
+            debug_detail_id: None,
+        })
+        .unwrap();
+    engine
+        .finish_runtime_activity(RuntimeActivityFinish {
+            activity_id: RuntimeActivityId::new("dispatch:unrelated-settlement"),
+            status: RuntimeActivityStatus::Completed,
+            phase: "completed".into(),
+            reason_code: None,
+            summary: Some("unrelated turn settled".into()),
+        })
+        .unwrap();
+    assert!(matches!(
+        wakes.recv_timeout(Duration::from_millis(50)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ));
+}
+
+#[test]
+fn restart_rearms_only_current_direct_route_and_cancels_stale_queue() {
+    let data_dir = unique_data_dir("direct-route-rearm");
+    let engine = test_engine_with_data_dir(data_dir.clone());
+    let target = engine
+        .create_session(session_config(
+            "direct-restart-session",
+            "direct-restart-agent",
+            "direct-restart-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    let route = engine
+        .put_agent_route(AgentRouteWrite {
+            route_key: AgentRouteKey::new("direct-restart"),
+            label: "Direct restart".into(),
+            description: None,
+            enabled: true,
+            target: AgentRouteTarget::DirectBrain {
+                agent_id: target.agent_id.clone(),
+                session_id: target.session_id.clone(),
+            },
+            required_runtime_kind: Some(AgentDirectoryRuntimeKind::DirectBrain),
+            required_delivery_policy: None,
+            expected_revision: None,
+            updated_at: "2026-06-19T00:00:00Z".into(),
+        })
+        .unwrap();
+    engine
+        .begin_runtime_activity(RuntimeActivityBegin {
+            activity_id: RuntimeActivityId::new("dispatch:direct-restart-current"),
+            parent_activity_id: None,
+            kind: RuntimeActivityKind::Dispatch,
+            owner: RuntimeActivityOwner::TypeScriptHost,
+            agent_id: Some(target.agent_id.clone()),
+            profile_id: Some(target.profile_id.clone()),
+            session_id: Some(target.session_id.clone()),
+            wake_id: Some("direct-restart-current".into()),
+            phase: "running".into(),
+            summary: None,
+            provider_alias: None,
+            model_config_id: None,
+            endpoint_id: None,
+            model: None,
+            tool_name: None,
+            process_id: None,
+            debug_detail_id: None,
+        })
+        .unwrap();
+    let queued = engine
+        .deliver_agent_message(AgentMessageCommand {
+            caller: AgentCoordinationCaller::System {
+                sender_agent_id: AgentId::new("direct-restart-sender"),
+            },
+            delivery_id: AgentMessageDeliveryId::new("direct-restart-delivery"),
+            idempotency_key: "direct-restart-delivery".into(),
+            message_id: "direct-restart-message".into(),
+            to_address: "@direct-restart".into(),
+            input_kind: AgentMessageInputKind::RoutedAgentMessage,
+            body: "resume after restart".into(),
+            image_attachment_ids: Vec::new(),
+            collaboration_mode: None,
+            correlation_id: None,
+            require_wake: true,
+            created_at: "2026-06-19T00:00:00Z".into(),
+            expires_at: "2026-06-19T00:05:00Z".into(),
+        })
+        .unwrap();
+    assert!(matches!(
+        queued.activation,
+        Some(AgentActivation::QueuedForNextTurn { .. })
+    ));
+    drop(engine);
+
+    let restarted = test_engine_with_data_dir(data_dir.clone());
+    let (_subscription, wakes) = restarted
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![CoreEventKind::BrainWakeRequested],
+            session_id: Some(target.session_id.clone()),
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+    assert_eq!(
+        restarted.requeue_pending_direct_agent_messages().unwrap(),
+        1
+    );
+    assert!(matches!(
+        wakes.recv_timeout(Duration::from_secs(1)).unwrap(),
+        CoreEvent::BrainWakeRequested { session_id } if session_id == target.session_id
+    ));
+
+    let updated = restarted
+        .put_agent_route(AgentRouteWrite {
+            route_key: AgentRouteKey::new("direct-restart"),
+            label: "Changed direct restart".into(),
+            description: None,
+            enabled: true,
+            target: AgentRouteTarget::DirectBrain {
+                agent_id: target.agent_id.clone(),
+                session_id: target.session_id.clone(),
+            },
+            required_runtime_kind: Some(AgentDirectoryRuntimeKind::DirectBrain),
+            required_delivery_policy: None,
+            expected_revision: Some(route.revision),
+            updated_at: "2026-06-19T00:00:01Z".into(),
+        })
+        .unwrap();
+    assert_eq!(updated.revision, route.revision + 1);
+    let body = restarted
+        .prepare_body_state_for_wake(&target.session_id)
+        .unwrap();
+    assert!(body
+        .pending_messages
+        .iter()
+        .all(|message| message.body != "resume after restart"));
+    assert_eq!(
+        restarted.requeue_pending_direct_agent_messages().unwrap(),
+        0
+    );
+    assert!(matches!(
+        wakes.recv_timeout(Duration::from_millis(50)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ));
+    let queue = restarted
+        .store
+        .load_queued_messages(&QueuedMessageFilter {
+            state: None,
+            owner_session_id: Some(target.session_id),
+            owner_agent_id: None,
+            limit: None,
+        })
+        .unwrap();
+    assert_eq!(queue[0].state, QueuedMessageState::Cancelled);
+    assert_eq!(
+        queue[0].state_reason.as_deref(),
+        Some("agent_route_activation_target_changed")
+    );
+    std::fs::remove_dir_all(data_dir).unwrap();
+}
+
+#[test]
+fn pending_receipt_replay_reconciles_pending_or_delivered_direct_queue_without_another_wake() {
+    let engine = test_engine();
+    let target = engine
+        .create_session(session_config(
+            "crash-replay-session",
+            "crash-replay-agent",
+            "crash-replay-profile",
+            SessionKind::Full,
+        ))
+        .unwrap();
+    engine
+        .put_agent_route(AgentRouteWrite {
+            route_key: AgentRouteKey::new("crash-replay"),
+            label: "Crash replay".into(),
+            description: None,
+            enabled: true,
+            target: AgentRouteTarget::DirectBrain {
+                agent_id: target.agent_id.clone(),
+                session_id: target.session_id.clone(),
+            },
+            required_runtime_kind: Some(AgentDirectoryRuntimeKind::DirectBrain),
+            required_delivery_policy: None,
+            expected_revision: None,
+            updated_at: "2026-06-19T00:00:00Z".into(),
+        })
+        .unwrap();
+    engine
+        .begin_runtime_activity(RuntimeActivityBegin {
+            activity_id: RuntimeActivityId::new("dispatch:crash-replay-current"),
+            parent_activity_id: None,
+            kind: RuntimeActivityKind::Dispatch,
+            owner: RuntimeActivityOwner::TypeScriptHost,
+            agent_id: Some(target.agent_id.clone()),
+            profile_id: Some(target.profile_id.clone()),
+            session_id: Some(target.session_id.clone()),
+            wake_id: Some("crash-replay-current".into()),
+            phase: "running".into(),
+            summary: None,
+            provider_alias: None,
+            model_config_id: None,
+            endpoint_id: None,
+            model: None,
+            tool_name: None,
+            process_id: None,
+            debug_detail_id: None,
+        })
+        .unwrap();
+    let seed_command = AgentMessageCommand {
+        caller: AgentCoordinationCaller::System {
+            sender_agent_id: AgentId::new("crash-replay-sender"),
+        },
+        delivery_id: AgentMessageDeliveryId::new("crash-replay-seed-delivery"),
+        idempotency_key: "crash-replay-seed-delivery".into(),
+        message_id: "crash-replay-seed-message".into(),
+        to_address: "@crash-replay".into(),
+        input_kind: AgentMessageInputKind::RoutedAgentMessage,
+        body: "seed queued delivery".into(),
+        image_attachment_ids: Vec::new(),
+        collaboration_mode: None,
+        correlation_id: None,
+        require_wake: true,
+        created_at: "2026-06-19T00:00:00Z".into(),
+        expires_at: "2026-06-19T00:05:00Z".into(),
+    };
+    let seed = engine.deliver_agent_message(seed_command).unwrap();
+    let mut pending = seed.clone();
+    pending.request.delivery_id = AgentMessageDeliveryId::new("crash-replay-delivery");
+    pending.request.idempotency_key = "crash-replay-delivery".into();
+    pending.request.message_id = "crash-replay-message".into();
+    pending.request.body = "queue persisted before receipt finalization".into();
+    pending.status = AgentMessageDeliveryStatus::Pending;
+    pending.sequence = None;
+    pending.activation = None;
+    pending.resolved_round_id = None;
+    pending.reason_code = None;
+    pending.terminal_at = None;
+    pending.revision = 1;
+    let pending = engine
+        .store
+        .create_agent_message_delivery(&pending)
+        .unwrap();
+    engine
+        .enqueue_routed_agent_message_without_wake(
+            &target.session_id,
+            &pending.request,
+            "queue persisted before receipt finalization".into(),
+        )
+        .unwrap();
+
+    let (_subscription, wakes) = engine
+        .subscribe_events(EventSubscription {
+            event_kinds: vec![CoreEventKind::BrainWakeRequested],
+            session_id: Some(target.session_id.clone()),
+            agent_id: None,
+            adapter_id: None,
+        })
+        .unwrap();
+    let retried = engine
+        .deliver_agent_message(AgentMessageCommand {
+            delivery_id: AgentMessageDeliveryId::new("crash-replay-delivery"),
+            idempotency_key: "crash-replay-delivery".into(),
+            message_id: "crash-replay-message".into(),
+            body: "queue persisted before receipt finalization".into(),
+            ..seed_command_for_crash_replay()
+        })
+        .unwrap();
+    assert_eq!(retried.status, AgentMessageDeliveryStatus::Accepted);
+    assert!(matches!(
+        retried.activation,
+        Some(AgentActivation::QueuedForNextTurn { ref session_id, .. }) if session_id == &target.session_id
+    ));
+    let queue = engine
+        .store
+        .load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Pending),
+            owner_session_id: Some(target.session_id.clone()),
+            owner_agent_id: None,
+            limit: None,
+        })
+        .unwrap();
+    assert_eq!(queue.len(), 2);
+    assert_eq!(
+        queue
+            .iter()
+            .filter(|record| record.message_id == "agent-message-queue:crash-replay-message")
+            .count(),
+        1
+    );
+    assert!(matches!(
+        wakes.recv_timeout(Duration::from_millis(50)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ));
+
+    let mut delivered_pending = seed;
+    delivered_pending.request.delivery_id = AgentMessageDeliveryId::new("crash-replay-delivered");
+    delivered_pending.request.idempotency_key = "crash-replay-delivered".into();
+    delivered_pending.request.message_id = "crash-replay-delivered-message".into();
+    delivered_pending.request.body = "queue delivered before receipt finalization".into();
+    delivered_pending.status = AgentMessageDeliveryStatus::Pending;
+    delivered_pending.sequence = None;
+    delivered_pending.activation = None;
+    delivered_pending.resolved_round_id = None;
+    delivered_pending.reason_code = None;
+    delivered_pending.terminal_at = None;
+    delivered_pending.revision = 1;
+    let delivered_pending = engine
+        .store
+        .create_agent_message_delivery(&delivered_pending)
+        .unwrap();
+    engine
+        .enqueue_routed_agent_message_without_wake(
+            &target.session_id,
+            &delivered_pending.request,
+            "queue delivered before receipt finalization".into(),
+        )
+        .unwrap();
+    let mut delivered_queue = engine
+        .store
+        .load_queued_messages(&QueuedMessageFilter {
+            state: Some(QueuedMessageState::Pending),
+            owner_session_id: Some(target.session_id.clone()),
+            owner_agent_id: None,
+            limit: None,
+        })
+        .unwrap()
+        .into_iter()
+        .find(|record| record.message_id == "agent-message-queue:crash-replay-delivered-message")
+        .unwrap();
+    delivered_queue.state = QueuedMessageState::Delivered;
+    delivered_queue.delivery_attempts = 1;
+    delivered_queue.terminal_at = Some("2026-06-19T00:01:00Z".into());
+    delivered_queue.state_reason = Some("delivered_for_wake".into());
+    engine.store.save_queued_message(&delivered_queue).unwrap();
+
+    let delivered_retry = engine
+        .deliver_agent_message(AgentMessageCommand {
+            delivery_id: AgentMessageDeliveryId::new("crash-replay-delivered"),
+            idempotency_key: "crash-replay-delivered".into(),
+            message_id: "crash-replay-delivered-message".into(),
+            body: "queue delivered before receipt finalization".into(),
+            ..seed_command_for_crash_replay()
+        })
+        .unwrap();
+    assert_eq!(delivered_retry.status, AgentMessageDeliveryStatus::Accepted);
+    assert!(matches!(
+        delivered_retry.activation,
+        Some(AgentActivation::QueuedForNextTurn { ref session_id, .. }) if session_id == &target.session_id
+    ));
+    let delivered_queue = engine
+        .store
+        .load_queued_messages(&QueuedMessageFilter {
+            state: None,
+            owner_session_id: Some(target.session_id.clone()),
+            owner_agent_id: None,
+            limit: None,
+        })
+        .unwrap()
+        .into_iter()
+        .find(|record| record.message_id == "agent-message-queue:crash-replay-delivered-message")
+        .unwrap();
+    assert_eq!(delivered_queue.state, QueuedMessageState::Delivered);
+    assert_eq!(delivered_queue.delivery_attempts, 1);
+    assert_eq!(
+        delivered_queue.state_reason.as_deref(),
+        Some("delivered_for_wake")
+    );
+    assert!(matches!(
+        wakes.recv_timeout(Duration::from_millis(50)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ));
+}
+
+fn seed_command_for_crash_replay() -> AgentMessageCommand {
+    AgentMessageCommand {
+        caller: AgentCoordinationCaller::System {
+            sender_agent_id: AgentId::new("crash-replay-sender"),
+        },
+        delivery_id: AgentMessageDeliveryId::new("placeholder"),
+        idempotency_key: "placeholder".into(),
+        message_id: "placeholder".into(),
+        to_address: "@crash-replay".into(),
+        input_kind: AgentMessageInputKind::RoutedAgentMessage,
+        body: "placeholder".into(),
+        image_attachment_ids: Vec::new(),
+        collaboration_mode: None,
+        correlation_id: None,
+        require_wake: true,
+        created_at: "2026-06-19T00:00:00Z".into(),
+        expires_at: "2026-06-19T00:05:00Z".into(),
+    }
 }
 
 #[test]

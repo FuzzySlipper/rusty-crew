@@ -14,6 +14,7 @@ export const bridgeOperations = [
   {"name":"settle_brain_wake","surface":"stable","direction":"ts_to_rust","input":"core_protocol::BrainWakeSettlementRequest","output":"core_protocol::BrainWakeSettlementReceipt","errors":"core_protocol::CoreError","summary":"Settle one Rust-owned logical-turn execution epoch as completed, durably yielded, or failed."},
   {"name":"logical_turn_diagnostics","surface":"stable","direction":"ts_to_rust","input":"core_protocol::LogicalTurnDiagnosticQuery","output":"core_protocol::LogicalTurnDiagnosticPage","errors":"core_protocol::CoreError","summary":"Read Rust-owned logical-turn continuation, progress, pause, and terminal diagnostics."},
   {"name":"requeue_logical_turn_continuations","surface":"stable","direction":"ts_to_rust","input":"core_protocol::Unit","output":"u32","errors":"core_protocol::CoreError","summary":"Republish Rust-owned runnable logical-turn tickets after the service event subscription is ready."},
+  {"name":"requeue_pending_direct_agent_messages","surface":"stable","direction":"ts_to_rust","input":"core_protocol::Unit","output":"u32","errors":"core_protocol::CoreError","summary":"Republish one wake for each idle direct-brain session with a valid durable routed message pending at its next-turn boundary."},
   {"name":"resolve_logical_turn_attention","surface":"stable","direction":"ts_to_rust","input":"core_protocol::LogicalTurnAttentionResolutionRequest","output":"core_protocol::LogicalTurnAttentionResolutionReceipt","errors":"core_protocol::CoreError","summary":"Resolve a paused logical turn through a Rust-owned operator action and queue its continuation."},
   {"name":"cancel_logical_turn","surface":"stable","direction":"ts_to_rust","input":"core_protocol::LogicalTurnCancelRequest","output":"core_protocol::LogicalTurnCancellationReceipt","errors":"core_protocol::CoreError","summary":"Cancel an active or yielded logical turn and its provider run using one idempotent Rust operation."},
   {"name":"submit_brain_event","surface":"stable","direction":"ts_to_rust","input":"core_protocol::BrainEventEnvelope","output":"core_protocol::EventReceipt","errors":"core_protocol::CoreError","summary":"TS streams brain events produced during a Rust-driven wake."},
@@ -322,4 +323,4 @@ export const manifestOperationNames = bridgeOperations.map(
 ({ name }) => name,
 ) as readonly ManifestOperationName[];
 
-export const bridgeWireShapeFingerprint = "f72fbf0ea48830d28e1e2e29c1f019dfa51116137a93bc8c068277b7c4322cd5" as const;
+export const bridgeWireShapeFingerprint = "e6f5876bb2d4090d19791e8110f6308c339ef11b89bba79e1de977f41bbd43f4" as const;

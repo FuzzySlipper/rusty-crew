@@ -288,6 +288,7 @@ export interface NativeBridgeBinding {
   settleBrainWakeJson(inputJson: string): string
   logicalTurnDiagnosticsJson(inputJson: string): string
   requeueLogicalTurnContinuations(): number
+  requeuePendingDirectAgentMessages(): number
   resolveLogicalTurnAttentionJson(inputJson: string): string
   cancelLogicalTurnJson(inputJson: string): string
   applyBrainProviderStateOutputJson(brain: number, sessionId: string, wakeId: string, outputJson: string): void
@@ -943,7 +944,7 @@ export interface JsToolProfile {
 export const nativeBridgeBindingSurface = {
   "formatVersion": 1,
   "source": "napi-rs NativeBridgeBinding declaration plus bridge manifest",
-  "manifestOperationCount": 310,
+  "manifestOperationCount": 311,
   "methods": [
     {
       "name": "listAgentDirectoryJson",
@@ -3216,6 +3217,14 @@ export const nativeBridgeBindingSurface = {
       "returnType": "number",
       "returnKind": "number",
       "operationName": "requeue_logical_turn_continuations"
+    },
+    {
+      "name": "requeuePendingDirectAgentMessages",
+      "parameterSource": "",
+      "parameterCount": 0,
+      "returnType": "number",
+      "returnKind": "number",
+      "operationName": "requeue_pending_direct_agent_messages"
     },
     {
       "name": "resolveLogicalTurnAttentionJson",

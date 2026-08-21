@@ -6252,6 +6252,36 @@ export const bridgeWireSchemaArtifact = {
               "null"
             ]
           },
+          "gateBypassEvidence": {
+            "properties": {
+              "bypassedAt": {
+                "type": "string"
+              },
+              "configRevision": {
+                "type": "string"
+              },
+              "deploymentRole": {
+                "enum": [
+                  "production",
+                  "debug"
+                ],
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "configRevision",
+              "deploymentRole",
+              "bypassedAt"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "gateId": {
             "format": "uint64",
             "minimum": 0,
@@ -26591,6 +26621,36 @@ export const bridgeWireSchemaArtifact = {
         "dispatchMessageId": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "gateBypassEvidence": {
+          "properties": {
+            "bypassedAt": {
+              "type": "string"
+            },
+            "configRevision": {
+              "type": "string"
+            },
+            "deploymentRole": {
+              "enum": [
+                "production",
+                "debug"
+              ],
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "configRevision",
+            "deploymentRole",
+            "bypassedAt"
+          ],
+          "type": [
+            "object",
             "null"
           ]
         },

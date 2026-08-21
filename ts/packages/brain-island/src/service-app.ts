@@ -1322,6 +1322,15 @@ export async function createRustyCrewServiceApp(
         summary: `Requeued ${requeuedLogicalTurns} durable logical turn continuation(s) after event subscription startup.`,
       });
     }
+    const requeuedDirectMessages =
+      await state.bridge.requeuePendingDirectAgentMessages();
+    if (requeuedDirectMessages > 0) {
+      recordServiceEvent(state, {
+        source: "service-host",
+        eventType: "direct_agent_messages_requeued",
+        summary: `Requeued ${requeuedDirectMessages} direct-brain routed message wake(s) after event subscription startup.`,
+      });
+    }
     await state.externalRuntimeController.start();
     state.denGatewayStartupReport = await connectDenSuccessorGatewayFromModule(
       adapterLifecycleContext(state),

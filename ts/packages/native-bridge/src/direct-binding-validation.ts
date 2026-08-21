@@ -151,6 +151,10 @@ const directOutputByMethod = {
     "requeue_logical_turn_continuations",
     nativeHandleSchema,
   ),
+  requeuePendingDirectAgentMessages: value(
+    "requeue_pending_direct_agent_messages",
+    nativeHandleSchema,
+  ),
   subscribeEvents: value("subscribe_events", nativeHandleSchema),
   getBuffer: runtimeBufferView(),
 } as const satisfies Record<string, DirectOutputDescriptor>;

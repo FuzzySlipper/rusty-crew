@@ -755,6 +755,16 @@ impl CoreEngine {
             (session, binding)
         };
         let Some(binding) = binding else {
+            if self
+                .session_execution_state(&session.session_id)?
+                .phase
+                .is_working()
+            {
+                return Ok(AgentActivation::QueuedForNextTurn {
+                    session_id: session.session_id,
+                    queue_id: request.queued_message_id,
+                });
+            }
             return Ok(AgentActivation::DirectBrainWakeRequested {
                 session_id: session.session_id,
                 wake_id: request.direct_wake_id,

@@ -10,6 +10,7 @@ impl CoreEngine {
     }
 
     pub fn prepare_body_state_for_wake(&self, session_id: &SessionId) -> CoreResult<BodyState> {
+        self.validate_pending_direct_agent_messages_for_wake(session_id)?;
         let mut state = self.project_body_state(session_id)?;
         let queued_capacity = state
             .session

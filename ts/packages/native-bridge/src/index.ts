@@ -774,6 +774,9 @@ export function createUnavailableNativeBridge(): NativeBridgeModule {
     requeueLogicalTurnContinuations: unavailable(
       "requeue_logical_turn_continuations",
     ),
+    requeuePendingDirectAgentMessages: unavailable(
+      "requeue_pending_direct_agent_messages",
+    ),
     resolveLogicalTurnAttention: unavailable("resolve_logical_turn_attention"),
     cancelLogicalTurn: unavailable("cancel_logical_turn"),
     diagnosticProjectBodyStateJson: unavailable("wake_brain"),
@@ -1627,6 +1630,8 @@ function createNativeBridgeModule(
       ) as Awaited<ReturnType<NativeBridgeModule["logicalTurnDiagnostics"]>>,
     requeueLogicalTurnContinuations: async () =>
       binding.requeueLogicalTurnContinuations(),
+    requeuePendingDirectAgentMessages: async () =>
+      binding.requeuePendingDirectAgentMessages(),
     resolveLogicalTurnAttention: async (input) =>
       JSON.parse(
         binding.resolveLogicalTurnAttentionJson(JSON.stringify(input)),

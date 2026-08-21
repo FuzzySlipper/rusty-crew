@@ -130,6 +130,15 @@ errors = "core_protocol::CoreError"
 summary = "Republish Rust-owned runnable logical-turn tickets after the service event subscription is ready."
 
 [[operation]]
+name = "requeue_pending_direct_agent_messages"
+surface = "stable"
+direction = "ts_to_rust"
+input = "core_protocol::Unit"
+output = "u32"
+errors = "core_protocol::CoreError"
+summary = "Republish one wake for each idle direct-brain session with a valid durable routed message pending at its next-turn boundary."
+
+[[operation]]
 name = "resolve_logical_turn_attention"
 surface = "stable"
 direction = "ts_to_rust"

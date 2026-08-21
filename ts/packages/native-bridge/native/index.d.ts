@@ -288,6 +288,7 @@ export declare class NativeBridgeBinding {
   settleBrainWakeJson(inputJson: string): string
   logicalTurnDiagnosticsJson(inputJson: string): string
   requeueLogicalTurnContinuations(): number
+  requeuePendingDirectAgentMessages(): number
   resolveLogicalTurnAttentionJson(inputJson: string): string
   cancelLogicalTurnJson(inputJson: string): string
   applyBrainProviderStateOutputJson(brain: number, sessionId: string, wakeId: string, outputJson: string): void
