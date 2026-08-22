@@ -9,7 +9,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "tsx src/adapter.test.ts"
+    "test": "tsx src/adapter.test.ts",
+    "smoke:real-boundary": "tsx smoke-real-boundary.ts"
   },
   "dependencies": {
     "@rusty-crew/contracts": "0.1.0",
