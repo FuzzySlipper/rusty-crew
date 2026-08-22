@@ -88,6 +88,14 @@ const adapterDiagnostics = buildAdapterDiagnosticsProjection({
       lastError: "MCP reload failed",
     },
   ],
+  crewServices: {
+    status: "running",
+    leaseExpiresAt: "2026-06-20T12:32:00.000Z",
+  },
+});
+assert.deepEqual(adapterDiagnostics.crewServices, {
+  status: "running",
+  leaseExpiresAt: "2026-06-20T12:32:00.000Z",
 });
 const validTools = buildToolRegistryDiagnostics({
   catalogId: "default-local-tools",

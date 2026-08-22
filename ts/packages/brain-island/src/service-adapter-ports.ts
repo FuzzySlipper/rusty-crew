@@ -14,6 +14,7 @@ import type {
   NormalizedChannelActivityProjection,
   PlatformAdapterRegistration,
 } from "@rusty-crew/contracts";
+import type { FabricClient } from "@rusty-crew/adapter-crew-services";
 
 export interface DenSuccessorGatewayEnv {
   DEN_SUCCESSOR_GATEWAY_URL?: string;
@@ -750,6 +751,7 @@ export interface ChannelProjectionSink {
 }
 
 export interface ServiceAdapterFactories {
+  createCrewServicesClient(input: { baseUrl: string }): FabricClient;
   createDenSuccessorGatewayClient(
     config: DenSuccessorGatewayConfig,
   ): DenSuccessorGatewayClient;

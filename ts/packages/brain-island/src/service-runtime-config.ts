@@ -44,6 +44,10 @@ import {
   type CoordinationToolRuntime,
 } from "./coordination-tools.js";
 import {
+  createCrewServicesToolResolver,
+  type CrewServicesToolRuntime,
+} from "./crew-services-tools.js";
+import {
   createReviewSubmissionToolResolver,
   type ReviewSubmissionToolRuntime,
 } from "./review-submission-tools.js";
@@ -970,6 +974,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
   adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
   externalMemoryReadiness?: ExternalMemoryReadiness;
   coordinationRuntime?: CoordinationToolRuntime;
+  crewServicesRuntime?: CrewServicesToolRuntime;
   reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
   telegramConsultRuntime?: TelegramConsultToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
@@ -1108,6 +1113,7 @@ export async function applyRustyCrewRuntimeConfig(input: {
             adapterFactories: input.adapterFactories,
             externalMemoryReadiness,
             coordinationRuntime: input.coordinationRuntime,
+            crewServicesRuntime: input.crewServicesRuntime,
             reviewSubmissionRuntime: input.reviewSubmissionRuntime,
             telegramConsultRuntime: input.telegramConsultRuntime,
             toolCallDebugStore: input.toolCallDebugStore,
@@ -1194,6 +1200,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
   adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
   externalMemoryReadiness?: ExternalMemoryReadiness;
   coordinationRuntime?: CoordinationToolRuntime;
+  crewServicesRuntime?: CrewServicesToolRuntime;
   telegramConsultRuntime?: TelegramConsultToolRuntime;
   toolCallDebugStore?: ToolCallDebugStore;
   providerRequestDebugStore?: ProviderRequestDebugStore;
@@ -1286,6 +1293,7 @@ export async function rebuildConfiguredBrainRuntime(input: {
         adapterFactories: input.adapterFactories,
         externalMemoryReadiness,
         coordinationRuntime: input.coordinationRuntime,
+        crewServicesRuntime: input.crewServicesRuntime,
         telegramConsultRuntime: input.telegramConsultRuntime,
         toolCallDebugStore: input.toolCallDebugStore,
         providerRequestDebugStore: input.providerRequestDebugStore,
@@ -1622,6 +1630,7 @@ async function createConfiguredBrain(
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     externalMemoryReadiness: ExternalMemoryReadiness;
     coordinationRuntime?: CoordinationToolRuntime;
+    crewServicesRuntime?: CrewServicesToolRuntime;
     reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
     telegramConsultRuntime?: TelegramConsultToolRuntime;
     toolCallDebugStore?: ToolCallDebugStore;
@@ -1689,6 +1698,7 @@ function createServiceToolResolver(
     adapterFactories?: Pick<ServiceAdapterFactories, "createDenMemoryClient">;
     externalMemoryReadiness: ExternalMemoryReadiness;
     coordinationRuntime?: CoordinationToolRuntime;
+    crewServicesRuntime?: CrewServicesToolRuntime;
     reviewSubmissionRuntime?: ReviewSubmissionToolRuntime;
     telegramConsultRuntime?: TelegramConsultToolRuntime;
     browserResources: ServiceBrowserResources;
@@ -1764,6 +1774,7 @@ function createServiceToolResolver(
     resolveDelegationTools,
     resolveCompletionTools,
     createCoordinationToolResolver(options.coordinationRuntime),
+    createCrewServicesToolResolver(options.crewServicesRuntime),
     createReviewSubmissionToolResolver(options.reviewSubmissionRuntime),
     createTelegramConsultToolResolver(options.telegramConsultRuntime),
     createPlanningToolResolver({

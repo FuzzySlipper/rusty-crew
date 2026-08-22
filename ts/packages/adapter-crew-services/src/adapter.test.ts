@@ -5,7 +5,10 @@ import type {
   AgentMessageDeliveryReceipt,
   AgentRouteResolution,
 } from "@rusty-crew/contracts";
-import { CrewServicesDirectBrainAdapter } from "./adapter.js";
+import {
+  CrewServicesDirectBrainAdapter,
+  fabricOriginFrame,
+} from "./adapter.js";
 import {
   nativeAttemptRef,
   nativeDeliveryId,
@@ -78,6 +81,7 @@ class FakeFabric implements FabricClient {
   claimOperations: string[] = [];
   claimAvailabilities: string[] = [];
   releaseOperations: string[] = [];
+  submitted: Record<string, unknown>[] = [];
   registerCount = 0;
   onClaim: (() => void) | undefined;
   beginGate: Promise<void> | undefined;
@@ -134,11 +138,12 @@ class FakeFabric implements FabricClient {
   async unbind(): Promise<FabricBinding> {
     throw new Error("not used");
   }
-  async submit(): Promise<{
+  async submit(body: Record<string, unknown>): Promise<{
     message: ReturnType<typeof message>;
     delivery: FabricDelivery;
     replayed: boolean;
   }> {
+    this.submitted.push(body);
     return { message: message(), delivery: delivery(), replayed: false };
   }
   async claim(body: Record<string, unknown>): Promise<FabricClaim> {
@@ -340,6 +345,64 @@ test("delivers one claimed envelope through one deterministic native receipt bef
   assert.deepEqual(bridge.delivered, [nativeDeliveryId("d-1")]);
   assert.deepEqual(fabric.calls, ["begin:d-1", "ack:d-1"]);
   await subject.stop();
+});
+
+test("bound brains get alias-only directory and producer-scoped replay-stable submission", async () => {
+  const [subject, fabric] = adapter();
+  await subject.start();
+  assert.equal(subject.available("beta-session"), true);
+  assert.deepEqual(await subject.directoryForSession("beta-session"), [
+    { alias: "beta", routeRevision: 1 },
+  ]);
+  await assert.rejects(() => subject.directoryForSession("outside"), /not exactly bound/);
+  const first = await subject.sendFromSession({
+    sessionId: "beta-session",
+    toolCallId: "call-1",
+    recipientAlias: "beta",
+    body: "hello",
+    replyToMessageId: "m-parent",
+  });
+  const replay = await subject.sendFromSession({
+    sessionId: "beta-session",
+    toolCallId: "call-1",
+    recipientAlias: "beta",
+    body: "hello",
+  });
+  assert.equal(first.messageId, replay.messageId);
+  assert.equal(fabric.submitted.length, 2);
+  assert.equal(fabric.submitted[0]?.operation_id, fabric.submitted[1]?.operation_id);
+  assert.ok(String(fabric.submitted[0]?.operation_id).includes("beta:call-1"));
+  await subject.stop();
+  assert.equal(subject.available("beta-session"), false);
+});
+
+test("availability projection hides unbound, archived, and rebound sessions on refresh", async () => {
+  const [subject, _fabric, bridge] = adapter();
+  await subject.start();
+  assert.equal(subject.available("beta-session"), true);
+  bridge.directory = [{ ...entry(), sessionStatus: "archived" }];
+  await subject.tick();
+  assert.equal(subject.available("beta-session"), false);
+  bridge.directory = [{ ...entry(), sessionId: "replacement-session" }];
+  bridge.resolution = {
+    ...route(),
+    route: { ...route().route!, target: { type: "direct_brain", agentId: "beta-agent", sessionId: "replacement-session" } },
+    resolvedTarget: { ...route().resolvedTarget!, sessionId: "replacement-session" },
+  };
+  await subject.tick();
+  assert.equal(subject.available("beta-session"), false);
+  assert.equal(subject.available("replacement-session"), true);
+  await subject.stop();
+});
+
+test("fabric frame retains aliases and only ordinary messages offer reply guidance", () => {
+  const ordinary = fabricOriginFrame(message());
+  assert.match(ordinary, /from @alpha to @beta/);
+  assert.match(ordinary, /replyToMessageId/);
+  const reply = fabricOriginFrame({ ...message(), reply_to_message_id: "m-parent" });
+  assert.match(reply, /terminal reply/);
+  assert.match(reply, /Do not answer merely because it is a reply/);
+  assert.match(reply, /omit replyToMessageId/);
 });
 
 test("a replayed claim produces one native delivery, not a second claim-side effect", async () => {

@@ -335,6 +335,16 @@ export const defaultToolExecutableBindings = [
     inventoryTest: "smoke:coordination-tools",
   },
   {
+    name: "crew_directory",
+    implementationModule: "./crew-services-tools.js#directoryTool",
+    inventoryTest: "smoke:crew-services-tools",
+  },
+  {
+    name: "crew_message",
+    implementationModule: "./crew-services-tools.js#messageTool",
+    inventoryTest: "smoke:crew-services-tools",
+  },
+  {
     name: "request_telegram_consult",
     implementationModule:
       "./telegram-consult-tools.js#requestTelegramConsultTool",

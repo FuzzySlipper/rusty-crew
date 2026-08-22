@@ -215,6 +215,26 @@
       "version": "0.1.0"
     },
     {
+      "name": "crew_directory",
+      "description": "List exact fabric-bound crew aliases without exposing session identifiers.",
+      "category": "coordination",
+      "toolsets": ["crew_services", "full_agent"],
+      "surfaces": ["brain"],
+      "safety": ["read_only"],
+      "output_shape": "crew_services.directory.v1",
+      "version": "0.1.0"
+    },
+    {
+      "name": "crew_message",
+      "description": "Send one ordinary message to an exact fabric-bound crew alias.",
+      "category": "coordination",
+      "toolsets": ["crew_services", "full_agent"],
+      "surfaces": ["brain"],
+      "safety": ["coordination_action", "network_access"],
+      "output_shape": "crew_services.message_result.v1",
+      "version": "0.1.0"
+    },
+    {
       "name": "request_telegram_consult",
       "description": "Send one proactive technical consult to the remote operator through the caller's exact active Telegram diplomat binding.",
       "category": "coordination",

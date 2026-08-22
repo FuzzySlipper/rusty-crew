@@ -42,6 +42,26 @@ export interface CrewServicesAdapterStatus {
   readonly leaseExpiresAt?: string;
 }
 
+export interface CrewServicesDirectoryEntry {
+  readonly alias: string;
+  readonly routeRevision: number;
+}
+
+export interface CrewServicesSendInput {
+  sessionId: string;
+  toolCallId: string;
+  recipientAlias: string;
+  body: string;
+  correlationId?: string;
+  replyToMessageId?: string;
+  ttl?: string;
+}
+
+export interface CrewServicesSendReceipt {
+  readonly messageId: string;
+  readonly replayed: boolean;
+}
+
 const defaults = {
   leaseDuration: "2m",
   renewMs: 45_000,
@@ -80,6 +100,8 @@ export class CrewServicesDirectBrainAdapter {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly inFlight = new Set<Promise<void>>();
   private readonly tails = new Map<string, Promise<void>>();
+  /** Synchronous visibility projection refreshed from validated exact bindings. */
+  private readonly availableSessions = new Set<string>();
   /** Claims survive here only until `begin-dispatch` is known to have started. */
   private readonly claimedBeforeDispatch = new Map<
     string,
@@ -105,6 +127,72 @@ export class CrewServicesDirectBrainAdapter {
     };
   }
 
+  /** Safe only as a visibility hint; all tool actions revalidate asynchronously. */
+  available(sessionId: string): boolean {
+    return this.started && !this.stopped && this.availableSessions.has(sessionId);
+  }
+
+  /** Deliberately alias-only view for agent tools; native session ids stay private. */
+  async directory(): Promise<readonly CrewServicesDirectoryEntry[]> {
+    const entries = await Promise.all(
+      this.config.bindings.map(async (binding) => {
+        const target = await this.resolveRoutableTarget(binding);
+        return target === undefined
+          ? undefined
+          : { alias: binding.alias, routeRevision: binding.routeRevision };
+      }),
+    );
+    return entries.filter(
+      (entry): entry is CrewServicesDirectoryEntry => entry !== undefined,
+    );
+  }
+
+  /** Directory access is itself limited to a currently exact bound brain route. */
+  async directoryForSession(
+    sessionId: string,
+  ): Promise<readonly CrewServicesDirectoryEntry[]> {
+    if ((await this.boundBindingForSession(sessionId)) === undefined) {
+      throw new Error("crew-services adapter: calling session is not exactly bound");
+    }
+    return this.directory();
+  }
+
+  /** Submit one ordinary fabric message from an exact configured direct-brain session. */
+  async sendFromSession(input: CrewServicesSendInput): Promise<CrewServicesSendReceipt> {
+    const sender = await this.boundBindingForSession(input.sessionId);
+    const recipient = await this.boundBindingForAlias(input.recipientAlias);
+    if (sender === undefined) {
+      throw new Error("crew-services adapter: calling session is not exactly bound");
+    }
+    if (recipient === undefined) {
+      throw new Error("crew-services adapter: recipient alias is not exactly bound");
+    }
+    const lease = await this.ensureLease();
+    const submitted = await this.fabric.submit({
+      producer_id: this.config.adapterId,
+      lease_token: lease.lease_token,
+      operation_id: operationId(
+        `submit:${sender.alias}:${input.toolCallId}`,
+        "submit",
+      ),
+      sender_address: sender.alias,
+      recipient_address: recipient.alias,
+      body: input.body,
+      activation_policy: "wake_when_idle",
+      ttl: input.ttl ?? "24h",
+      ...(input.correlationId === undefined
+        ? {}
+        : { correlation_id: input.correlationId }),
+      ...(input.replyToMessageId === undefined
+        ? {}
+        : { reply_to_message_id: input.replyToMessageId }),
+    });
+    return {
+      messageId: submitted.message.message_id,
+      replayed: submitted.replayed,
+    };
+  }
+
   async start(): Promise<void> {
     if (this.started && !this.stopped) return;
     this.stopped = false;
@@ -118,6 +206,7 @@ export class CrewServicesDirectBrainAdapter {
   /** Stop new claims, wait for admitted native calls, release only pre-begin claims. */
   async stop(): Promise<void> {
     this.stopped = true;
+    this.availableSessions.clear();
     if (this.timer !== undefined) clearTimeout(this.timer);
     this.timer = undefined;
     await Promise.all([...this.inFlight]);
@@ -190,6 +279,7 @@ export class CrewServicesDirectBrainAdapter {
   }
 
   private async syncBindings(): Promise<void> {
+    this.availableSessions.clear();
     const lease = await this.ensureLease();
     const current = await this.fabric.listBindings();
     const byAlias = new Map(
@@ -210,6 +300,12 @@ export class CrewServicesDirectBrainAdapter {
           ? {}
           : { expected_revision: existing.revision }),
       });
+    }
+    const validated = await Promise.all(
+      this.config.bindings.map((binding) => this.resolveRoutableTarget(binding)),
+    );
+    for (const target of validated) {
+      if (target !== undefined) this.availableSessions.add(target.entry.sessionId);
     }
   }
 
@@ -324,7 +420,7 @@ export class CrewServicesDirectBrainAdapter {
         messageId: nativeMessageId(message.message_id),
         toAddress: binding.routeKey,
         inputKind: "routed_agent_message",
-        body: message.body,
+        body: fabricOriginFrame(message),
         ...(message.correlation_id === undefined
           ? {}
           : { correlationId: message.correlation_id }),
@@ -439,6 +535,32 @@ export class CrewServicesDirectBrainAdapter {
       throw new Error(
         `crew-services adapter: ${binding.alias} must resolve to revision ${binding.routeRevision} direct-brain route ${binding.routeKey}`,
       );
+  }
+
+  private async boundBindingForSession(
+    sessionId: string,
+  ): Promise<CrewServicesRouteBinding | undefined> {
+    const candidates = await Promise.all(
+      this.config.bindings.map(async (binding) => {
+        const target = await this.resolveRoutableTarget(binding);
+        return target?.entry.sessionId === sessionId ? binding : undefined;
+      }),
+    );
+    const matched = candidates.filter(
+      (binding): binding is CrewServicesRouteBinding => binding !== undefined,
+    );
+    return matched.length === 1 ? matched[0] : undefined;
+  }
+
+  private async boundBindingForAlias(
+    alias: string,
+  ): Promise<CrewServicesRouteBinding | undefined> {
+    const binding = this.config.bindings.find(
+      (candidate) => candidate.alias === alias,
+    );
+    return binding !== undefined && (await this.resolveRoutableTarget(binding))
+      ? binding
+      : undefined;
   }
 
   private async claimHead(
@@ -573,6 +695,23 @@ function replayAvailability(
         "crew-services adapter: claimed delivery has no replayable dispatch action",
       );
   }
+}
+
+/** Frames fabric provenance without turning replies into automatic request/reply work. */
+export function fabricOriginFrame(message: {
+  message_id: string;
+  sender_address: string;
+  recipient_address: string;
+  body: string;
+  reply_to_message_id?: string;
+}): string {
+  const prefix = message.reply_to_message_id === undefined
+    ? `[Crew message ${message.message_id} from @${message.sender_address} to @${message.recipient_address}]`
+    : `[Crew reply ${message.message_id} to ${message.reply_to_message_id} from @${message.sender_address} to @${message.recipient_address}]`;
+  const guidance = message.reply_to_message_id === undefined
+    ? "\n\nIf a reply is useful, send one ordinary crew_message with replyToMessageId set to this message id."
+    : "\n\nThis is a terminal reply. Do not answer merely because it is a reply; only send a new ordinary crew_message if independently needed, and omit replyToMessageId.";
+  return `${prefix}\n${message.body}${guidance}`;
 }
 
 /** Native delivery bounds are relative to the adapter's admission, not fabric creation. */

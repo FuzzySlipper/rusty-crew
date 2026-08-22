@@ -26,6 +26,7 @@
     "smoke:delegation-tools": "tsx smokes/smoke-delegation-tools.ts",
     "smoke:completion-tools": "tsx smokes/smoke-completion-tools.ts",
     "smoke:coordination-tools": "tsx smokes/smoke-coordination-tools.ts",
+    "smoke:crew-services-tools": "tsx smokes/smoke-crew-services-tools.ts",
     "smoke:review-submission-tools": "tsx smokes/smoke-review-submission-tools.ts",
     "smoke:telegram-consult-tools": "tsx smokes/smoke-telegram-consult-tools.ts",
     "smoke:telegram-consult-runtime": "tsx smokes/smoke-telegram-consult-runtime.ts",
@@ -189,6 +190,7 @@
     "generate:tool-registry-artifact": "tsx src/generate-tool-registry-artifact.ts"
   },
   "dependencies": {
+    "@rusty-crew/adapter-crew-services": "0.1.0",
     "@rusty-crew/contracts": "0.1.0",
     "@rusty-crew/external-runtime-codex": "0.1.0",
     "@rusty-crew/native-bridge": "0.1.0",

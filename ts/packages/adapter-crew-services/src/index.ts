@@ -1,8 +1,12 @@
 export {
   CrewServicesDirectBrainAdapter,
+  fabricOriginFrame,
   type CrewServicesAdapterConfig,
   type CrewServicesAdapterStatus,
+  type CrewServicesDirectoryEntry,
   type CrewServicesRouteBinding,
+  type CrewServicesSendInput,
+  type CrewServicesSendReceipt,
   type DirectBrainDeliveryBridge,
 } from "./adapter.js";
 export { CrewServicesClient } from "./client.js";

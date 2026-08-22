@@ -32,6 +32,7 @@ import {
   FileTelegramUpdateTerminalStore,
   TelegramChannelConnector,
 } from "@rusty-crew/adapter-telegram";
+import { CrewServicesClient } from "@rusty-crew/adapter-crew-services";
 import type { AdapterId, EngineHandle } from "@rusty-crew/contracts";
 import type { NativeBridgeModule } from "@rusty-crew/native-bridge";
 
@@ -192,6 +193,7 @@ async function handleHostHttpRequest(
 
 function defaultServiceAdapterFactories(): ServiceAdapterFactories {
   return {
+    createCrewServicesClient: ({ baseUrl }) => new CrewServicesClient(baseUrl),
     createDenSuccessorGatewayClient,
     resolveDenConversationChannels,
     createDenMemoryClient,

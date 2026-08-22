@@ -74,6 +74,7 @@ assert.equal(defaultConfig.mcp.baseUrl, undefined);
 assert.equal(defaultConfig.mcp.requestTimeoutMs, 30_000);
 assert.equal(defaultConfig.reviewDenAuthority, undefined);
 assert.equal(defaultConfig.telegram.enabled, false);
+assert.equal(defaultConfig.crewServices.enabled, false);
 assert.equal(defaultConfig.telegram.adapterId, "telegram-main");
 assert.equal(defaultConfig.telegram.pollIntervalMs, 2_000);
 assert.equal(defaultConfig.telegram.pollTimeoutSeconds, 20);
@@ -94,6 +95,26 @@ assert.equal(
 );
 assert.equal(defaultConfig.storage.postgres.schema, "rusty_crew");
 assert.equal(defaultConfig.storage.postgres.bootMode, "blocked");
+
+const crewServicesConfig = loadRustyCrewServiceConfig({
+  RUSTY_CREW_ADMIN_TOKEN: "crew-services-token",
+  RUSTY_CREW_CREW_SERVICES_ENABLED: "true",
+  RUSTY_CREW_CREW_SERVICES_URL: "http://127.0.0.1:9070",
+  RUSTY_CREW_CREW_SERVICES_ADAPTER_ID: "crew-service",
+  RUSTY_CREW_CREW_SERVICES_INSTANCE_ID: "agent-k8",
+  RUSTY_CREW_CREW_SERVICES_BINDINGS_JSON:
+    '[{"alias":"beta","routeKey":"@brain-beta","routeRevision":3}]',
+});
+assert.equal(crewServicesConfig.crewServices.enabled, true);
+assert.equal(crewServicesConfig.crewServices.bindings[0]?.routeRevision, 3);
+assert.throws(
+  () =>
+    loadRustyCrewServiceConfig({
+      RUSTY_CREW_ADMIN_TOKEN: "crew-services-token",
+      RUSTY_CREW_CREW_SERVICES_ENABLED: "true",
+    }),
+  /CREW_SERVICES_URL/,
+);
 
 const root = mkdtempSync(join(tmpdir(), "rusty-crew-service-config-"));
 try {

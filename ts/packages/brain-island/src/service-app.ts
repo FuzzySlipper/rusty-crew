@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { CrewServicesDirectBrainAdapter } from "@rusty-crew/adapter-crew-services";
 import type {
   AdapterId,
   BrainEvent,
@@ -57,6 +58,7 @@ import {
   type DeliveryIntentWakeDecision,
 } from "./channel-wake-policy.js";
 import type { CoordinationToolRuntime } from "./coordination-tools.js";
+import type { CrewServicesToolRuntime } from "./crew-services-tools.js";
 import type {
   TelegramConsultToolReceipt,
   TelegramConsultToolRuntime,
@@ -514,6 +516,7 @@ interface ServiceState {
   denGatewayStartupReport?: DenSuccessorGatewayStartupReport;
   denObservationSubscription?: SubscriptionHandle;
   telegramConnector?: TelegramChannelConnectorPort;
+  crewServicesAdapter?: CrewServicesDirectBrainAdapter;
   telegramOutboundSubscription?: SubscriptionHandle;
   readonly curator: ServiceCuratorRuntime;
   readonly backgroundReview: ServiceBackgroundReviewRuntime;
@@ -1195,6 +1198,9 @@ export async function createRustyCrewServiceApp(
       adapterFactories: options.adapterFactories,
       externalMemoryReadiness,
       coordinationRuntime: createServiceCoordinationRuntime(() => liveState),
+      crewServicesRuntime: config.crewServices.enabled
+        ? createServiceCrewServicesRuntime(() => liveState)
+        : undefined,
       reviewSubmissionRuntime: createServiceReviewSubmissionRuntime(() =>
         liveState === undefined
           ? undefined
@@ -1296,6 +1302,22 @@ export async function createRustyCrewServiceApp(
       stopping: false,
     };
     liveState = state;
+    if (config.crewServices.enabled) {
+      const crewServicesAdapter = new CrewServicesDirectBrainAdapter(
+        options.adapterFactories.createCrewServicesClient({
+          baseUrl: config.crewServices.url!,
+        }),
+        bridge,
+        config.crewServices,
+      );
+      state.crewServicesAdapter = crewServicesAdapter;
+      await crewServicesAdapter.start();
+      recordServiceEvent(state, {
+        source: "crew-services",
+        eventType: "adapter_started",
+        summary: "Crew-services fabric adapter started.",
+      });
+    }
     await refreshReviewDenAuthorityDiagnostics(state);
     const chatRestartReconciliation = await reconcileInterruptedChatTurns({
       bridge: state.bridge,
@@ -3801,7 +3823,8 @@ function buildServiceAdapterDiagnostics(
   if (
     state.runtimeConfig.channelBindings.length === 0 &&
     state.dynamicDenChannelBindings.size === 0 &&
-    state.runtimeConfig.mcpBindings.length === 0
+    state.runtimeConfig.mcpBindings.length === 0 &&
+    !state.config.crewServices.enabled
   ) {
     return undefined;
   }
@@ -3822,7 +3845,22 @@ function buildServiceAdapterDiagnostics(
     channelWakePolicies: channelWakePoliciesByBinding(state),
     mcpBindings: state.runtimeConfig.mcpBindings,
     mcpSurfaces: state.mcpManager.diagnostics(),
+    ...(state.config.crewServices.enabled
+      ? { crewServices: crewServicesDiagnostics(state) }
+      : {}),
   });
+}
+
+function crewServicesDiagnostics(state: ServiceState): {
+  status: "initialized" | "running" | "stopped";
+  leaseExpiresAt?: string;
+} {
+  const status = state.crewServicesAdapter?.status();
+  if (status === undefined) return { status: "initialized" };
+  return {
+    status: status.stopped ? "stopped" : status.started ? "running" : "initialized",
+    ...(status.leaseExpiresAt === undefined ? {} : { leaseExpiresAt: status.leaseExpiresAt }),
+  };
 }
 
 async function createServiceMcpManager(
@@ -4318,6 +4356,9 @@ async function applyServiceRuntimeConfigFromDisk(
     adapterFactories: state.adapterFactories,
     externalMemoryReadiness: state.externalMemoryReadiness,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    crewServicesRuntime: state.config.crewServices.enabled
+      ? createServiceCrewServicesRuntime(() => state)
+      : undefined,
     reviewSubmissionRuntime: createServiceReviewSubmissionRuntime(() =>
       reviewSubmissionContext(state),
     ),
@@ -4417,6 +4458,9 @@ async function rebuildServiceBrainRuntime(
     adapterFactories: state.adapterFactories,
     externalMemoryReadiness: state.externalMemoryReadiness,
     coordinationRuntime: createServiceCoordinationRuntime(() => state),
+    crewServicesRuntime: state.config.crewServices.enabled
+      ? createServiceCrewServicesRuntime(() => state)
+      : undefined,
     telegramConsultRuntime: createServiceTelegramConsultRuntime(() => state),
     toolCallDebugStore: state.toolCallDebugStore,
     providerRequestDebugStore: state.providerRequestDebugStore,
@@ -6653,6 +6697,21 @@ function createServiceCoordinationRuntime(
   return runtime;
 }
 
+function createServiceCrewServicesRuntime(
+  getState: () => ServiceState | undefined,
+): CrewServicesToolRuntime {
+  const adapter = (): CrewServicesDirectBrainAdapter => {
+    const value = getState()?.crewServicesAdapter;
+    if (value === undefined) throw new Error("crew-services is disabled");
+    return value;
+  };
+  return {
+    available: (sessionId) => adapter().available(sessionId),
+    directory: (sessionId) => adapter().directoryForSession(sessionId),
+    message: (input) => adapter().sendFromSession(input),
+  };
+}
+
 export function createServiceTelegramConsultRuntime(
   getState: () => ServiceState | undefined,
 ): TelegramConsultToolRuntime {
@@ -7523,6 +7582,14 @@ async function stopService(state: ServiceState): Promise<void> {
   for (const timer of state.timers) clearInterval(timer);
   state.timers.clear();
   try {
+    if (state.crewServicesAdapter !== undefined) {
+      await state.crewServicesAdapter.stop();
+      recordServiceEvent(state, {
+        source: "crew-services",
+        eventType: "adapter_stopped",
+        summary: "Crew-services fabric adapter stopped.",
+      });
+    }
     await stopTelegramConnectorFromModule(adapterLifecycleContext(state));
     if (state.denObservationSubscription !== undefined) {
       await state.bridge

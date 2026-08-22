@@ -27,6 +27,7 @@
     "smoke:telegram-service-connector": "tsx ../../smokes/brain-island/smoke-telegram-service-connector.ts"
   },
   "dependencies": {
+    "@rusty-crew/adapter-crew-services": "0.1.0",
     "@rusty-crew/adapter-den": "0.1.0",
     "@rusty-crew/adapter-mcp": "0.1.0",
     "@rusty-crew/adapter-telegram": "0.1.0",

@@ -36,6 +36,10 @@ export interface AdapterDiagnosticsInput {
   mcpBindings: readonly McpBindingRecord[];
   mcpSurfaces?: readonly McpSurfaceDiagnostics[];
   mcpReloadHistory?: readonly McpSurfaceReloadReport[];
+  crewServices?: {
+    status: "initialized" | "running" | "stopped";
+    leaseExpiresAt?: string;
+  };
 }
 
 export interface ChannelAdapterBindingDiagnostics {
@@ -99,6 +103,10 @@ export interface AdapterDiagnosticsProjection {
     collisionCount: number;
     reloadCount: number;
     surfaces: McpAdapterSurfaceDiagnostics[];
+  };
+  crewServices?: {
+    status: "initialized" | "running" | "stopped";
+    leaseExpiresAt?: string;
   };
   issues: string[];
 }
@@ -195,6 +203,7 @@ export function buildAdapterDiagnosticsProjection(
       reloadCount: input.mcpReloadHistory?.length ?? 0,
       surfaces: mcp,
     },
+    ...(input.crewServices === undefined ? {} : { crewServices: input.crewServices }),
     issues,
   };
 }

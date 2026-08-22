@@ -69,6 +69,15 @@ export interface RustyCrewServiceEnv extends DenSuccessorGatewayEnv {
   RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS?: string;
   RUSTY_CREW_TELEGRAM_ADAPTER_ID?: string;
   RUSTY_CREW_TELEGRAM_CREDENTIAL_ID?: string;
+  RUSTY_CREW_CREW_SERVICES_ENABLED?: string;
+  RUSTY_CREW_CREW_SERVICES_URL?: string;
+  RUSTY_CREW_CREW_SERVICES_ADAPTER_ID?: string;
+  RUSTY_CREW_CREW_SERVICES_INSTANCE_ID?: string;
+  RUSTY_CREW_CREW_SERVICES_LEASE_DURATION?: string;
+  RUSTY_CREW_CREW_SERVICES_RENEW_MS?: string;
+  RUSTY_CREW_CREW_SERVICES_POLL_MS?: string;
+  RUSTY_CREW_CREW_SERVICES_CLAIM_DURATION?: string;
+  RUSTY_CREW_CREW_SERVICES_BINDINGS_JSON?: string;
   RUSTY_CREW_STORAGE_BACKEND?: string;
   RUSTY_CREW_SQLITE_PATH?: string;
   RUSTY_CREW_SQLITE_WAL?: string;
@@ -166,6 +175,19 @@ export interface RustyCrewTelegramConfig {
   messageTtlMs: number;
 }
 
+/** Optional local crew-services fabric bridge. Disabled means no client or pump. */
+export interface RustyCrewCrewServicesConfig {
+  enabled: boolean;
+  url?: string;
+  adapterId: string;
+  instanceId: string;
+  leaseDuration: string;
+  renewMs: number;
+  pollMs: number;
+  claimDuration: string;
+  bindings: Array<{ alias: string; routeKey: string; routeRevision: number }>;
+}
+
 export type RustyCrewStorageBackend = "sqlite" | "postgres";
 export type RustyCrewDeploymentRole = "production" | "debug";
 
@@ -224,6 +246,7 @@ export interface RustyCrewServiceConfig {
   mcp: RustyCrewMcpConfig;
   reviewDenAuthority?: RustyCrewReviewDenAuthorityConfig;
   telegram: RustyCrewTelegramConfig;
+  crewServices: RustyCrewCrewServicesConfig;
   storage: RustyCrewStorageConfig;
   environmentVariablePresent(name: string): boolean;
   denSuccessorGateway?: DenSuccessorGatewayConfig;
@@ -344,6 +367,7 @@ export function loadRustyCrewServiceConfig(
   const mcp = loadRustyCrewMcpConfig(env);
   const reviewDenAuthority = loadReviewDenAuthorityConfig(env);
   const telegram = loadRustyCrewTelegramConfig(env);
+  const crewServices = loadRustyCrewCrewServicesConfig(env);
   const storage = loadRustyCrewStorageConfig(env, paths);
   const environmentVariablePresent = (name: string) =>
     normalizeOptional(env[name]) !== undefined;
@@ -359,6 +383,7 @@ export function loadRustyCrewServiceConfig(
     mcp,
     ...(reviewDenAuthority === undefined ? {} : { reviewDenAuthority }),
     telegram,
+    crewServices,
     storage,
     environmentVariablePresent,
     denSuccessorGateway,
@@ -375,6 +400,7 @@ export function loadRustyCrewServiceConfig(
     mcp,
     ...(reviewDenAuthority === undefined ? {} : { reviewDenAuthority }),
     telegram,
+    crewServices,
     storage,
     environmentVariablePresent,
     denSuccessorGateway,
@@ -464,6 +490,7 @@ export function validateRustyCrewServiceConfig(
   validateMcpConfig(config.mcp);
   validateReviewDenAuthorityConfig(config.reviewDenAuthority);
   validateTelegramConfig(config.telegram);
+  validateCrewServicesConfig(config.crewServices);
   validateStorageConfig(config.storage);
 }
 
@@ -1115,6 +1142,94 @@ function loadRustyCrewTelegramConfig(
       "RUSTY_CREW_TELEGRAM_MESSAGE_TTL_MS",
     ),
   };
+}
+
+function loadRustyCrewCrewServicesConfig(
+  env: RustyCrewServiceEnv,
+): RustyCrewCrewServicesConfig {
+  const enabled = parseBoolean(
+    env.RUSTY_CREW_CREW_SERVICES_ENABLED,
+    false,
+    "RUSTY_CREW_CREW_SERVICES_ENABLED",
+  );
+  const url = normalizeOptional(env.RUSTY_CREW_CREW_SERVICES_URL);
+  const bindingsText = normalizeOptional(
+    env.RUSTY_CREW_CREW_SERVICES_BINDINGS_JSON,
+  );
+  const bindings = bindingsText === undefined
+    ? []
+    : parseCrewServicesBindings(bindingsText);
+  return {
+    enabled,
+    ...(url === undefined ? {} : { url }),
+    adapterId:
+      normalizeOptional(env.RUSTY_CREW_CREW_SERVICES_ADAPTER_ID) ??
+      "rusty-crew-fabric",
+    instanceId:
+      normalizeOptional(env.RUSTY_CREW_CREW_SERVICES_INSTANCE_ID) ??
+      "rusty-crew-service",
+    leaseDuration:
+      normalizeOptional(env.RUSTY_CREW_CREW_SERVICES_LEASE_DURATION) ?? "2m",
+    renewMs: parsePositiveInteger(
+      env.RUSTY_CREW_CREW_SERVICES_RENEW_MS,
+      45_000,
+      "RUSTY_CREW_CREW_SERVICES_RENEW_MS",
+    ),
+    pollMs: parsePositiveInteger(
+      env.RUSTY_CREW_CREW_SERVICES_POLL_MS,
+      1_000,
+      "RUSTY_CREW_CREW_SERVICES_POLL_MS",
+    ),
+    claimDuration:
+      normalizeOptional(env.RUSTY_CREW_CREW_SERVICES_CLAIM_DURATION) ?? "45s",
+    bindings,
+  };
+}
+
+function parseCrewServicesBindings(
+  value: string,
+): Array<{ alias: string; routeKey: string; routeRevision: number }> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error("RUSTY_CREW_CREW_SERVICES_BINDINGS_JSON must be JSON");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("RUSTY_CREW_CREW_SERVICES_BINDINGS_JSON must be an array");
+  }
+  return parsed.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      throw new Error(`crew-services binding ${index} must be an object`);
+    }
+    const binding = entry as Record<string, unknown>;
+    if (
+      typeof binding.alias !== "string" || !binding.alias.trim() ||
+      typeof binding.routeKey !== "string" || !binding.routeKey.trim() ||
+      !Number.isInteger(binding.routeRevision) ||
+      (binding.routeRevision as number) <= 0
+    ) {
+      throw new Error(
+        `crew-services binding ${index} requires alias, routeKey, and positive routeRevision`,
+      );
+    }
+    return {
+      alias: binding.alias,
+      routeKey: binding.routeKey,
+      routeRevision: binding.routeRevision as number,
+    };
+  });
+}
+
+function validateCrewServicesConfig(config: RustyCrewCrewServicesConfig): void {
+  if (!config.enabled) return;
+  if (config.url === undefined) {
+    throw new Error("RUSTY_CREW_CREW_SERVICES_URL is required when crew-services is enabled");
+  }
+  validateHttpUrl(config.url, "RUSTY_CREW_CREW_SERVICES_URL must be a valid HTTP(S) URL");
+  if (!config.adapterId.trim() || !config.instanceId.trim() || config.bindings.length === 0) {
+    throw new Error("enabled crew-services requires adapter identity, instance identity, and bindings");
+  }
 }
 
 function validateTelegramConfig(config: RustyCrewTelegramConfig): void {
